@@ -3,6 +3,10 @@ import { BookOpen, Shield, Zap, AlertCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { PricingCard } from "@/components/PricingCard";
 import { tiersData } from "@/data/siteData";
+import cert5percenters from "@/assets/cert-5percenters.png";
+import certFtmo from "@/assets/cert-ftmo.png";
+import certTopstep from "@/assets/cert-topstep.png";
+import certAtf from "@/assets/cert-atf.png";
 
 export default function Home() {
   return (
@@ -58,101 +62,50 @@ export default function Home() {
 
           <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-6">
             {/* Certificate 1 - The 5%ers */}
-            <div className="bg-gradient-to-br from-blue-950/50 to-blue-900/30 border border-secondary/30 rounded-xl p-6 hover:scale-105 transition-all shadow-lg">
-              <div className="text-center mb-4">
-                <div className="text-secondary text-sm font-semibold mb-2">The 5%ers</div>
-                <h3 className="text-2xl font-bold mb-1">FUNDED</h3>
-                <h3 className="text-xl font-bold">CERTIFICATE</h3>
+            <div className="relative group hover:scale-105 transition-all duration-300">
+              <img
+                src={cert5percenters}
+                alt="The 5%ers Funded Certificate - You"
+                className="w-full h-auto rounded-xl shadow-lg border border-secondary/30"
+              />
+              <div className="absolute inset-0 bg-gradient-to-t from-background/80 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity rounded-xl flex items-end justify-center pb-4">
+                <span className="text-secondary font-bold text-sm">The 5%ers Funded</span>
               </div>
-              <div className="border-t border-secondary/30 pt-4 mb-4">
-                <p className="text-foreground/60 text-xs text-center mb-3">
-                  Proudly presented to
-                </p>
-                <div className="bg-secondary/10 rounded px-3 py-2 text-center">
-                  <span className="font-semibold">[Student Name]</span>
-                </div>
-              </div>
-              <p className="text-foreground/50 text-xs text-center leading-relaxed">
-                Successfully completed evaluation program and officially funded
-              </p>
             </div>
 
             {/* Certificate 2 - FTMO */}
-            <div className="bg-gradient-to-br from-cyan-950/50 to-cyan-900/30 border border-primary/30 rounded-xl p-6 hover:scale-105 transition-all shadow-lg relative overflow-hidden">
-              <div className="absolute top-0 right-0 w-20 h-20 bg-white/5 rounded-bl-full"></div>
-              <div className="text-center mb-4">
-                <div className="text-lg font-bold mb-2">◆ FTMO®</div>
-                <h3 className="text-2xl font-bold mb-1">MAX</h3>
-                <h3 className="text-xl font-bold">ALLOCATION</h3>
-              </div>
-              <div className="border-t border-primary/30 pt-4 mb-4">
-                <p className="text-foreground/60 text-xs text-center mb-3">
-                  Proudly presented to:
-                </p>
-                <div className="bg-primary/10 rounded px-3 py-2 text-center">
-                  <span className="text-secondary font-bold text-lg">[Student Name]</span>
-                </div>
-              </div>
-              <div className="flex justify-between text-xs text-foreground/50 mt-4">
-                <span>Date: [XX/XX/XXXX]</span>
+            <div className="relative group hover:scale-105 transition-all duration-300">
+              <img
+                src={certFtmo}
+                alt="FTMO Passed Verification Certificate - You"
+                className="w-full h-auto rounded-xl shadow-lg border border-primary/30"
+              />
+              <div className="absolute inset-0 bg-gradient-to-t from-background/80 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity rounded-xl flex items-end justify-center pb-4">
+                <span className="text-primary font-bold text-sm">FTMO Verification</span>
               </div>
             </div>
 
             {/* Certificate 3 - TopStep */}
-            <div className="bg-white border-2 border-black rounded-xl overflow-hidden hover:scale-105 transition-all shadow-lg">
-              <div className="bg-black text-white p-4 text-center">
-                <h3 className="text-xs font-bold tracking-widest mb-1">CERTIFIED</h3>
-                <h3 className="text-xl font-bold">FUNDED TRADER</h3>
-              </div>
-              <div className="p-6 bg-white">
-                <div className="text-right mb-4">
-                  <span className="text-black font-bold text-lg">TOPSTEP</span>
-                </div>
-                <p className="text-black text-xs text-center mb-3 uppercase">
-                  This certificate is proudly presented to
-                </p>
-                <div className="border-2 border-black rounded px-3 py-2 text-center mb-4">
-                  <span className="text-black font-bold">[Student Name]</span>
-                </div>
-                <p className="text-black/70 text-xs text-center leading-relaxed mb-4">
-                  Successfully passed the Trading Combine™ and is officially a TopStep Funded
-                  Trader
-                </p>
-                <div className="flex justify-center">
-                  <div className="w-12 h-12 bg-yellow-400 rounded-full flex items-center justify-center">
-                    <span className="text-black font-bold text-xl">T</span>
-                  </div>
-                </div>
+            <div className="relative group hover:scale-105 transition-all duration-300">
+              <img
+                src={certTopstep}
+                alt="TopStep Certified Funded Trader - You"
+                className="w-full h-auto rounded-xl shadow-lg border border-secondary/30"
+              />
+              <div className="absolute inset-0 bg-gradient-to-t from-background/80 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity rounded-xl flex items-end justify-center pb-4">
+                <span className="text-secondary font-bold text-sm">TopStep Funded</span>
               </div>
             </div>
 
-            {/* Certificate 4 - My Funded Futures */}
-            <div className="bg-gradient-to-br from-slate-950/50 to-slate-900/30 border border-secondary/30 rounded-xl p-6 hover:scale-105 transition-all shadow-lg">
-              <div className="flex items-center gap-2 mb-4">
-                <div className="w-8 h-8 bg-secondary rounded flex items-center justify-center">
-                  <span className="text-primary-foreground font-bold">🛡</span>
-                </div>
-                <span className="font-semibold text-sm">My Funded Futures</span>
-              </div>
-              <div className="text-center mb-4">
-                <h3 className="text-2xl font-bold mb-1">PASSING</h3>
-                <h3 className="text-xl font-bold">CERTIFICATE</h3>
-              </div>
-              <div className="border-t border-secondary/30 pt-4 mb-4">
-                <p className="text-foreground/60 text-xs text-center mb-3">awarded to</p>
-                <div className="bg-secondary/10 rounded px-3 py-2 text-center mb-3">
-                  <span className="text-secondary font-bold text-lg">[Student Name]</span>
-                </div>
-              </div>
-              <div className="grid grid-cols-2 gap-2 text-xs">
-                <div>
-                  <p className="text-foreground/50">Date</p>
-                  <p className="font-semibold">[XX/XX/XXXX]</p>
-                </div>
-                <div>
-                  <p className="text-foreground/50">Account Size</p>
-                  <p className="text-primary font-bold">$150,000</p>
-                </div>
+            {/* Certificate 4 - ATF */}
+            <div className="relative group hover:scale-105 transition-all duration-300">
+              <img
+                src={certAtf}
+                alt="Apex Trader Funding Certificate - You"
+                className="w-full h-auto rounded-xl shadow-lg border border-secondary/30"
+              />
+              <div className="absolute inset-0 bg-gradient-to-t from-background/80 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity rounded-xl flex items-end justify-center pb-4">
+                <span className="text-secondary font-bold text-sm">ATF Best Award</span>
               </div>
             </div>
           </div>
