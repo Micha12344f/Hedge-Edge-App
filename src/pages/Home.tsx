@@ -7,6 +7,9 @@ import cert5percenters from "@/assets/cert-5percenters.png";
 import certFtmo from "@/assets/cert-ftmo.png";
 import certTopstep from "@/assets/cert-topstep.png";
 import certAtf from "@/assets/cert-atf.png";
+import brokerBlackBull from "@/assets/broker-blackbull.png";
+import brokerFxPro from "@/assets/broker-fxpro.png";
+import brokerFxtm from "@/assets/broker-fxtm.png";
 
 export default function Home() {
   return (
@@ -46,6 +49,35 @@ export default function Home() {
               <Zap className="w-5 h-5 text-secondary" />
               <span className="font-semibold">Automation Available</span>
             </div>
+          </div>
+        </div>
+      </section>
+
+      {/* Brokers We Use Section */}
+      <section className="py-12 px-4 bg-muted">
+        <div className="container mx-auto text-center">
+          <h2 className="text-3xl font-bold mb-2">
+            Brokers We <span className="text-primary">Use</span>
+          </h2>
+          <p className="text-sm text-muted-foreground mb-8">
+            Hedge against challenge fee on one of these brokers
+          </p>
+          <div className="flex justify-center items-center gap-8 flex-wrap">
+            <img 
+              src={brokerBlackBull} 
+              alt="BlackBull Markets" 
+              className="h-12 md:h-16 w-auto opacity-80 hover:opacity-100 transition-opacity"
+            />
+            <img 
+              src={brokerFxPro} 
+              alt="FxPro" 
+              className="h-12 md:h-16 w-auto opacity-80 hover:opacity-100 transition-opacity"
+            />
+            <img 
+              src={brokerFxtm} 
+              alt="FXTM" 
+              className="h-12 md:h-16 w-auto opacity-80 hover:opacity-100 transition-opacity"
+            />
           </div>
         </div>
       </section>
