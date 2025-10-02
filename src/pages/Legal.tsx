@@ -1,7 +1,7 @@
 import { useParams, Link } from "react-router-dom";
 import { legalContent } from "@/data/siteData";
 
-type LegalType = "terms" | "privacy" | "risk" | "cookies";
+type LegalType = "terms" | "privacy" | "risk";
 
 export default function Legal() {
   const { type = "terms" } = useParams<{ type: LegalType }>();

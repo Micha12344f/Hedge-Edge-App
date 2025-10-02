@@ -5,7 +5,7 @@ export const Footer = () => {
   return (
     <footer className="bg-background border-t border-primary/20 py-12 px-4">
       <div className="container mx-auto">
-        <div className="grid md:grid-cols-4 gap-8 mb-8">
+        <div className="grid md:grid-cols-3 gap-8 mb-8">
           <div>
             <div className="flex items-center gap-2 mb-4">
               <TrendingUp className="w-6 h-6 text-primary" />
@@ -52,14 +52,6 @@ export const Footer = () => {
             </div>
           </div>
 
-          <div>
-            <h4 className="font-semibold mb-3">Legal</h4>
-            <div className="space-y-2">
-              <Link to="/legal/cookies" className="block text-muted-foreground hover:text-primary text-sm transition-colors">
-                Cookie Policy
-              </Link>
-            </div>
-          </div>
         </div>
 
         <div className="border-t border-primary/20 pt-8">

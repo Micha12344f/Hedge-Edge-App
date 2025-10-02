@@ -48,6 +48,7 @@ export const tiersData = [
     cta: "Download Now",
     ctaLink: "/learn",
     popular: false,
+    locked: false,
   },
   {
     name: "1-on-1 Consult",
@@ -62,7 +63,9 @@ export const tiersData = [
     ],
     cta: "Book Consultation",
     ctaLink: "/consult",
-    popular: true,
+    popular: false,
+    locked: true,
+    status: "Coming Soon",
   },
   {
     name: "Full Automation",
@@ -78,6 +81,8 @@ export const tiersData = [
     cta: "Start Automation",
     ctaLink: "/automation",
     popular: false,
+    locked: true,
+    status: "Coming Soon",
   },
 ];
 
@@ -102,17 +107,6 @@ export const faqData = [
     q: "Can I get a refund?",
     a: "Consultation and automation fees are non-refundable once services are rendered, as they involve personalized time and setup. The free guide is always available at no cost.",
   },
-];
-
-export const automationFeatures = [
-  "Full account setup & configuration",
-  "Custom algorithm development",
-  "Broker integration & API setup",
-  "24/7 automated monitoring",
-  "Monthly optimization calls",
-  "Real-time alerts & reporting",
-  "Priority technical support",
-  "90-day performance tracking",
 ];
 
 export const legalContent = {
@@ -200,31 +194,6 @@ export const legalContent = {
       {
         heading: "Regulatory Disclaimer",
         text: "We are not a registered investment advisor, broker-dealer, or financial institution. Users are responsible for ensuring compliance with their local regulations.",
-      },
-    ],
-  },
-  cookies: {
-    title: "Cookie Policy",
-    sections: [
-      {
-        heading: "What Are Cookies",
-        text: "Cookies are small text files stored on your device that help us provide and improve our services, remember your preferences, and analyze site usage.",
-      },
-      {
-        heading: "Types of Cookies We Use",
-        text: "Essential cookies enable core functionality. Analytics cookies help us understand how you use our site. We do not use advertising or tracking cookies.",
-      },
-      {
-        heading: "Third-Party Cookies",
-        text: "Some cookies may be set by third-party services we use, such as analytics providers. These are governed by the respective third party privacy policies.",
-      },
-      {
-        heading: "Managing Cookies",
-        text: "You can control cookies through your browser settings. Disabling cookies may limit some site functionality but will not prevent access to content.",
-      },
-      {
-        heading: "Cookie Duration",
-        text: "Session cookies expire when you close your browser. Persistent cookies remain for a set period to remember your preferences across visits.",
       },
     ],
   },
