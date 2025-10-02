@@ -8,10 +8,10 @@ import certFtmo from "@/assets/cert-ftmo.png";
 import certTopstep from "@/assets/cert-topstep.png";
 import certAtf from "@/assets/cert-atf.png";
 
+import blackbullBanner from "@/assets/blackbull-banner.png";
+
 const BLACKBULL_REFERRAL_URL =
   "https://blackbull.com/en/live-account/?cmp=5p0z2d3q&refid=6478";
-const BLACKBULL_BANNER_URL =
-  "https://ib-static.blackbull.com/banners/98/blackbullmarkets98.png";
 
 export default function Home() {
   return (
@@ -71,9 +71,9 @@ export default function Home() {
             className="block max-w-4xl mx-auto transition-transform hover:scale-[1.01]"
           >
             <img
-              src={BLACKBULL_BANNER_URL}
+              src={blackbullBanner}
               alt="BlackBull Markets seamless ribbon"
-              className="w-full h-auto rounded-xl"
+              className="w-full h-auto rounded-xl object-cover"
             />
           </a>
         </div>

@@ -1,9 +1,9 @@
 import { AlertCircle, ArrowUpRight } from "lucide-react";
 
+import blackbullBanner from "@/assets/blackbull-banner.png";
+
 const BLACKBULL_REFERRAL_URL =
   "https://blackbull.com/en/live-account/?cmp=5p0z2d3q&refid=6478";
-const BLACKBULL_BANNER_URL =
-  "https://ib-static.blackbull.com/banners/98/blackbullmarkets98.png";
 
 export default function Brokers() {
   return (
@@ -73,9 +73,9 @@ export default function Brokers() {
               className="block overflow-hidden rounded-2xl border border-primary/30 bg-background"
             >
               <img
-                src={BLACKBULL_BANNER_URL}
+                src={blackbullBanner}
                 alt="BlackBull Markets banner"
-                className="w-full h-auto"
+                className="w-full h-auto object-cover"
               />
             </a>
           </div>
