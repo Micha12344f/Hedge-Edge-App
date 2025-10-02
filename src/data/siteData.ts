@@ -1,39 +1,3 @@
-export const brokersData = [
-  {
-    id: 1,
-    name: "Alpha Prop Trading",
-    logo: "APT",
-    description: "Industry-leading prop firm with flexible rules and fast payouts",
-    minDeposit: "$0",
-    maxDrawdown: "10%",
-    profitSplit: "80/20",
-    features: ["Daily payouts", "No time limits", "Scale to $2M"],
-    hasRebate: true,
-  },
-  {
-    id: 2,
-    name: "Apex Trader Funding",
-    logo: "ATF",
-    description: "Trusted platform with multiple account sizes and evaluation paths",
-    minDeposit: "$0",
-    maxDrawdown: "8%",
-    profitSplit: "90/10",
-    features: ["Weekly payouts", "One-step evaluation", "Mobile trading"],
-    hasRebate: true,
-  },
-  {
-    id: 3,
-    name: "FTMO",
-    logo: "FTM",
-    description: "Established European firm with rigorous but rewarding programs",
-    minDeposit: "$0",
-    maxDrawdown: "10%",
-    profitSplit: "80/20",
-    features: ["Bi-weekly payouts", "Two-step challenge", "Scaling plan"],
-    hasRebate: true,
-  },
-];
-
 export const tiersData = [
   {
     name: "Free Guide",

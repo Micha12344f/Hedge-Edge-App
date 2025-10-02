@@ -7,9 +7,11 @@ import cert5percenters from "@/assets/cert-5percenters.png";
 import certFtmo from "@/assets/cert-ftmo.png";
 import certTopstep from "@/assets/cert-topstep.png";
 import certAtf from "@/assets/cert-atf.png";
-import brokerBlackBull from "@/assets/broker-blackbull.png";
-import brokerFxPro from "@/assets/broker-fxpro.png";
-import brokerFxtm from "@/assets/broker-fxtm.png";
+
+const BLACKBULL_REFERRAL_URL =
+  "https://blackbull.com/en/live-account/?cmp=5p0z2d3q&refid=6478";
+const BLACKBULL_BANNER_URL =
+  "https://ib-static.blackbull.com/banners/98/blackbullmarkets98.png";
 
 export default function Home() {
   return (
@@ -54,31 +56,26 @@ export default function Home() {
       </section>
 
       {/* Brokers We Use Section */}
-      <section className="py-12 px-4 bg-muted">
+      <section className="py-12 px-4 bg-background">
         <div className="container mx-auto text-center">
           <h2 className="text-3xl font-bold mb-2">
-            Brokers We <span className="text-primary">Use</span>
+            Broker We <span className="text-primary">Use</span>
           </h2>
           <p className="text-sm text-muted-foreground mb-8">
-            Hedge against challenge fee on one of these brokers
+            Hedge against challenge fees with our preferred BlackBull Markets partner
           </p>
-          <div className="flex justify-center items-center gap-8 flex-wrap">
-            <img 
-              src={brokerBlackBull} 
-              alt="BlackBull Markets" 
-              className="h-12 md:h-16 w-auto opacity-80 hover:opacity-100 transition-opacity"
+          <a
+            href={BLACKBULL_REFERRAL_URL}
+            target="_blank"
+            rel="noreferrer"
+            className="block max-w-4xl mx-auto transition-transform hover:scale-[1.01]"
+          >
+            <img
+              src={BLACKBULL_BANNER_URL}
+              alt="BlackBull Markets seamless ribbon"
+              className="w-full h-auto rounded-xl"
             />
-            <img 
-              src={brokerFxPro} 
-              alt="FxPro" 
-              className="h-12 md:h-16 w-auto opacity-80 hover:opacity-100 transition-opacity"
-            />
-            <img 
-              src={brokerFxtm} 
-              alt="FXTM" 
-              className="h-12 md:h-16 w-auto opacity-80 hover:opacity-100 transition-opacity"
-            />
-          </div>
+          </a>
         </div>
       </section>
 
@@ -89,7 +86,7 @@ export default function Home() {
             Join <span className="text-primary">Funded Traders</span> Worldwide
           </h2>
           <p className="text-center text-muted-foreground mb-12 max-w-2xl mx-auto">
-            Our students have successfully passed evaluations with top prop firms
+            You can successfully pass with 100% win rate evaluations with top prop firms
           </p>
 
           <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-6">
