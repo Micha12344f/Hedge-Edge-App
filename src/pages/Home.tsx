@@ -55,35 +55,35 @@ export default function Home() {
       </section>
 
       {/* Brokers We Use Section */}
-      <section className="py-12 px-4 bg-background">
-        <div className="container mx-auto text-center">
+      <section className="py-12 bg-background">
+        <div className="text-center px-4 mb-8">
           <h2 className="text-3xl font-bold mb-2">
             Broker We <span className="text-primary">Use</span>
           </h2>
           <p className="text-sm text-muted-foreground mb-4">
             Hedge against challenge fees with our preferred BlackBull Markets partner
           </p>
-          <p className="text-sm text-muted-foreground mb-8">
+          <p className="text-sm text-muted-foreground">
             Click the banner below 👇
           </p>
-          <div className="overflow-hidden">
-            <div className="flex animate-marquee-rtl">
-              {[...Array(6)].map((_, i) => (
-                <a
-                  key={i}
-                  href={BLACKBULL_REFERRAL_URL}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="flex-shrink-0 mx-2 hover:opacity-80 transition-opacity"
-                >
-                  <img
-                    src={blackbullBanner}
-                    alt="BlackBull Markets"
-                    className="h-32 w-auto"
-                  />
-                </a>
-              ))}
-            </div>
+        </div>
+        <div className="overflow-hidden w-full">
+          <div className="flex animate-marquee-rtl">
+            {[...Array(8)].map((_, i) => (
+              <a
+                key={i}
+                href={BLACKBULL_REFERRAL_URL}
+                target="_blank"
+                rel="noreferrer"
+                className="flex-shrink-0 mx-4 hover:opacity-80 transition-opacity"
+              >
+                <img
+                  src={blackbullBanner}
+                  alt="BlackBull Markets"
+                  className="h-32 w-auto"
+                />
+              </a>
+            ))}
           </div>
         </div>
       </section>
