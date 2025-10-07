@@ -66,18 +66,25 @@ export default function Home() {
           <p className="text-sm text-muted-foreground mb-8">
             Click the banner below 👇
           </p>
-          <a
-            href={BLACKBULL_REFERRAL_URL}
-            target="_blank"
-            rel="noreferrer"
-            className="block max-w-4xl mx-auto transition-transform hover:scale-[1.01]"
-          >
-            <img
-              src={blackbullBanner}
-              alt="BlackBull Markets"
-              className="w-full h-auto rounded-xl object-cover"
-            />
-          </a>
+          <div className="overflow-hidden">
+            <div className="flex animate-marquee-rtl">
+              {[...Array(6)].map((_, i) => (
+                <a
+                  key={i}
+                  href={BLACKBULL_REFERRAL_URL}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="flex-shrink-0 mx-2 hover:opacity-80 transition-opacity"
+                >
+                  <img
+                    src={blackbullBanner}
+                    alt="BlackBull Markets"
+                    className="h-32 w-auto"
+                  />
+                </a>
+              ))}
+            </div>
+          </div>
         </div>
       </section>
 
