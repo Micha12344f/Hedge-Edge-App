@@ -7,7 +7,7 @@ import cert5percenters from "@/assets/cert-5percenters.png";
 import certFtmo from "@/assets/cert-ftmo.png";
 import certTopstep from "@/assets/cert-topstep.png";
 import certAtf from "@/assets/cert-atf.png";
-import blackbullLogo from "@/assets/blackbull-logo.png";
+import blackbullBanner from "@/assets/blackbull-banner-new.png";
 
 const BLACKBULL_REFERRAL_URL =
   "https://blackbull.com/en/live-account/?cmp=5p0z2d3q&refid=6478";
@@ -55,27 +55,29 @@ export default function Home() {
       </section>
 
       {/* Brokers We Use Section */}
-      <section className="py-12 px-4 bg-muted/50 overflow-hidden">
-        <div className="container mx-auto">
-          <div className="relative">
-            <div className="flex animate-marquee">
-              {[...Array(8)].map((_, i) => (
-                <a
-                  key={i}
-                  href={BLACKBULL_REFERRAL_URL}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="flex-shrink-0 mx-8 opacity-60 hover:opacity-100 transition-opacity grayscale hover:grayscale-0"
-                >
-                  <img
-                    src={blackbullLogo}
-                    alt="BlackBull Markets"
-                    className="h-12 w-auto"
-                  />
-                </a>
-              ))}
-            </div>
-          </div>
+      <section className="py-12 px-4 bg-background">
+        <div className="container mx-auto text-center">
+          <h2 className="text-3xl font-bold mb-2">
+            Broker We <span className="text-primary">Use</span>
+          </h2>
+          <p className="text-sm text-muted-foreground mb-4">
+            Hedge against challenge fees with our preferred BlackBull Markets partner
+          </p>
+          <p className="text-sm text-muted-foreground mb-8">
+            Click the banner below 👇
+          </p>
+          <a
+            href={BLACKBULL_REFERRAL_URL}
+            target="_blank"
+            rel="noreferrer"
+            className="block max-w-4xl mx-auto transition-transform hover:scale-[1.01]"
+          >
+            <img
+              src={blackbullBanner}
+              alt="BlackBull Markets"
+              className="w-full h-auto rounded-xl object-cover"
+            />
+          </a>
         </div>
       </section>
 
