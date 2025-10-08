@@ -62,7 +62,7 @@ export default function Home() {
             Broker We <span className="text-primary">Use</span>
           </h2>
           <p className="text-sm text-muted-foreground mb-4">
-            Hedge against challenge fees with our preferred BlackBull Markets partner
+            Stop donating challenge fees — open your hedge account today and turn every failed prop into a refund. Your broker pays you back when the prop loses
           </p>
           <p className="text-sm text-muted-foreground">
             Click the banner below 👇
