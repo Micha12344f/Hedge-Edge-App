@@ -84,11 +84,11 @@ export default function Home() {
                     className="h-20 w-auto"
                   />
                 </a>
-                <div className="flex-shrink-0 hover:opacity-80 transition-opacity">
+                <div className="flex-shrink-0 hover:opacity-80 transition-opacity flex items-center">
                   <img
                     src={vantageLogo}
                     alt="Vantage"
-                    className="h-20 w-auto"
+                    className="h-20 w-auto object-contain"
                   />
                 </div>
               </div>
