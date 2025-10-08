@@ -81,14 +81,14 @@ export default function Home() {
                   <img
                     src={blackbullBanner}
                     alt="BlackBull Markets"
-                    className="h-20 w-auto"
+                    className="h-16 w-auto"
                   />
                 </a>
-                <div className="flex-shrink-0 hover:opacity-80 transition-opacity flex items-center">
+                <div className="flex-shrink-0 hover:opacity-80 transition-opacity">
                   <img
                     src={vantageLogo}
                     alt="Vantage"
-                    className="h-20 w-auto object-contain"
+                    className="h-16 w-auto"
                   />
                 </div>
               </div>
