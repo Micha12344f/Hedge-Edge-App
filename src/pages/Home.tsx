@@ -81,7 +81,7 @@ export default function Home() {
                   <img
                     src={blackbullBanner}
                     alt="BlackBull Markets"
-                    className="h-16 w-auto"
+                    className="h-11 w-auto"
                   />
                 </a>
                 <div className="flex-shrink-0 hover:opacity-80 transition-opacity">
