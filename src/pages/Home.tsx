@@ -8,6 +8,7 @@ import certFtmo from "@/assets/cert-ftmo.png";
 import certTopstep from "@/assets/cert-topstep.png";
 import certAtf from "@/assets/cert-atf.png";
 import blackbullBanner from "@/assets/blackbull-banner-new.png";
+import vantageLogo from "@/assets/vantage-logo.png";
 
 const BLACKBULL_REFERRAL_URL =
   "https://blackbull.com/en/live-account/?cmp=5p0z2d3q&refid=6478";
@@ -70,19 +71,27 @@ export default function Home() {
         <div className="overflow-hidden w-full">
           <div className="flex animate-marquee-rtl">
             {[...Array(8)].map((_, i) => (
-              <a
-                key={i}
-                href={BLACKBULL_REFERRAL_URL}
-                target="_blank"
-                rel="noreferrer"
-                className="flex-shrink-0 mx-4 hover:opacity-80 transition-opacity"
-              >
-                <img
-                  src={blackbullBanner}
-                  alt="BlackBull Markets"
-                  className="h-20 w-auto"
-                />
-              </a>
+              <div key={i} className="flex items-center gap-8 flex-shrink-0">
+                <a
+                  href={BLACKBULL_REFERRAL_URL}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="flex-shrink-0 hover:opacity-80 transition-opacity"
+                >
+                  <img
+                    src={blackbullBanner}
+                    alt="BlackBull Markets"
+                    className="h-20 w-auto"
+                  />
+                </a>
+                <div className="flex-shrink-0 hover:opacity-80 transition-opacity">
+                  <img
+                    src={vantageLogo}
+                    alt="Vantage"
+                    className="h-20 w-auto"
+                  />
+                </div>
+              </div>
             ))}
           </div>
         </div>
