@@ -88,7 +88,7 @@ export default function Home() {
                   <img
                     src={vantageLogo}
                     alt="Vantage"
-                    className="h-16 w-auto"
+                    className="h-32 w-auto"
                   />
                 </div>
               </div>
