@@ -16,7 +16,7 @@ export const tiersData = [
   },
   {
     name: "1-on-1 Consult",
-    price: "$99",
+    price: "£99",
     description: "Personalized strategy session with expert guidance",
     features: [
       "60-minute strategy call",
@@ -33,7 +33,7 @@ export const tiersData = [
   },
   {
     name: "Full Automation",
-    price: "$599",
+    price: "£599",
     description: "Done-for-you hedge setup & ongoing management",
     features: [
       "Complete account setup",
