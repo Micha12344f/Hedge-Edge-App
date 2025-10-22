@@ -12,6 +12,7 @@ export const Header = () => {
     { href: "/learn", label: "Free Guide" },
     { href: "/consult", label: "Consult" },
     { href: "/automation", label: "Automation" },
+    { href: "/calculator", label: "Calculator" },
     { href: "/brokers", label: "Brokers" },
     { href: "/faq", label: "FAQ" },
   ];

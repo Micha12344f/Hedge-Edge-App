@@ -9,6 +9,7 @@ import Automation from "./pages/Automation";
 import Brokers from "./pages/Brokers";
 import FAQ from "./pages/FAQ";
 import Legal from "./pages/Legal";
+import Calculator from "./pages/Calculator";
 import NotFound from "./pages/NotFound";
 
 const App = () => (
@@ -22,6 +23,7 @@ const App = () => (
             <Route path="/learn" element={<Learn />} />
             <Route path="/consult" element={<Consult />} />
             <Route path="/automation" element={<Automation />} />
+            <Route path="/calculator" element={<Calculator />} />
             <Route path="/brokers" element={<Brokers />} />
             <Route path="/faq" element={<FAQ />} />
             <Route path="/legal/:type" element={<Legal />} />
