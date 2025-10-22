@@ -18,11 +18,9 @@ interface CalculatorInputs {
   maxDrawdownPct: number;
   hedgeType: "Hedging (normal)" | "Over-hedge";
   overHedgeFactor: number;
-  hedgeMultiplier: number;
   spreadPips: number;
   commissionPerRoundLot: number;
   fundingBpsDaily: number;
-  correlationRho: number;
   execBufferPct: number;
   workingCapitalManual?: number;
 }
@@ -45,19 +43,52 @@ interface CalculatorResults {
 
 const presets = {
   FTMO: {
+    challengeType: "2 Phase" as const,
     phase1TargetPct: 0.10,
     phase2TargetPct: 0.05,
     maxDrawdownPct: 0.10,
   },
-  FundingPips: {
+  "Alpha Capital Group": {
+    challengeType: "2 Phase" as const,
     phase1TargetPct: 0.08,
     phase2TargetPct: 0.05,
     maxDrawdownPct: 0.10,
   },
-  Alpha: {
+  FundingPips: {
+    challengeType: "2 Phase" as const,
+    phase1TargetPct: 0.08,
+    phase2TargetPct: 0.05,
+    maxDrawdownPct: 0.10,
+  },
+  FundedNext: {
+    challengeType: "2 Phase" as const,
     phase1TargetPct: 0.08,
     phase2TargetPct: 0.04,
     maxDrawdownPct: 0.08,
+  },
+  "E8 Markets": {
+    challengeType: "2 Phase" as const,
+    phase1TargetPct: 0.08,
+    phase2TargetPct: 0.04,
+    maxDrawdownPct: 0.08,
+  },
+  "Funded Trading Plus": {
+    challengeType: "2 Phase" as const,
+    phase1TargetPct: 0.10,
+    phase2TargetPct: 0.05,
+    maxDrawdownPct: 0.10,
+  },
+  "The 5%ers": {
+    challengeType: "2 Phase" as const,
+    phase1TargetPct: 0.08,
+    phase2TargetPct: 0.05,
+    maxDrawdownPct: 0.10,
+  },
+  "Quant Tekel": {
+    challengeType: "2 Phase" as const,
+    phase1TargetPct: 0.08,
+    phase2TargetPct: 0.05,
+    maxDrawdownPct: 0.10,
   },
 };
 
@@ -75,11 +106,9 @@ const Calculator = () => {
     maxDrawdownPct: 0.10,
     hedgeType: "Hedging (normal)",
     overHedgeFactor: 1.0,
-    hedgeMultiplier: 10,
     spreadPips: 1,
     commissionPerRoundLot: 1,
     fundingBpsDaily: 0,
-    correlationRho: 1.0,
     execBufferPct: 0.15,
   });
 
@@ -88,8 +117,8 @@ const Calculator = () => {
     const T1 = inputs.phase1TargetPct;
     const T2 = inputs.phase2TargetPct;
     const OH = inputs.overHedgeFactor;
-    const Hmult = inputs.hedgeMultiplier;
-    const rho = inputs.correlationRho;
+    const Hmult = 10; // Fixed hedge multiplier
+    const rho = 1.0; // Fixed correlation
 
     // Friction calculation
     const spreadCost = inputs.spreadPips * 0.0098;
@@ -198,8 +227,13 @@ const Calculator = () => {
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="FTMO">FTMO</SelectItem>
+                <SelectItem value="Alpha Capital Group">Alpha Capital Group</SelectItem>
                 <SelectItem value="FundingPips">FundingPips</SelectItem>
-                <SelectItem value="Alpha">Alpha Capital</SelectItem>
+                <SelectItem value="FundedNext">FundedNext</SelectItem>
+                <SelectItem value="E8 Markets">E8 Markets</SelectItem>
+                <SelectItem value="Funded Trading Plus">Funded Trading Plus</SelectItem>
+                <SelectItem value="The 5%ers">The 5%ers</SelectItem>
+                <SelectItem value="Quant Tekel">Quant Tekel</SelectItem>
               </SelectContent>
             </Select>
             <Button onClick={exportJSON} variant="outline" size="sm">
@@ -347,31 +381,6 @@ const Calculator = () => {
                     <p className="text-sm text-muted-foreground text-center">{inputs.overHedgeFactor.toFixed(1)}×</p>
                   </div>
                 )}
-
-                <div className="space-y-2">
-                  <Label htmlFor="hedgeMultiplier">Hedge Multiplier</Label>
-                  <Input
-                    id="hedgeMultiplier"
-                    type="number"
-                    value={inputs.hedgeMultiplier}
-                    onChange={(e) => setInputs({ ...inputs, hedgeMultiplier: parseFloat(e.target.value) })}
-                    className="bg-blue-950/20 border-blue-500/50"
-                  />
-                </div>
-
-                <div className="space-y-2">
-                  <Label htmlFor="correlation">Correlation ρ</Label>
-                  <Slider
-                    id="correlation"
-                    min={0}
-                    max={1}
-                    step={0.1}
-                    value={[inputs.correlationRho]}
-                    onValueChange={(v) => setInputs({ ...inputs, correlationRho: v[0] })}
-                    className="py-4"
-                  />
-                  <p className="text-sm text-muted-foreground text-center">{inputs.correlationRho.toFixed(1)}</p>
-                </div>
               </div>
 
               {/* Friction */}
