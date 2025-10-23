@@ -212,7 +212,7 @@ const Calculator = () => {
       <div className="max-w-7xl mx-auto space-y-8">
         {/* Header */}
         <div className="text-center space-y-4">
-          <h1 className="text-4xl md:text-5xl font-bold text-foreground">
+          <h1 className="text-4xl md:text-5xl font-bold text-[#39FF14] animate-pulse [text-shadow:0_0_10px_#39FF14,0_0_20px_#39FF14,0_0_30px_#39FF14]">
             Hedge Calculator
           </h1>
           <p className="text-lg text-muted-foreground max-w-2xl mx-auto">
