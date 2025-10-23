@@ -36,8 +36,10 @@ export const Header = () => {
               <Link
                 key={link.href}
                 to={link.href}
-                className={`transition-colors ${
-                  isActive(link.href)
+                className={`transition-all ${
+                  link.href === "/calculator"
+                    ? "text-[#39FF14] font-semibold animate-pulse [text-shadow:0_0_10px_#39FF14,0_0_20px_#39FF14]"
+                    : isActive(link.href)
                     ? "text-primary font-semibold"
                     : "text-foreground hover:text-primary"
                 }`}
@@ -64,8 +66,10 @@ export const Header = () => {
                 key={link.href}
                 to={link.href}
                 onClick={() => setMobileMenuOpen(false)}
-                className={`transition-colors ${
-                  isActive(link.href)
+                className={`transition-all ${
+                  link.href === "/calculator"
+                    ? "text-[#39FF14] font-semibold animate-pulse [text-shadow:0_0_10px_#39FF14,0_0_20px_#39FF14]"
+                    : isActive(link.href)
                     ? "text-primary font-semibold"
                     : "text-foreground hover:text-primary"
                 }`}
