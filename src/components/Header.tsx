@@ -37,7 +37,11 @@ export const Header = () => {
                 key={link.href}
                 to={link.href}
                 className={`transition-colors ${
-                  isActive(link.href)
+                  link.href === "/automation"
+                    ? "text-secondary font-semibold"
+                    : link.href === "/consult"
+                    ? "text-[hsl(200,100%,60%)] font-semibold"
+                    : isActive(link.href)
                     ? "text-primary font-semibold"
                     : "text-foreground hover:text-primary"
                 }`}
@@ -65,7 +69,11 @@ export const Header = () => {
                 to={link.href}
                 onClick={() => setMobileMenuOpen(false)}
                 className={`transition-colors ${
-                  isActive(link.href)
+                  link.href === "/automation"
+                    ? "text-secondary font-semibold"
+                    : link.href === "/consult"
+                    ? "text-[hsl(200,100%,60%)] font-semibold"
+                    : isActive(link.href)
                     ? "text-primary font-semibold"
                     : "text-foreground hover:text-primary"
                 }`}
