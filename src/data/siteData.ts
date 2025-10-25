@@ -27,10 +27,9 @@ export const tiersData = [
       "Follow-up email support",
     ],
     cta: "Reserve My Strategy Session – £397",
-    ctaLink: "/consult",
+    ctaLink: "/booking?tier=strategy",
     popular: true,
-    locked: true,
-    status: "Coming Soon",
+    locked: false,
   },
   {
     name: "Full Automation",
@@ -44,10 +43,9 @@ export const tiersData = [
       "Priority support access",
     ],
     cta: "Join the Automation Waitlist – £1,597",
-    ctaLink: "/automation",
+    ctaLink: "/booking?tier=automation",
     popular: false,
-    locked: true,
-    status: "Coming Soon",
+    locked: false,
   },
 ];
 
