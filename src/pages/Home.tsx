@@ -177,7 +177,7 @@ export default function Home() {
           <p className="text-center text-muted-foreground mb-12 max-w-2xl mx-auto">
             Start with our free resources or accelerate your journey with personalized guidance
           </p>
-          <div className="grid md:grid-cols-3 gap-6">
+          <div className="grid md:grid-cols-3 gap-6 max-w-sm md:max-w-none mx-auto">
             {tiersData.map((tier) => (
               <PricingCard key={tier.name} {...tier} />
             ))}
