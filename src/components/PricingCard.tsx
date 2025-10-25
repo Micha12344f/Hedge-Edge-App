@@ -6,6 +6,7 @@ import { cn } from "@/lib/utils";
 interface PricingCardProps {
   name: string;
   price: string;
+  originalPrice?: string;
   description: string;
   features: string[];
   cta: string;
@@ -18,6 +19,7 @@ interface PricingCardProps {
 export const PricingCard = ({
   name,
   price,
+  originalPrice,
   description,
   features,
   cta,
@@ -52,8 +54,15 @@ export const PricingCard = ({
       <h3 className={`text-2xl font-bold mb-2 ${isLocked ? "text-muted-foreground" : "text-primary"}`}>
         {name}
       </h3>
-      <div className={`text-4xl font-bold mb-2 ${isLocked ? "text-muted-foreground" : "text-foreground"}`}>
-        {price}
+      <div className="mb-2">
+        {originalPrice && (
+          <div className={`text-sm line-through ${isLocked ? "text-muted-foreground/60" : "text-muted-foreground"}`}>
+            Was {originalPrice}
+          </div>
+        )}
+        <div className={`text-4xl font-bold ${isLocked ? "text-muted-foreground" : "text-foreground"}`}>
+          {price}
+        </div>
       </div>
       <p className="mb-6 text-muted-foreground">{description}</p>
       <ul className="space-y-3 mb-8">
