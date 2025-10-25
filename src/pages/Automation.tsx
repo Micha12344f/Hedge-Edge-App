@@ -1,25 +1,41 @@
-import { Button } from "@/components/ui/button";
+import { useEffect } from "react";
 
 export default function Automation() {
+  useEffect(() => {
+    // Load the zcal embed script
+    const script = document.createElement("script");
+    script.src = "https://static.zcal.co/embed/v1/embed.js";
+    script.async = true;
+    document.body.appendChild(script);
+
+    return () => {
+      // Cleanup script on unmount
+      if (document.body.contains(script)) {
+        document.body.removeChild(script);
+      }
+    };
+  }, []);
+
   return (
     <div className="min-h-screen bg-background py-16 px-4">
-      <div className="container max-w-3xl mx-auto text-center space-y-6">
-        <h1 className="text-4xl font-bold">
-          Full Automation <span className="text-primary">Coming Soon</span>
-        </h1>
-        <p className="text-muted-foreground">
-          We&apos;re reworking our automation service so it runs entirely on our own stack. The full
-          done-for-you package isn&apos;t available just yet, but you can review the free guide while we
-          finish things up.
-        </p>
-        <div className="bg-muted border border-primary/10 rounded-xl p-8 space-y-4">
-          <p className="text-foreground/70">
-            Check back soon for a simple, self-contained automation offer with easy onboarding and
-            transparent pricing.
+      <div className="container max-w-4xl mx-auto space-y-8">
+        <div className="text-center space-y-4">
+          <h1 className="text-4xl font-bold text-primary">
+            Book Your Automation Setup Call
+          </h1>
+          <p className="text-lg text-muted-foreground max-w-2xl mx-auto">
+            Schedule your consultation to get started with full automation setup.
           </p>
-          <Button disabled className="w-full bg-muted text-muted-foreground" size="lg">
-            Coming Soon
-          </Button>
+        </div>
+
+        <div className="bg-card border rounded-xl p-8">
+          <div className="zcal-inline-widget">
+            <a href="https://zcal.co/i/DmkwmVRV">30 Minute Meeting - Schedule a meeting</a>
+          </div>
+        </div>
+
+        <div className="text-center text-sm text-muted-foreground">
+          <p>After booking, you'll receive a confirmation email with meeting details and preparation instructions.</p>
         </div>
       </div>
     </div>
