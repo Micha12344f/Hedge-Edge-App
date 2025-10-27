@@ -106,28 +106,56 @@ export const legalContent = {
     title: "Privacy Policy",
     sections: [
       {
-        heading: "Information We Collect",
-        text: "We collect email addresses, names, and payment information necessary to provide our services. We may also collect usage data and analytics to improve our platform.",
+        heading: "1. Introduction",
+        text: "Hedge Edge ('we', 'us', 'our') respects your privacy and is committed to protecting your personal information. This policy outlines how we collect, use, disclose, and safeguard your data when you use our website, social media channels, educational content, and other services. Effective Date: January 1, 2025",
       },
       {
-        heading: "How We Use Your Information",
-        text: "Your information is used to deliver services, send educational content, process payments, and communicate important updates. We never sell personal data to third parties.",
+        heading: "2. Information We Collect",
+        text: "Personal Information: We may collect personal information that you voluntarily provide, such as name, email address, and contact details; social media handles, usernames, or identifiers; payment or billing information (if applicable); and other information you choose to share in forms, messages, or surveys. Non-Personal/Analytics Data: We may collect non-identifiable data, including device and browser information (e.g., device model, OS version, browser type); usage data (pages visited, time spent, interaction events); and cookies and similar tracking technologies.",
       },
       {
-        heading: "Third-Party Services",
-        text: "We use Stripe for payment processing and may use email service providers. These partners have their own privacy policies and data handling practices.",
+        heading: "3. How We Use Your Information",
+        text: "We use your information for purposes including: delivering our educational content, newsletters, and services; managing your account and providing customer support; improving our website and content through analytics and feedback; communicating about updates, offers, or relevant news (only if you've opted in); and complying with legal obligations, protecting our rights or those of others.",
       },
       {
-        heading: "Data Security",
-        text: "We implement industry-standard security measures to protect your data. However, no method of transmission over the internet is 100% secure.",
+        heading: "4. Legal Basis for Processing (If applicable under GDPR)",
+        text: "Where required, we process personal data on the basis of: your consent; performance of a contract or to take pre-contractual steps; and legitimate interests (e.g., improving our service) except where overridden by your data protection rights.",
       },
       {
-        heading: "Your Rights",
-        text: "You have the right to access, correct, or delete your personal information. Contact us to exercise these rights or for data-related questions.",
+        heading: "5. Sharing Your Information",
+        text: "We do not sell or trade your personal information. We may share data with: service providers and partners who help deliver our services (e.g., email platform, analytics provider); and legal or regulatory authorities, if required by law or to protect rights, safety or property. We ensure that any third-party provider we share data with is contractually obligated to handle data securely and only for the intended purpose.",
       },
       {
-        heading: "Updates to This Policy",
-        text: "We may update this Privacy Policy periodically. Continued use after changes constitutes acceptance of the updated policy.",
+        heading: "6. Cookies and Tracking Technologies",
+        text: "We may place cookies and similar technologies on your device to: recognise you and remember your preferences; and analyse usage patterns and optimise website performance. You can manage or disable cookies via your browser settings; note that disabling cookies may limit some site functionality.",
+      },
+      {
+        heading: "7. Your Rights (Depending on Your Region)",
+        text: "Depending on your jurisdiction (e.g., UK, EU, US), you may have the following rights: access the personal data we hold about you; request correction of inaccurate or incomplete data; request erasure of your data (subject to legal restrictions); object to or restrict certain processing; withdraw consent where processing is based on consent; and lodge a complaint with a data protection authority. To exercise your rights, contact us using the details below.",
+      },
+      {
+        heading: "8. Data Retention",
+        text: "We retain personal data for as long as necessary to fulfil the purposes described in this policy, including for legal, accounting or security obligations. When data is no longer required, we securely delete or anonymise it.",
+      },
+      {
+        heading: "9. Security",
+        text: "We implement reasonable technical and organisational measures to protect your personal data from unauthorised access, disclosure, alteration or destruction. These measures include encryption, access controls, and regular security reviews. However, no system is completely secure and we cannot guarantee absolute security.",
+      },
+      {
+        heading: "10. Children's Privacy",
+        text: "Our services are not directed to children under the age of 16 (or applicable age in your jurisdiction). We do not knowingly collect personal data from children without appropriate parental/guardian consent. If you believe we have collected such data, please contact us to request its removal.",
+      },
+      {
+        heading: "11. International Transfers",
+        text: "If we transfer your personal data outside of your country (or the EEA), we will ensure appropriate safeguards are in place (e.g., standard contractual clauses, adequacy decisions).",
+      },
+      {
+        heading: "12. Changes to This Policy",
+        text: "We may update this Privacy Policy from time to time. When we do, we will revise the 'Effective Date' at the top. We encourage you to check this page periodically for any changes.",
+      },
+      {
+        heading: "13. Contact Us",
+        text: "If you have any questions, concerns, or requests regarding this policy or our data practices, please contact us at: Email: hedgedge@gmail.com | Address: 182-184 high street north, London, E6 2JA",
       },
     ],
   },
