@@ -7,11 +7,13 @@ import cert5percenters from "@/assets/cert-5percenters.png";
 import certFtmo from "@/assets/cert-ftmo.png";
 import certTopstep from "@/assets/cert-topstep.png";
 import certAtf from "@/assets/cert-atf.png";
-import blackbullBanner from "@/assets/blackbull-banner-new.png";
+import acySecuritiesLogo from "@/assets/acy-securities-logo.png";
 import vantageLogo from "@/assets/vantage-logo.png";
 
 const BLACKBULL_REFERRAL_URL =
   "https://blackbull.com/en/live-account/?cmp=5p0z2d3q&refid=6478";
+const VANTAGE_REFERRAL_URL =
+  "https://www.vantagemarkets.com/open-live-account/?affid=NzM2NTE1NQ==";
 
 export default function Home() {
   return (
@@ -79,18 +81,23 @@ export default function Home() {
                   className="flex-shrink-0 hover:opacity-80 transition-opacity"
                 >
                   <img
-                    src={blackbullBanner}
-                    alt="BlackBull Markets"
+                    src={acySecuritiesLogo}
+                    alt="ACY Securities"
                     className="h-11 w-auto"
                   />
                 </a>
-                <div className="flex-shrink-0 hover:opacity-80 transition-opacity">
+                <a
+                  href={VANTAGE_REFERRAL_URL}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="flex-shrink-0 hover:opacity-80 transition-opacity"
+                >
                   <img
                     src={vantageLogo}
                     alt="Vantage"
                     className="h-28 w-auto"
                   />
-                </div>
+                </a>
               </div>
             ))}
           </div>
