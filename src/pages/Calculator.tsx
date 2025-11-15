@@ -470,17 +470,13 @@ const Calculator = () => {
             </CardHeader>
             <CardContent className="space-y-6">
               {/* Working Capital */}
-              <div className="p-4 rounded-lg bg-muted/50">
+              <div className="p-4 rounded-lg bg-primary/5 border border-primary/20">
                 <p className="text-sm text-muted-foreground mb-1">Working Capital Requirement</p>
-                <p className="text-3xl font-bold text-foreground">{formatCurrency(results.workingCapitalRequirement)}</p>
+                <p className="text-3xl font-bold text-primary">{formatCurrency(results.workingCapitalRequirement)}</p>
               </div>
 
               {/* Phase Details */}
               <div className="space-y-4">
-                <div className="p-4 rounded-lg bg-primary/5 border border-primary/20">
-                  <p className="text-sm text-muted-foreground mb-1">Total Hedge Amount Required</p>
-                  <p className="text-2xl font-bold text-primary">{formatCurrency(results.totalHedgeAmountRequired)}</p>
-                </div>
 
                 <div className="space-y-3">
                   <div className="flex justify-between items-center p-3 rounded bg-muted/30">
