@@ -145,7 +145,7 @@ const Calculator = () => {
     // Totals
     const totalHedgeAmountRequired = phase1HedgeAmount + (inputs.challengeType === "2 Phase" ? phase2HedgeAmount : 0);
     const totalAnticipatedHedgeExposure = L1 + (inputs.challengeType === "2 Phase" ? L2 : 0);
-    const projectedTotalCost = totalAnticipatedHedgeExposure + K;
+    const projectedTotalCost = L1 + (inputs.challengeType === "2 Phase" ? L2 : 0) + F;
 
     // Working capital
     const H1_capital = F * (1 + inputs.execBufferPct);
