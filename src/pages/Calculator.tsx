@@ -206,6 +206,8 @@ const Calculator = () => {
 
   const formatCurrency = (value: number) => `$${value.toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ",")}`;
   const formatPercent = (value: number) => `${(value * 100).toFixed(2)}%`;
+  const formatInputCurrency = (value: number) => `$${value.toLocaleString('en-US')}`;
+  const parseInputCurrency = (value: string) => parseFloat(value.replace(/[$,]/g, '')) || 0;
 
   return (
     <div className="min-h-screen bg-gradient-to-b from-[#0A0A0A] to-[#000000] py-12 px-4">
@@ -279,9 +281,9 @@ const Calculator = () => {
                   </Label>
                   <Input
                     id="challengeSize"
-                    type="number"
-                    value={inputs.challengeSize}
-                    onChange={(e) => setInputs({ ...inputs, challengeSize: parseFloat(e.target.value) })}
+                    type="text"
+                    value={formatInputCurrency(inputs.challengeSize)}
+                    onChange={(e) => setInputs({ ...inputs, challengeSize: parseInputCurrency(e.target.value) })}
                     className="bg-blue-950/20 border-blue-500/50"
                   />
                 </div>
@@ -290,9 +292,9 @@ const Calculator = () => {
                   <Label htmlFor="challengeFee">Challenge Fee</Label>
                   <Input
                     id="challengeFee"
-                    type="number"
-                    value={inputs.challengeFee}
-                    onChange={(e) => setInputs({ ...inputs, challengeFee: parseFloat(e.target.value) })}
+                    type="text"
+                    value={formatInputCurrency(inputs.challengeFee)}
+                    onChange={(e) => setInputs({ ...inputs, challengeFee: parseInputCurrency(e.target.value) })}
                     className="bg-blue-950/20 border-blue-500/50"
                   />
                 </div>
