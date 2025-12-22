@@ -7,11 +7,8 @@ import cert5percenters from "@/assets/cert-5percenters.png";
 import certFtmo from "@/assets/cert-ftmo.png";
 import certTopstep from "@/assets/cert-topstep.png";
 import certAtf from "@/assets/cert-atf.png";
-import acySecuritiesLogo from "@/assets/acy-securities-logo.png";
 import vantageLogo from "@/assets/vantage-logo-new.png";
 
-const BLACKBULL_REFERRAL_URL =
-  "https://blackbull.com/en/live-account/?cmp=5p0z2d3q&refid=6478";
 const VANTAGE_REFERRAL_URL =
   "https://www.vantagemarkets.com/open-live-account/?affid=NzM2NTE1NQ==";
 
@@ -57,11 +54,11 @@ export default function Home() {
         </div>
       </section>
 
-      {/* Brokers We Use Section */}
+      {/* Our Partners Section */}
       <section className="py-12 bg-background">
         <div className="text-center px-4 mb-8">
           <h2 className="text-3xl font-bold mb-2">
-            Broker We <span className="text-primary">Use</span>
+            Our <span className="text-primary">Partners</span>
           </h2>
           <p className="text-sm text-muted-foreground mb-4">
             Stop donating challenge fees — open your hedge account today and turn every failed prop into a refund. Your broker pays you back when the prop loses
@@ -75,18 +72,6 @@ export default function Home() {
             {[...Array(8)].map((_, i) => (
               <div key={i} className="flex items-center gap-8 flex-shrink-0">
                 <a
-                  href={BLACKBULL_REFERRAL_URL}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="flex-shrink-0 hover:opacity-80 transition-opacity"
-                >
-                  <img
-                    src={acySecuritiesLogo}
-                    alt="ACY Securities"
-                    className="h-[132px] w-auto"
-                  />
-                </a>
-                <a
                   href={VANTAGE_REFERRAL_URL}
                   target="_blank"
                   rel="noreferrer"
@@ -95,7 +80,7 @@ export default function Home() {
                   <img
                     src={vantageLogo}
                     alt="Vantage"
-                    className="h-[132px] w-auto"
+                    className="h-[264px] w-auto"
                   />
                 </a>
               </div>
