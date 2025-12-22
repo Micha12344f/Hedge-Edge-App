@@ -1,20 +1,19 @@
 import { AlertCircle, ArrowUpRight } from "lucide-react";
 
-import blackbullBanner from "@/assets/blackbull-banner.png";
+import vantageLogo from "@/assets/vantage-logo-new.png";
 
-const BLACKBULL_REFERRAL_URL =
-  "https://blackbull.com/en/live-account/?cmp=5p0z2d3q&refid=6478";
+const VANTAGE_REFERRAL_URL =
+  "https://www.vantagemarkets.com/open-live-account/?affid=NzM2NTE1NQ==";
 
 export default function Brokers() {
   return (
     <div className="min-h-screen bg-gradient-to-b from-background to-muted py-16 px-4">
       <div className="container mx-auto">
         <h1 className="text-5xl font-bold mb-4 text-center">
-          Our Preferred <span className="text-primary">Broker</span>
+          Our <span className="text-primary">Partner Broker</span>
         </h1>
         <p className="text-foreground/70 text-xl text-center mb-12 max-w-3xl mx-auto">
-          We now focus exclusively on BlackBull Markets for their blend of deep liquidity, tight spreads,
-          and responsive support tailored to prop traders.
+          Through our Introducing Broker partnership with Vantage, we bring our clients exclusive offers, competitive spreads, and premium support.
         </p>
 
         <div className="bg-muted border border-secondary/30 rounded-xl p-6 mb-12">
@@ -35,47 +34,46 @@ export default function Brokers() {
           <div className="grid lg:grid-cols-2 gap-10 items-center">
             <div className="text-left space-y-6">
               <div>
-                <p className="text-sm uppercase tracking-[0.3em] text-primary/70">Preferred Partner</p>
-                <h2 className="text-4xl font-bold text-white mt-2">BlackBull Markets</h2>
+                <p className="text-sm uppercase tracking-[0.3em] text-primary/70">Introducing Broker Partner</p>
+                <h2 className="text-4xl font-bold text-foreground mt-2">Vantage</h2>
               </div>
               <p className="text-foreground/80 text-lg leading-relaxed">
-                Access institutional-grade liquidity, ultra-fast execution, and tight spreads with our go-to
-                brokerage partner for challenge hedging and long-term trading.
+                As an official Introducing Broker for Vantage, we provide our clients with exclusive benefits including competitive spreads, dedicated support, and special offers tailored for prop traders.
               </p>
               <ul className="space-y-3 text-foreground/80">
                 <li className="flex items-center gap-3">
                   <span className="inline-flex h-2 w-2 rounded-full bg-primary" aria-hidden="true" />
-                  <span>Deep ECN liquidity with Equinix NY4 &amp; LD4 infrastructure</span>
+                  <span>Exclusive offers and benefits for HedgeEdge members</span>
                 </li>
                 <li className="flex items-center gap-3">
                   <span className="inline-flex h-2 w-2 rounded-full bg-primary" aria-hidden="true" />
-                  <span>Multi-platform support (MT4, MT5, TradingView) with raw or standard accounts</span>
+                  <span>Multi-platform support (MT4, MT5, ProTrader) with raw or standard accounts</span>
                 </li>
                 <li className="flex items-center gap-3">
                   <span className="inline-flex h-2 w-2 rounded-full bg-primary" aria-hidden="true" />
-                  <span>Custom rebate structure for HedgeEdge members to offset challenge fees</span>
+                  <span>Dedicated account management and priority support</span>
                 </li>
               </ul>
               <a
-                href={BLACKBULL_REFERRAL_URL}
+                href={VANTAGE_REFERRAL_URL}
                 target="_blank"
                 rel="noreferrer"
                 className="inline-flex items-center justify-center gap-2 rounded-full bg-primary px-6 py-3 text-primary-foreground text-lg font-semibold shadow-lg shadow-primary/25 transition-transform hover:scale-[1.02]"
               >
-                Start live trading
+                Open Your Account
                 <ArrowUpRight className="w-5 h-5" />
               </a>
             </div>
             <a
-              href={BLACKBULL_REFERRAL_URL}
+              href={VANTAGE_REFERRAL_URL}
               target="_blank"
               rel="noreferrer"
-              className="block overflow-hidden rounded-2xl border border-primary/30 bg-background"
+              className="block overflow-hidden rounded-2xl border border-primary/30 bg-background p-8 flex items-center justify-center"
             >
               <img
-                src={blackbullBanner}
-                alt="BlackBull Markets banner"
-                className="w-full h-auto object-cover"
+                src={vantageLogo}
+                alt="Vantage logo"
+                className="w-full max-w-md h-auto object-contain"
               />
             </a>
           </div>
