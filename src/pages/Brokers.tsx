@@ -1,6 +1,6 @@
 import { AlertCircle, ArrowUpRight } from "lucide-react";
 
-import vantageLogo from "@/assets/vantage-logo-new.png";
+import vantageLogo from "@/assets/vantage-ferrari.png";
 
 const VANTAGE_REFERRAL_URL =
   "https://www.vantagemarkets.com/open-live-account/?affid=NzM2NTE1NQ==";
