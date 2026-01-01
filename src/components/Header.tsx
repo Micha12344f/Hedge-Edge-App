@@ -41,6 +41,8 @@ export const Header = () => {
                     ? "text-secondary font-semibold"
                     : link.href === "/consult"
                     ? "text-[hsl(200,100%,60%)] font-semibold"
+                    : link.href === "/calculator"
+                    ? "text-[#39FF14] font-semibold"
                     : isActive(link.href)
                     ? "text-primary font-semibold"
                     : "text-foreground hover:text-primary"
@@ -73,6 +75,8 @@ export const Header = () => {
                     ? "text-secondary font-semibold"
                     : link.href === "/consult"
                     ? "text-[hsl(200,100%,60%)] font-semibold"
+                    : link.href === "/calculator"
+                    ? "text-[#39FF14] font-semibold"
                     : isActive(link.href)
                     ? "text-primary font-semibold"
                     : "text-foreground hover:text-primary"
