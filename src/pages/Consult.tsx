@@ -30,7 +30,7 @@ export default function Consult() {
 
         <div className="bg-card border rounded-xl p-8">
           <div className="zcal-inline-widget">
-            <a href="https://zcal.co/i/DmkwmVRV">30 Minute Meeting - Schedule a meeting</a>
+            <a href="https://zcal.co/hedgedge">Schedule a meeting</a>
           </div>
         </div>
 
