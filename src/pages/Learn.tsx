@@ -1,6 +1,6 @@
 import { Button } from "@/components/ui/button";
 
-const GOOGLE_FORM_URL = "https://docs.google.com/forms/d/e/1FAIpQLSd3BhPc8itMtva8h-GJAOB6sWNuwZhqzlEYc5apiKmbUlw7Tg/viewform?usp=header";
+const GOOGLE_FORM_URL = "https://wbtC8k.short.gy/LiStNq";
 
 export default function Learn() {
   return (
