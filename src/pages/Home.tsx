@@ -54,11 +54,11 @@ export default function Home() {
         </div>
       </section>
 
-      {/* Our Partners Section */}
+      {/* Brokers We Use Section */}
       <section className="py-12 bg-background">
         <div className="text-center px-4 mb-8">
           <h2 className="text-3xl font-bold mb-2">
-            Our <span className="text-primary">Partners</span>
+            Brokers We <span className="text-primary">Use</span>
           </h2>
           <p className="text-sm text-muted-foreground mb-4">
             Stop donating challenge fees — open your hedge account today and turn every failed prop into a refund. Your broker pays you back when the prop loses
