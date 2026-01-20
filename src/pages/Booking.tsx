@@ -24,18 +24,18 @@ export default function Booking() {
     <div className="min-h-screen bg-background py-16 px-4">
       <div className="container max-w-4xl mx-auto space-y-8">
         <div className="text-center space-y-4">
-          <h1 className="text-4xl font-bold text-primary">
+          <h1 className="text-3xl md:text-4xl font-bold text-primary">
             {tier === "automation" ? "Book Your Automation Setup Call" : "Book Your Strategy Session"}
           </h1>
-          <p className="text-lg text-muted-foreground max-w-2xl mx-auto">
+          <p className="text-base md:text-lg text-muted-foreground max-w-2xl mx-auto">
             {tier === "automation" 
               ? "Schedule your consultation to get started with full automation setup."
               : "Select a convenient time for your 60-minute strategy accelerator session."}
           </p>
         </div>
 
-        <div className="bg-card border rounded-xl p-8">
-          <div className="zcal-inline-widget">
+        <div className="bg-card border rounded-xl p-4 md:p-8 overflow-hidden">
+          <div className="zcal-inline-widget w-full">
             <a href="https://zcal.co/hedgedge">Schedule a meeting</a>
           </div>
         </div>

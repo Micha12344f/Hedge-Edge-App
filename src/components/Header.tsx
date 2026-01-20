@@ -9,10 +9,9 @@ export const Header = () => {
 
   const navLinks = [
     { href: "/", label: "Home" },
-    { href: "/learn", label: "Free Guide" },
-    { href: "/consult", label: "Consult" },
-    { href: "/automation", label: "Automation" },
-    { href: "/calculator", label: "Calculator" },
+    { href: "/overview", label: "Overview" },
+    { href: "/analytics", label: "Analytics" },
+    { href: "/hedge-calculator", label: "Hedge Calculator" },
     { href: "/brokers", label: "Brokers" },
     { href: "/faq", label: "FAQ" },
   ];
@@ -37,11 +36,11 @@ export const Header = () => {
                 key={link.href}
                 to={link.href}
                 className={`transition-colors ${
-                  link.href === "/automation"
+                  link.href === "/analytics"
                     ? "text-secondary font-semibold"
-                    : link.href === "/consult"
+                    : link.href === "/overview"
                     ? "text-[hsl(200,100%,60%)] font-semibold"
-                    : link.href === "/calculator"
+                    : link.href === "/hedge-calculator"
                     ? "text-[#39FF14] font-semibold"
                     : isActive(link.href)
                     ? "text-primary font-semibold"
@@ -71,11 +70,11 @@ export const Header = () => {
                 to={link.href}
                 onClick={() => setMobileMenuOpen(false)}
                 className={`transition-colors ${
-                  link.href === "/automation"
+                  link.href === "/analytics"
                     ? "text-secondary font-semibold"
-                    : link.href === "/consult"
+                    : link.href === "/overview"
                     ? "text-[hsl(200,100%,60%)] font-semibold"
-                    : link.href === "/calculator"
+                    : link.href === "/hedge-calculator"
                     ? "text-[#39FF14] font-semibold"
                     : isActive(link.href)
                     ? "text-primary font-semibold"

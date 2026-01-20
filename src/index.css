@@ -91,4 +91,22 @@ All colors MUST be HSL.
   .animate-marquee-rtl {
     animation: marquee-rtl 30s linear infinite;
   }
+
+  /* Zcal embed mobile responsiveness */
+  .zcal-inline-widget {
+    width: 100% !important;
+    max-width: 100% !important;
+  }
+
+  .zcal-inline-widget iframe {
+    width: 100% !important;
+    max-width: 100% !important;
+    min-height: 600px;
+  }
+
+  @media (max-width: 768px) {
+    .zcal-inline-widget iframe {
+      min-height: 800px;
+    }
+  }
 }

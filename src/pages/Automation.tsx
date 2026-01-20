@@ -20,17 +20,17 @@ export default function Automation() {
     <div className="min-h-screen bg-background py-16 px-4">
       <div className="container max-w-4xl mx-auto space-y-8">
         <div className="text-center space-y-4">
-          <h1 className="text-4xl font-bold text-primary">
+          <h1 className="text-4xl md:text-4xl text-3xl font-bold text-primary">
             Book Your Automation Setup Call
           </h1>
-          <p className="text-lg text-muted-foreground max-w-2xl mx-auto">
+          <p className="text-base md:text-lg text-muted-foreground max-w-2xl mx-auto">
             Schedule your consultation to get started with full automation setup.
           </p>
         </div>
 
-        <div className="bg-card border rounded-xl p-8">
-          <div className="zcal-inline-widget">
-            <a href="https://zcal.co/i/DmkwmVRV">30 Minute Meeting - Schedule a meeting</a>
+        <div className="bg-card border rounded-xl p-4 md:p-8 overflow-hidden">
+          <div className="zcal-inline-widget w-full">
+            <a href="https://zcal.co/hedgedge">Schedule a meeting</a>
           </div>
         </div>
 
