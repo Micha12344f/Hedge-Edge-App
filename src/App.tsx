@@ -1,41 +1,55 @@
 import { TooltipProvider } from "@/components/ui/tooltip";
-import { BrowserRouter, Routes, Route } from "react-router-dom";
-import { Header } from "@/components/Header";
-import { Footer } from "@/components/Footer";
+import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { ScrollToTop } from "@/components/ScrollToTop";
-import Home from "./pages/Home";
-import Overview from "./pages/Overview";
-import Analytics from "./pages/Analytics";
-import HedgeCalculator from "./pages/HedgeCalculator";
-import Brokers from "./pages/Brokers";
-import FAQ from "./pages/FAQ";
-import Legal from "./pages/Legal";
-import Booking from "./pages/Booking";
-import NotFound from "./pages/NotFound";
+import { AuthProvider } from "@/contexts/AuthContext";
+import { Toaster } from "@/components/ui/toaster";
+import { DashboardLayout } from "@/components/dashboard/DashboardLayout";
+
+// Auth page
+import Auth from "./pages/Auth";
+
+// Dashboard pages
+import DashboardOverview from "./pages/app/DashboardOverview";
+import Accounts from "./pages/app/Accounts";
+import DashboardAnalytics from "./pages/app/DashboardAnalytics";
+import TradeCopier from "./pages/app/TradeCopier";
+import Journal from "./pages/app/Journal";
+import DashboardCalculator from "./pages/app/DashboardCalculator";
+import Settings from "./pages/app/Settings";
+import Help from "./pages/app/Help";
 
 const App = () => (
-  <TooltipProvider>
-    <BrowserRouter>
-      <ScrollToTop />
-      <div className="flex flex-col min-h-screen">
-        <Header />
-        <main className="flex-1">
-          <Routes>
-            <Route path="/" element={<Home />} />
-            <Route path="/overview" element={<Overview />} />
-            <Route path="/analytics" element={<Analytics />} />
-            <Route path="/hedge-calculator" element={<HedgeCalculator />} />
-            <Route path="/booking" element={<Booking />} />
-            <Route path="/brokers" element={<Brokers />} />
-            <Route path="/faq" element={<FAQ />} />
-            <Route path="/legal/:type" element={<Legal />} />
-            <Route path="*" element={<NotFound />} />
-          </Routes>
-        </main>
-        <Footer />
-      </div>
-    </BrowserRouter>
-  </TooltipProvider>
+  <AuthProvider>
+    <TooltipProvider>
+      <BrowserRouter>
+        <ScrollToTop />
+        <Toaster />
+        <Routes>
+          {/* Redirect root to dashboard */}
+          <Route path="/" element={<Navigate to="/app/overview" replace />} />
+          
+          {/* Auth */}
+          <Route path="/auth" element={<Auth />} />
+          
+          {/* Dashboard routes */}
+          <Route path="/app" element={<DashboardLayout />}>
+            <Route index element={<Navigate to="/app/overview" replace />} />
+            <Route path="overview" element={<DashboardOverview />} />
+            <Route path="accounts" element={<Accounts />} />
+            <Route path="analytics" element={<DashboardAnalytics />} />
+            <Route path="copier" element={<TradeCopier />} />
+            <Route path="journal" element={<Journal />} />
+            <Route path="calculator" element={<DashboardCalculator />} />
+            <Route path="settings" element={<Settings />} />
+            <Route path="help" element={<Help />} />
+          </Route>
+
+          {/* Catch all - redirect to dashboard */}
+          <Route path="*" element={<Navigate to="/app/overview" replace />} />
+        </Routes>
+      </BrowserRouter>
+    </TooltipProvider>
+  </AuthProvider>
 );
 
 export default App;
