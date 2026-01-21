@@ -14,7 +14,102 @@ export type Database = {
   }
   public: {
     Tables: {
-      [_ in never]: never
+      profiles: {
+        Row: {
+          avatar_url: string | null
+          created_at: string
+          full_name: string | null
+          id: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          avatar_url?: string | null
+          created_at?: string
+          full_name?: string | null
+          id?: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          avatar_url?: string | null
+          created_at?: string
+          full_name?: string | null
+          id?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
+      trading_accounts: {
+        Row: {
+          account_name: string
+          account_size: number
+          created_at: string
+          current_balance: number
+          id: string
+          is_active: boolean | null
+          last_sync_at: string | null
+          max_daily_loss: number | null
+          max_loss: number | null
+          min_trading_days: number | null
+          phase: Database["public"]["Enums"]["account_phase"]
+          platform: string | null
+          pnl: number | null
+          pnl_percent: number | null
+          profit_target: number | null
+          prop_firm: string | null
+          server: string | null
+          trading_days_completed: number | null
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          account_name: string
+          account_size?: number
+          created_at?: string
+          current_balance?: number
+          id?: string
+          is_active?: boolean | null
+          last_sync_at?: string | null
+          max_daily_loss?: number | null
+          max_loss?: number | null
+          min_trading_days?: number | null
+          phase?: Database["public"]["Enums"]["account_phase"]
+          platform?: string | null
+          pnl?: number | null
+          pnl_percent?: number | null
+          profit_target?: number | null
+          prop_firm?: string | null
+          server?: string | null
+          trading_days_completed?: number | null
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          account_name?: string
+          account_size?: number
+          created_at?: string
+          current_balance?: number
+          id?: string
+          is_active?: boolean | null
+          last_sync_at?: string | null
+          max_daily_loss?: number | null
+          max_loss?: number | null
+          min_trading_days?: number | null
+          phase?: Database["public"]["Enums"]["account_phase"]
+          platform?: string | null
+          pnl?: number | null
+          pnl_percent?: number | null
+          profit_target?: number | null
+          prop_firm?: string | null
+          server?: string | null
+          trading_days_completed?: number | null
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never
@@ -23,7 +118,7 @@ export type Database = {
       [_ in never]: never
     }
     Enums: {
-      [_ in never]: never
+      account_phase: "evaluation" | "funded" | "live"
     }
     CompositeTypes: {
       [_ in never]: never
@@ -150,6 +245,8 @@ export type CompositeTypes<
 
 export const Constants = {
   public: {
-    Enums: {},
+    Enums: {
+      account_phase: ["evaluation", "funded", "live"],
+    },
   },
 } as const
