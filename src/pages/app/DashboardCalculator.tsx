@@ -1,8 +1,7 @@
 import { useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Button } from '@/components/ui/button';
+import { NumberInput } from '@/components/ui/number-input';
 import { Calculator, Target, AlertTriangle, DollarSign } from 'lucide-react';
 
 const DashboardCalculator = () => {
@@ -40,43 +39,46 @@ const DashboardCalculator = () => {
           <CardContent className="space-y-4">
             <div className="space-y-2">
               <Label htmlFor="account_size">Account Size ($)</Label>
-              <Input
+              <NumberInput
                 id="account_size"
-                type="number"
                 value={accountSize}
-                onChange={(e) => setAccountSize(Number(e.target.value))}
+                onChange={setAccountSize}
+                min={0}
+                step={1000}
               />
             </div>
 
             <div className="space-y-2">
               <Label htmlFor="risk_percent">Risk Per Trade (%)</Label>
-              <Input
+              <NumberInput
                 id="risk_percent"
-                type="number"
-                step="0.1"
                 value={riskPercent}
-                onChange={(e) => setRiskPercent(Number(e.target.value))}
+                onChange={setRiskPercent}
+                min={0}
+                max={100}
+                step={0.1}
               />
             </div>
 
             <div className="space-y-2">
               <Label htmlFor="stop_loss">Stop Loss (Pips)</Label>
-              <Input
+              <NumberInput
                 id="stop_loss"
-                type="number"
                 value={stopLossPips}
-                onChange={(e) => setStopLossPips(Number(e.target.value))}
+                onChange={setStopLossPips}
+                min={0}
+                step={1}
               />
             </div>
 
             <div className="space-y-2">
               <Label htmlFor="pip_value">Pip Value ($)</Label>
-              <Input
+              <NumberInput
                 id="pip_value"
-                type="number"
-                step="0.01"
                 value={pipValue}
-                onChange={(e) => setPipValue(Number(e.target.value))}
+                onChange={setPipValue}
+                min={0}
+                step={0.01}
               />
             </div>
           </CardContent>

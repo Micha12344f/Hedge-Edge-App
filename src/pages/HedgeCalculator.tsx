@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Search, Play, Bell, RefreshCw, Settings, Info, Bookmark, MoreVertical, Plus } from "lucide-react";
+import { Search, Play, Bell, RefreshCw, Settings, Info, Bookmark, MoreVertical, Plus, Minus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -164,14 +164,33 @@ export default function HedgeCalculator() {
                 className="pl-9 w-[150px] bg-card border-primary/20"
               />
             </div>
-            <div className="flex items-center gap-1 bg-card border border-primary/20 rounded-md px-3 py-2">
-              <span className="text-sm text-muted-foreground">$</span>
-              <Input
-                type="number"
-                value={betSize}
-                onChange={(e) => setBetSize(e.target.value)}
-                className="w-12 border-0 bg-transparent p-0 text-center focus-visible:ring-0"
-              />
+            <div className="flex items-center bg-card border border-primary/20 rounded-md overflow-hidden">
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-9 w-9 rounded-none border-r border-primary/20"
+                onClick={() => setBetSize(String(Math.max(0, Number(betSize) - 10)))}
+              >
+                <Minus className="h-3 w-3" />
+              </Button>
+              <div className="flex items-center px-2">
+                <span className="text-sm text-muted-foreground">$</span>
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  value={betSize}
+                  onChange={(e) => setBetSize(e.target.value.replace(/[^0-9]/g, ''))}
+                  className="w-12 bg-transparent p-1 text-center text-sm focus:outline-none [appearance:textfield]"
+                />
+              </div>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-9 w-9 rounded-none border-l border-primary/20"
+                onClick={() => setBetSize(String(Number(betSize) + 10))}
+              >
+                <Plus className="h-3 w-3" />
+              </Button>
             </div>
             <Button variant="outline" size="icon" className="border-primary/20">
               <Play className="w-4 h-4" />

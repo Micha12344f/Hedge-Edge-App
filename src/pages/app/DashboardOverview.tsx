@@ -37,6 +37,7 @@ const DashboardOverview = () => {
 
   const evaluationCount = accounts.filter(a => a.phase === 'evaluation').length;
   const fundedCount = accounts.filter(a => a.phase === 'funded').length;
+  const hedgeCount = accounts.filter(a => a.phase === 'live').length;
 
   const formatCurrency = (value: number) => {
     return new Intl.NumberFormat('en-US', {
@@ -131,7 +132,7 @@ const DashboardOverview = () => {
               <div className="flex items-baseline gap-2">
                 <p className="text-2xl font-bold text-foreground">{accounts.length}</p>
                 <p className="text-sm text-muted-foreground">
-                  ({evaluationCount} eval, {fundedCount} funded)
+                  ({evaluationCount} eval, {fundedCount} funded, {hedgeCount} hedge)
                 </p>
               </div>
             )}
@@ -148,7 +149,7 @@ const DashboardOverview = () => {
                 <TabsTrigger value="all">All Accounts</TabsTrigger>
                 <TabsTrigger value="evaluation">Evaluation</TabsTrigger>
                 <TabsTrigger value="funded">Funded</TabsTrigger>
-                <TabsTrigger value="live">Live</TabsTrigger>
+                <TabsTrigger value="live">Hedge</TabsTrigger>
               </TabsList>
               <Button variant="outline" size="sm" className="hidden sm:flex">
                 <RefreshCw className="mr-2 h-4 w-4" />
