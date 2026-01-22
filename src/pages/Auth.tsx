@@ -9,6 +9,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useToast } from '@/hooks/use-toast';
 import { Loader2, TrendingUp, Sparkles } from 'lucide-react';
 import { z } from 'zod';
+import { AnimatedBackground } from '@/components/ui/animated-background';
 
 const emailSchema = z.string().email('Please enter a valid email address');
 const passwordSchema = z.string().min(6, 'Password must be at least 6 characters');
@@ -94,15 +95,8 @@ const Auth = () => {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-background via-background to-muted/20 flex items-center justify-center p-4 relative overflow-hidden">
-      {/* Background decorative elements */}
-      <div className="absolute inset-0 overflow-hidden pointer-events-none">
-        <div className="absolute top-1/4 -left-20 w-72 h-72 bg-primary/10 rounded-full blur-blob animate-float" />
-        <div className="absolute bottom-1/4 -right-20 w-96 h-96 bg-secondary/10 rounded-full blur-blob animate-float" style={{ animationDelay: '1s' }} />
-        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[600px] h-[600px] bg-primary/5 rounded-full blur-blob" />
-      </div>
-
-      <div className="w-full max-w-md relative z-10 animate-fade-in-up">
+    <AnimatedBackground className="flex items-center justify-center p-4">
+      <div className="w-full max-w-md animate-fade-in-up">
         {/* Logo */}
         <div className="flex items-center justify-center gap-2 mb-8">
           <div className="w-12 h-12 rounded-xl bg-primary flex items-center justify-center shadow-lg shadow-primary/30 animate-pulse-glow">
@@ -223,7 +217,7 @@ const Auth = () => {
           By continuing, you agree to our Terms of Service and Privacy Policy
         </p>
       </div>
-    </div>
+    </AnimatedBackground>
   );
 };
 
