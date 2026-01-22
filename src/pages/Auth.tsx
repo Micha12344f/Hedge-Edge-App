@@ -7,7 +7,7 @@ import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useToast } from '@/hooks/use-toast';
-import { Loader2, TrendingUp } from 'lucide-react';
+import { Loader2, TrendingUp, Sparkles } from 'lucide-react';
 import { z } from 'zod';
 
 const emailSchema = z.string().email('Please enter a valid email address');
@@ -94,34 +94,54 @@ const Auth = () => {
   };
 
   return (
-    <div className="min-h-screen bg-background flex items-center justify-center p-4">
-      <div className="w-full max-w-md">
+    <div className="min-h-screen bg-gradient-to-br from-background via-background to-muted/20 flex items-center justify-center p-4 relative overflow-hidden">
+      {/* Background decorative elements */}
+      <div className="absolute inset-0 overflow-hidden pointer-events-none">
+        <div className="absolute top-1/4 -left-20 w-72 h-72 bg-primary/10 rounded-full blur-blob animate-float" />
+        <div className="absolute bottom-1/4 -right-20 w-96 h-96 bg-secondary/10 rounded-full blur-blob animate-float" style={{ animationDelay: '1s' }} />
+        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[600px] h-[600px] bg-primary/5 rounded-full blur-blob" />
+      </div>
+
+      <div className="w-full max-w-md relative z-10 animate-fade-in-up">
         {/* Logo */}
         <div className="flex items-center justify-center gap-2 mb-8">
-          <div className="w-10 h-10 rounded-lg bg-primary flex items-center justify-center">
-            <TrendingUp className="w-6 h-6 text-primary-foreground" />
+          <div className="w-12 h-12 rounded-xl bg-primary flex items-center justify-center shadow-lg shadow-primary/30 animate-pulse-glow">
+            <TrendingUp className="w-7 h-7 text-primary-foreground" />
           </div>
-          <span className="text-2xl font-bold text-foreground">HedgeEdge</span>
+          <span className="text-3xl font-bold text-foreground">HedgeEdge</span>
         </div>
 
-        <Card className="border-border/50 bg-card/50 backdrop-blur">
-          <CardHeader className="text-center">
-            <CardTitle className="text-xl">Welcome back</CardTitle>
-            <CardDescription>
+        <Card className="border-border/30 bg-card/60 backdrop-blur-xl shadow-2xl shadow-primary/5">
+          <CardHeader className="text-center space-y-2">
+            <CardTitle className="text-2xl flex items-center justify-center gap-2">
+              Welcome back
+              <Sparkles className="w-5 h-5 text-secondary animate-pulse" />
+            </CardTitle>
+            <CardDescription className="text-base">
               Sign in to manage your trading accounts
             </CardDescription>
           </CardHeader>
           <CardContent>
             <Tabs defaultValue="signin" className="w-full">
-              <TabsList className="grid w-full grid-cols-2 mb-6">
-                <TabsTrigger value="signin">Sign In</TabsTrigger>
-                <TabsTrigger value="signup">Sign Up</TabsTrigger>
+              <TabsList className="grid w-full grid-cols-2 mb-6 bg-muted/50 backdrop-blur-sm">
+                <TabsTrigger 
+                  value="signin" 
+                  className="data-[state=active]:bg-primary/20 data-[state=active]:text-primary transition-all duration-300"
+                >
+                  Sign In
+                </TabsTrigger>
+                <TabsTrigger 
+                  value="signup"
+                  className="data-[state=active]:bg-primary/20 data-[state=active]:text-primary transition-all duration-300"
+                >
+                  Sign Up
+                </TabsTrigger>
               </TabsList>
 
-              <TabsContent value="signin">
+              <TabsContent value="signin" className="animate-fade-in-up">
                 <form onSubmit={handleSignIn} className="space-y-4">
                   <div className="space-y-2">
-                    <Label htmlFor="signin-email">Email</Label>
+                    <Label htmlFor="signin-email" className="text-foreground">Email</Label>
                     <Input
                       id="signin-email"
                       type="email"
@@ -129,10 +149,11 @@ const Auth = () => {
                       value={email}
                       onChange={(e) => setEmail(e.target.value)}
                       required
+                      className="bg-muted/30 border-border/50 focus:border-primary/50 focus:ring-primary/20 transition-all"
                     />
                   </div>
                   <div className="space-y-2">
-                    <Label htmlFor="signin-password">Password</Label>
+                    <Label htmlFor="signin-password" className="text-foreground">Password</Label>
                     <Input
                       id="signin-password"
                       type="password"
@@ -140,29 +161,31 @@ const Auth = () => {
                       value={password}
                       onChange={(e) => setPassword(e.target.value)}
                       required
+                      className="bg-muted/30 border-border/50 focus:border-primary/50 focus:ring-primary/20 transition-all"
                     />
                   </div>
-                  <Button type="submit" className="w-full" disabled={loading}>
+                  <Button type="submit" className="w-full h-11 text-base font-semibold" disabled={loading}>
                     {loading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
                     Sign In
                   </Button>
                 </form>
               </TabsContent>
 
-              <TabsContent value="signup">
+              <TabsContent value="signup" className="animate-fade-in-up">
                 <form onSubmit={handleSignUp} className="space-y-4">
                   <div className="space-y-2">
-                    <Label htmlFor="signup-name">Full Name</Label>
+                    <Label htmlFor="signup-name" className="text-foreground">Full Name</Label>
                     <Input
                       id="signup-name"
                       type="text"
                       placeholder="John Doe"
                       value={fullName}
                       onChange={(e) => setFullName(e.target.value)}
+                      className="bg-muted/30 border-border/50 focus:border-primary/50 focus:ring-primary/20 transition-all"
                     />
                   </div>
                   <div className="space-y-2">
-                    <Label htmlFor="signup-email">Email</Label>
+                    <Label htmlFor="signup-email" className="text-foreground">Email</Label>
                     <Input
                       id="signup-email"
                       type="email"
@@ -170,10 +193,11 @@ const Auth = () => {
                       value={email}
                       onChange={(e) => setEmail(e.target.value)}
                       required
+                      className="bg-muted/30 border-border/50 focus:border-primary/50 focus:ring-primary/20 transition-all"
                     />
                   </div>
                   <div className="space-y-2">
-                    <Label htmlFor="signup-password">Password</Label>
+                    <Label htmlFor="signup-password" className="text-foreground">Password</Label>
                     <Input
                       id="signup-password"
                       type="password"
@@ -181,9 +205,10 @@ const Auth = () => {
                       value={password}
                       onChange={(e) => setPassword(e.target.value)}
                       required
+                      className="bg-muted/30 border-border/50 focus:border-primary/50 focus:ring-primary/20 transition-all"
                     />
                   </div>
-                  <Button type="submit" className="w-full" disabled={loading}>
+                  <Button type="submit" className="w-full h-11 text-base font-semibold" disabled={loading}>
                     {loading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
                     Create Account
                   </Button>
@@ -192,6 +217,11 @@ const Auth = () => {
             </Tabs>
           </CardContent>
         </Card>
+
+        {/* Footer text */}
+        <p className="text-center text-sm text-muted-foreground mt-6">
+          By continuing, you agree to our Terms of Service and Privacy Policy
+        </p>
       </div>
     </div>
   );
