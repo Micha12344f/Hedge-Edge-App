@@ -1,6 +1,6 @@
-import { useState } from 'react';
 import { NavLink, useNavigate } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
+import { useSidebar } from '@/contexts/SidebarContext';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 import {
@@ -33,7 +33,7 @@ const bottomNavItems = [
 ];
 
 export const DashboardSidebar = () => {
-  const [collapsed, setCollapsed] = useState(true);
+  const { collapsed, toggleCollapsed } = useSidebar();
   const { signOut, user } = useAuth();
   const navigate = useNavigate();
 
@@ -60,7 +60,7 @@ export const DashboardSidebar = () => {
         <Button
           variant="ghost"
           size="icon"
-          onClick={() => setCollapsed(!collapsed)}
+          onClick={toggleCollapsed}
           className="h-8 w-8 transition-transform duration-300 hover:rotate-180"
         >
           {collapsed ? <ChevronRight className="h-4 w-4" /> : <ChevronLeft className="h-4 w-4" />}

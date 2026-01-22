@@ -4,6 +4,7 @@ import { HedgeNode } from './HedgeNode';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { useToast } from '@/hooks/use-toast';
+import { useSidebar } from '@/contexts/SidebarContext';
 import {
   Dialog,
   DialogContent,
@@ -130,6 +131,7 @@ export const DraggableHedgeMap = ({
   const hasAutoAligned = useRef(false);
   const autoAlignRef = useRef<(() => void) | null>(null);
   const { toast } = useToast();
+  const { collapsed, setCollapsed } = useSidebar();
   const [zoom, setZoom] = useState(1);
   const [pan, setPan] = useState({ x: 0, y: 0 });
   const [isPanning, setIsPanning] = useState(false);
@@ -756,7 +758,7 @@ export const DraggableHedgeMap = ({
             <ZoomIn className="h-4 w-4" />
           </Button>
           <div className="w-px h-5 bg-border mx-1" />
-          <Button variant="ghost" size="icon" onClick={fitToView} className="h-8 w-8" title="Fit to view">
+          <Button variant="ghost" size="icon" onClick={() => setCollapsed(true)} className="h-8 w-8" title="Collapse sidebar">
             <Maximize2 className="h-4 w-4" />
           </Button>
           <Button variant="ghost" size="icon" onClick={autoAlign} className="h-8 w-8" title="Auto-align nodes">
@@ -911,10 +913,20 @@ export const DraggableHedgeMap = ({
 
           {/* Nodes */}
           {accounts.length === 0 ? (
-            <div className="absolute -translate-x-1/2 -translate-y-1/2 text-center space-y-4">
-              <div className="w-20 h-20 rounded-full bg-muted/30 flex items-center justify-center mx-auto">
+            <div 
+              className="absolute text-center space-y-4"
+              style={{
+                left: '0',
+                top: '0',
+                transform: 'translate(-50%, -50%)',
+              }}
+            >
+              <button 
+                onClick={onAddAccount}
+                className="w-20 h-20 rounded-full bg-muted/30 flex items-center justify-center mx-auto transition-all hover:bg-muted/50 hover:scale-110 cursor-pointer"
+              >
                 <Plus className="w-10 h-10 text-muted-foreground" />
-              </div>
+              </button>
               <div>
                 <h3 className="text-lg font-medium text-foreground">No accounts yet</h3>
                 <p className="text-sm text-muted-foreground">Add your first account to get started</p>
