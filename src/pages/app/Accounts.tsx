@@ -1,65 +1,106 @@
 import { useState } from 'react';
 import { useTradingAccounts } from '@/hooks/useTradingAccounts';
-import { AccountCard } from '@/components/dashboard/AccountCard';
+import { DraggableHedgeMap, HedgeRelationship } from '@/components/dashboard/DraggableHedgeMap';
 import { AddAccountModal } from '@/components/dashboard/AddAccountModal';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Plus, Search } from 'lucide-react';
+import { useToast } from '@/hooks/use-toast';
+
+// Local storage key for relationships
+const RELATIONSHIPS_KEY = 'hedge_edge_relationships';
+
+const getStoredRelationships = (): HedgeRelationship[] => {
+  try {
+    const stored = localStorage.getItem(RELATIONSHIPS_KEY);
+    return stored ? JSON.parse(stored) : [];
+  } catch {
+    return [];
+  }
+};
+
+const saveRelationships = (relationships: HedgeRelationship[]) => {
+  localStorage.setItem(RELATIONSHIPS_KEY, JSON.stringify(relationships));
+};
 
 const Accounts = () => {
   const { accounts, loading, createAccount, deleteAccount } = useTradingAccounts();
   const [addModalOpen, setAddModalOpen] = useState(false);
-  const [searchQuery, setSearchQuery] = useState('');
+  const [relationships, setRelationships] = useState<HedgeRelationship[]>(getStoredRelationships);
+  const { toast } = useToast();
 
-  const filteredAccounts = accounts.filter((account) =>
-    account.account_name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    (account.prop_firm?.toLowerCase().includes(searchQuery.toLowerCase()))
-  );
+  const handleCreateRelationship = (sourceId: string, targetId: string, logic: HedgeRelationship['logic'] = 'mirror', offsetPercentage: number = 100) => {
+    // Check if relationship already exists
+    const exists = relationships.some(
+      r => (r.sourceId === sourceId && r.targetId === targetId) ||
+           (r.sourceId === targetId && r.targetId === sourceId)
+    );
+
+    if (exists) {
+      toast({
+        title: 'Relationship exists ⚠️',
+        description: 'These accounts are already linked.',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    const newRelationship: HedgeRelationship = {
+      id: crypto.randomUUID(),
+      sourceId,
+      targetId,
+      offsetPercentage,
+      logic,
+      isActive: true,
+    };
+
+    const updated = [...relationships, newRelationship];
+    setRelationships(updated);
+    saveRelationships(updated);
+  };
+
+  const handleUpdateRelationship = (id: string, updates: Partial<HedgeRelationship>) => {
+    const updated = relationships.map(r => 
+      r.id === id ? { ...r, ...updates } : r
+    );
+    setRelationships(updated);
+    saveRelationships(updated);
+  };
+
+  const handleDeleteRelationship = (id: string) => {
+    const updated = relationships.filter(r => r.id !== id);
+    setRelationships(updated);
+    saveRelationships(updated);
+  };
+
+  const handleDeleteAccount = async (id: string) => {
+    // Also remove any relationships involving this account
+    const updated = relationships.filter(r => r.sourceId !== id && r.targetId !== id);
+    setRelationships(updated);
+    saveRelationships(updated);
+    
+    await deleteAccount(id);
+  };
+
+  if (loading) {
+    return (
+      <div className="h-screen flex items-center justify-center">
+        <div className="text-center space-y-4">
+          <div className="w-12 h-12 border-4 border-primary border-t-transparent rounded-full animate-spin mx-auto" />
+          <p className="text-muted-foreground">Loading accounts...</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
-    <div className="p-6 space-y-6">
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-bold text-foreground">Accounts</h1>
-          <p className="text-muted-foreground">View and manage all your trading accounts</p>
-        </div>
-        <Button onClick={() => setAddModalOpen(true)}>
-          <Plus className="mr-2 h-4 w-4" />
-          Add Account
-        </Button>
-      </div>
-
-      <div className="flex items-center gap-4">
-        <div className="relative flex-1 max-w-sm">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-          <Input
-            placeholder="Search accounts..."
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            className="pl-10"
-          />
-        </div>
-      </div>
-
-      {loading ? (
-        <div className="text-center py-12 text-muted-foreground">Loading accounts...</div>
-      ) : filteredAccounts.length === 0 ? (
-        <div className="text-center py-12">
-          <p className="text-muted-foreground">
-            {searchQuery ? 'No accounts match your search' : 'No accounts yet. Add your first account!'}
-          </p>
-        </div>
-      ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-          {filteredAccounts.map((account) => (
-            <AccountCard
-              key={account.id}
-              account={account}
-              onDelete={deleteAccount}
-            />
-          ))}
-        </div>
-      )}
+    <div className="h-screen">
+      <DraggableHedgeMap
+        accounts={accounts}
+        relationships={relationships}
+        onAddAccount={() => setAddModalOpen(true)}
+        onDeleteAccount={handleDeleteAccount}
+        onCreateRelationship={handleCreateRelationship}
+        onDeleteRelationship={handleDeleteRelationship}
+        onUpdateRelationship={handleUpdateRelationship}
+      />
 
       <AddAccountModal
         open={addModalOpen}

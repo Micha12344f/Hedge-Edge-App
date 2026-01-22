@@ -20,7 +20,7 @@ import {
 
 const navItems = [
   { icon: LayoutDashboard, label: 'Overview', path: '/app/overview' },
-  { icon: Wallet, label: 'Accounts', path: '/app/accounts' },
+  { icon: Wallet, label: 'Hedge Map', path: '/app/accounts' },
   { icon: BarChart3, label: 'Analytics', path: '/app/analytics' },
   { icon: Copy, label: 'Trade Copier', path: '/app/copier' },
   { icon: BookOpen, label: 'Journal', path: '/app/journal' },
@@ -33,7 +33,7 @@ const bottomNavItems = [
 ];
 
 export const DashboardSidebar = () => {
-  const [collapsed, setCollapsed] = useState(false);
+  const [collapsed, setCollapsed] = useState(true);
   const { signOut, user } = useAuth();
   const navigate = useNavigate();
 
@@ -52,11 +52,9 @@ export const DashboardSidebar = () => {
       {/* Logo */}
       <div className="h-16 flex items-center justify-between px-4 border-b border-border/30">
         {!collapsed && (
-          <div className="flex items-center gap-2 animate-fade-in-up">
-            <div className="w-8 h-8 rounded-lg bg-primary flex items-center justify-center shadow-lg shadow-primary/30 animate-pulse-glow">
-              <TrendingUp className="w-5 h-5 text-primary-foreground" />
-            </div>
-            <span className="text-lg font-bold text-foreground">HedgeEdge</span>
+          <div className="flex items-center gap-1 animate-fade-in-up">
+            <TrendingUp className="w-6 h-6 text-primary" strokeWidth={3} />
+            <span className="text-lg font-bold text-primary">HedgeEdge</span>
           </div>
         )}
         <Button

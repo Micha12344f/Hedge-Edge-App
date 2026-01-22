@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import { Button } from '@/components/ui/button';
@@ -24,8 +24,13 @@ const Auth = () => {
   const [fullName, setFullName] = useState('');
 
   // Redirect if already logged in
+  useEffect(() => {
+    if (user) {
+      navigate('/app/overview');
+    }
+  }, [user, navigate]);
+
   if (user) {
-    navigate('/app/overview');
     return null;
   }
 
@@ -37,7 +42,7 @@ const Auth = () => {
     } catch (error) {
       if (error instanceof z.ZodError) {
         toast({
-          title: 'Validation Error',
+          title: 'Validation Error ⚠️',
           description: error.errors[0].message,
           variant: 'destructive',
         });
@@ -56,7 +61,7 @@ const Auth = () => {
 
     if (error) {
       toast({
-        title: 'Sign in failed',
+        title: 'Sign in failed ❌',
         description: error.message === 'Invalid login credentials' 
           ? 'Invalid email or password. Please try again.' 
           : error.message,
@@ -81,13 +86,13 @@ const Auth = () => {
         description = 'This email is already registered. Please sign in instead.';
       }
       toast({
-        title: 'Sign up failed',
+        title: 'Sign up failed ❌',
         description,
         variant: 'destructive',
       });
     } else {
       toast({
-        title: 'Account created!',
+        title: 'Account created! 🎉',
         description: 'You have been logged in successfully.',
       });
       navigate('/app/overview');
@@ -98,11 +103,9 @@ const Auth = () => {
     <AnimatedBackground className="flex items-center justify-center p-4">
       <div className="w-full max-w-md animate-fade-in-up">
         {/* Logo */}
-        <div className="flex items-center justify-center gap-2 mb-8">
-          <div className="w-12 h-12 rounded-xl bg-primary flex items-center justify-center shadow-lg shadow-primary/30 animate-pulse-glow">
-            <TrendingUp className="w-7 h-7 text-primary-foreground" />
-          </div>
-          <span className="text-3xl font-bold text-foreground">HedgeEdge</span>
+        <div className="flex items-center justify-center gap-1 mb-8">
+          <TrendingUp className="w-10 h-10 text-primary" strokeWidth={3} />
+          <span className="text-3xl font-bold text-primary">HedgeEdge</span>
         </div>
 
         <Card className="border-border/30 bg-card/60 backdrop-blur-xl shadow-2xl shadow-primary/5">

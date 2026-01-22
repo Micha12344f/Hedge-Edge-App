@@ -102,7 +102,7 @@ export const useTradingAccounts = () => {
 
       if (error) {
         toast({
-          title: 'Error creating account',
+          title: 'Error creating account ❌',
           description: error.message,
           variant: 'destructive',
         });
@@ -140,7 +140,7 @@ export const useTradingAccounts = () => {
     }
 
     toast({
-      title: 'Account created',
+      title: 'Account created 🎉',
       description: 'Your trading account has been added.',
     });
     
@@ -157,7 +157,7 @@ export const useTradingAccounts = () => {
 
       if (error) {
         toast({
-          title: 'Error updating account',
+          title: 'Error updating account ❌',
           description: error.message,
           variant: 'destructive',
         });
@@ -173,7 +173,7 @@ export const useTradingAccounts = () => {
     }
 
     toast({
-      title: 'Account updated',
+      title: 'Account updated ✅',
       description: 'Your trading account has been updated.',
     });
     
@@ -190,7 +190,7 @@ export const useTradingAccounts = () => {
 
       if (error) {
         toast({
-          title: 'Error deleting account',
+          title: 'Error deleting account ❌',
           description: error.message,
           variant: 'destructive',
         });
@@ -204,7 +204,7 @@ export const useTradingAccounts = () => {
     }
 
     toast({
-      title: 'Account deleted',
+      title: 'Account deleted 🗑️',
       description: 'Your trading account has been removed.',
     });
     

@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -6,14 +6,16 @@ import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Switch } from '@/components/ui/switch';
 import { NumberInput } from '@/components/ui/number-input';
-import { Loader2, CheckCircle2, TrendingUp, Briefcase, Shuffle } from 'lucide-react';
-import { CreateAccountData } from '@/hooks/useTradingAccounts';
+import { Loader2, TrendingUp } from 'lucide-react';
+import { CreateAccountData, TradingAccount } from '@/hooks/useTradingAccounts';
 import { cn } from '@/lib/utils';
 
 interface AddAccountModalProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onSubmit: (data: CreateAccountData) => Promise<{ error: Error | null }>;
+  defaultType?: 'hedge' | 'linked';
+  hedgeAccounts?: TradingAccount[];
 }
 
 const PROP_FIRMS = [
@@ -42,6 +44,15 @@ const PLATFORMS = ['MT4', 'MT5', 'cTrader', 'TradingView', 'Other'];
 
 const ACCOUNT_TYPES = [
   {
+    phase: 'live' as const,
+    icon: TrendingUp,
+    title: 'Hedge Account',
+    description: 'Personal account for hedging prop trades',
+    color: 'hover:border-blue-500/50 hover:bg-blue-500/5',
+    activeColor: 'border-blue-500/50 bg-blue-500/10',
+    iconColor: 'text-blue-400',
+  },
+  {
     phase: 'evaluation' as const,
     icon: TrendingUp,
     title: 'Evaluation',
@@ -52,28 +63,69 @@ const ACCOUNT_TYPES = [
   },
   {
     phase: 'funded' as const,
-    icon: CheckCircle2,
+    icon: TrendingUp,
     title: 'Funded',
     description: 'Passed challenge, now funded',
-    color: 'hover:border-primary/50 hover:bg-primary/5',
-    activeColor: 'border-primary/50 bg-primary/10',
-    iconColor: 'text-primary',
-  },
-  {
-    phase: 'live' as const,
-    icon: Shuffle,
-    title: 'Hedge Account',
-    description: 'Account for hedging trades',
-    color: 'hover:border-blue-500/50 hover:bg-blue-500/5',
-    activeColor: 'border-blue-500/50 bg-blue-500/10',
-    iconColor: 'text-blue-400',
+    color: 'hover:border-emerald-500/50 hover:bg-emerald-500/5',
+    activeColor: 'border-emerald-500/50 bg-emerald-500/10',
+    iconColor: 'text-emerald-500',
   },
 ];
 
-export const AddAccountModal = ({ open, onOpenChange, onSubmit }: AddAccountModalProps) => {
+const HEDGE_TYPE = {
+  phase: 'live' as const,
+  icon: TrendingUp,
+  title: 'Hedge Account',
+  description: 'Account for hedging trades',
+  color: 'hover:border-blue-500/50 hover:bg-blue-500/5',
+  activeColor: 'border-blue-500/50 bg-blue-500/10',
+  iconColor: 'text-blue-400',
+};
+
+export const AddAccountModal = ({ open, onOpenChange, onSubmit, defaultType, hedgeAccounts = [] }: AddAccountModalProps) => {
   const [step, setStep] = useState(1);
   const [loading, setLoading] = useState(false);
   const [showRules, setShowRules] = useState(false);
+  const [isHedgeMode, setIsHedgeMode] = useState(false);
+  
+  // Reset state when modal opens/closes or defaultType changes
+  useEffect(() => {
+    if (open) {
+      // Only skip to step 2 if defaultType is explicitly set
+      if (defaultType === 'hedge') {
+        setIsHedgeMode(true);
+        setStep(2);
+        setFormData(prev => ({ ...prev, phase: 'live' }));
+      } else if (defaultType === 'linked') {
+        setIsHedgeMode(false);
+        setStep(1); // Show type picker for linked (evaluation/funded)
+        setFormData(prev => ({ ...prev, phase: 'evaluation' }));
+      } else {
+        // No defaultType - show all options including hedge
+        setIsHedgeMode(false);
+        setStep(1);
+      }
+    } else {
+      // Reset when closing
+      setStep(1);
+      setShowRules(false);
+      setIsHedgeMode(false);
+      setFormData({
+        phase: 'evaluation',
+        account_name: '',
+        prop_firm: '',
+        account_size: 0,
+        platform: 'MT5',
+        server: '',
+        login: '',
+        password: '',
+        profit_target: 10,
+        max_loss: 10,
+        max_daily_loss: 5,
+        min_trading_days: 0,
+      });
+    }
+  }, [open, defaultType]);
   
   const [formData, setFormData] = useState({
     phase: 'evaluation' as 'evaluation' | 'funded' | 'live',
@@ -92,7 +144,17 @@ export const AddAccountModal = ({ open, onOpenChange, onSubmit }: AddAccountModa
 
   const handlePhaseSelect = (phase: 'evaluation' | 'funded' | 'live') => {
     setFormData({ ...formData, phase });
+    if (phase === 'live') {
+      setIsHedgeMode(true);
+    }
     setStep(2);
+  };
+
+  const getDialogTitle = () => {
+    if (step === 1) return 'Select Account Type';
+    if (formData.phase === 'live') return 'Add Hedge Account';
+    if (step === 3) return 'Account Credentials';
+    return formData.phase === 'evaluation' ? 'Add Evaluation Account' : 'Add Funded Account';
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -120,22 +182,6 @@ export const AddAccountModal = ({ open, onOpenChange, onSubmit }: AddAccountModa
     
     if (!error) {
       onOpenChange(false);
-      setStep(1);
-      setFormData({
-        phase: 'evaluation',
-        account_name: '',
-        prop_firm: '',
-        account_size: 0,
-        platform: 'MT5',
-        server: '',
-        login: '',
-        password: '',
-        profit_target: 10,
-        max_loss: 10,
-        max_daily_loss: 5,
-        min_trading_days: 0,
-      });
-      setShowRules(false);
     }
   };
 
@@ -144,7 +190,7 @@ export const AddAccountModal = ({ open, onOpenChange, onSubmit }: AddAccountModa
       <DialogContent className="sm:max-w-md border-border/30 bg-card/95 backdrop-blur-xl">
         <DialogHeader>
           <DialogTitle className="text-xl">
-            {step === 1 ? 'Select Account Type' : step === 3 ? 'Account Credentials' : 'Add Trading Account'}
+            {getDialogTitle()}
           </DialogTitle>
         </DialogHeader>
 
@@ -175,7 +221,7 @@ export const AddAccountModal = ({ open, onOpenChange, onSubmit }: AddAccountModa
               </button>
             ))}
           </div>
-        ) : formData.phase === 'live' ? (
+        ) : (isHedgeMode || formData.phase === 'live') ? (
           /* Hedge Account Form */
           <form onSubmit={handleSubmit} className="space-y-4 py-4 animate-fade-in-up">
             <div className="space-y-2">

@@ -83,8 +83,8 @@ export const AccountCard = ({ account, onDelete, onSync }: AccountCardProps) => 
           </div>
           <p className="text-sm text-muted-foreground">
             {isHedgeAccount 
-              ? `${account.platform} • ${account.server}`
-              : `${account.prop_firm || 'Personal'} • ${account.platform}`
+              ? `${account.platform} - ${account.server}`
+              : `${account.prop_firm || 'Personal'} - ${account.platform}`
             }
           </p>
         </div>
