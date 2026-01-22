@@ -6,8 +6,9 @@ import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Switch } from '@/components/ui/switch';
 import { NumberInput } from '@/components/ui/number-input';
-import { Loader2 } from 'lucide-react';
+import { Loader2, CheckCircle2, TrendingUp, Briefcase, Shuffle } from 'lucide-react';
 import { CreateAccountData } from '@/hooks/useTradingAccounts';
+import { cn } from '@/lib/utils';
 
 interface AddAccountModalProps {
   open: boolean;
@@ -38,6 +39,36 @@ const ACCOUNT_SIZES = [
 ];
 
 const PLATFORMS = ['MT4', 'MT5', 'cTrader', 'TradingView', 'Other'];
+
+const ACCOUNT_TYPES = [
+  {
+    phase: 'evaluation' as const,
+    icon: TrendingUp,
+    title: 'Evaluation',
+    description: 'Challenge or evaluation phase account',
+    color: 'hover:border-yellow-500/50 hover:bg-yellow-500/5',
+    activeColor: 'border-yellow-500/50 bg-yellow-500/10',
+    iconColor: 'text-yellow-500',
+  },
+  {
+    phase: 'funded' as const,
+    icon: CheckCircle2,
+    title: 'Funded',
+    description: 'Passed challenge, now funded',
+    color: 'hover:border-primary/50 hover:bg-primary/5',
+    activeColor: 'border-primary/50 bg-primary/10',
+    iconColor: 'text-primary',
+  },
+  {
+    phase: 'live' as const,
+    icon: Shuffle,
+    title: 'Hedge Account',
+    description: 'Account for hedging trades',
+    color: 'hover:border-blue-500/50 hover:bg-blue-500/5',
+    activeColor: 'border-blue-500/50 bg-blue-500/10',
+    iconColor: 'text-blue-400',
+  },
+];
 
 export const AddAccountModal = ({ open, onOpenChange, onSubmit }: AddAccountModalProps) => {
   const [step, setStep] = useState(1);
@@ -110,43 +141,43 @@ export const AddAccountModal = ({ open, onOpenChange, onSubmit }: AddAccountModa
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-md">
+      <DialogContent className="sm:max-w-md border-border/30 bg-card/95 backdrop-blur-xl">
         <DialogHeader>
-          <DialogTitle>
+          <DialogTitle className="text-xl">
             {step === 1 ? 'Select Account Type' : step === 3 ? 'Account Credentials' : 'Add Trading Account'}
           </DialogTitle>
         </DialogHeader>
 
         {step === 1 ? (
           <div className="space-y-3 py-4">
-            <button
-              onClick={() => handlePhaseSelect('evaluation')}
-              className="w-full p-4 rounded-lg border border-border hover:border-primary/50 hover:bg-primary/5 transition-all text-left animate-in fade-in slide-in-from-bottom-4 duration-300"
-              style={{ animationDelay: '0ms', animationFillMode: 'both' }}
-            >
-              <h3 className="font-medium text-foreground">Evaluation</h3>
-              <p className="text-sm text-muted-foreground">Challenge or evaluation phase account</p>
-            </button>
-            <button
-              onClick={() => handlePhaseSelect('funded')}
-              className="w-full p-4 rounded-lg border border-border hover:border-primary/50 hover:bg-primary/5 transition-all text-left animate-in fade-in slide-in-from-bottom-4 duration-300"
-              style={{ animationDelay: '100ms', animationFillMode: 'both' }}
-            >
-              <h3 className="font-medium text-foreground">Funded</h3>
-              <p className="text-sm text-muted-foreground">Passed challenge, now funded</p>
-            </button>
-            <button
-              onClick={() => handlePhaseSelect('live')}
-              className="w-full p-4 rounded-lg border border-border hover:border-primary/50 hover:bg-primary/5 transition-all text-left animate-in fade-in slide-in-from-bottom-4 duration-300"
-              style={{ animationDelay: '200ms', animationFillMode: 'both' }}
-            >
-              <h3 className="font-medium text-foreground">Hedge Account</h3>
-              <p className="text-sm text-muted-foreground">Account for hedging trades</p>
-            </button>
+            {ACCOUNT_TYPES.map((type, index) => (
+              <button
+                key={type.phase}
+                onClick={() => handlePhaseSelect(type.phase)}
+                className={cn(
+                  "w-full p-4 rounded-lg border border-border/50 transition-all text-left group animate-fade-in-up active:scale-[0.98]",
+                  type.color
+                )}
+                style={{ animationDelay: `${index * 75}ms` }}
+              >
+                <div className="flex items-center gap-3">
+                  <div className={cn(
+                    "w-10 h-10 rounded-lg bg-muted/50 flex items-center justify-center transition-all group-hover:scale-110",
+                    type.iconColor
+                  )}>
+                    <type.icon className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h3 className="font-medium text-foreground group-hover:text-primary transition-colors">{type.title}</h3>
+                    <p className="text-sm text-muted-foreground">{type.description}</p>
+                  </div>
+                </div>
+              </button>
+            ))}
           </div>
         ) : formData.phase === 'live' ? (
           /* Hedge Account Form */
-          <form onSubmit={handleSubmit} className="space-y-4 py-4">
+          <form onSubmit={handleSubmit} className="space-y-4 py-4 animate-fade-in-up">
             <div className="space-y-2">
               <Label htmlFor="account_name">Account Name</Label>
               <Input
@@ -155,6 +186,7 @@ export const AddAccountModal = ({ open, onOpenChange, onSubmit }: AddAccountModa
                 value={formData.account_name}
                 onChange={(e) => setFormData({ ...formData, account_name: e.target.value })}
                 required
+                className="bg-muted/30 border-border/50 focus:border-primary/50 transition-all"
               />
             </div>
 
@@ -164,12 +196,12 @@ export const AddAccountModal = ({ open, onOpenChange, onSubmit }: AddAccountModa
                 value={formData.platform}
                 onValueChange={(value) => setFormData({ ...formData, platform: value })}
               >
-                <SelectTrigger>
+                <SelectTrigger className="bg-muted/30 border-border/50">
                   <SelectValue />
                 </SelectTrigger>
-                <SelectContent>
+                <SelectContent className="bg-card/95 backdrop-blur-xl border-border/30">
                   {PLATFORMS.map((platform) => (
-                    <SelectItem key={platform} value={platform}>
+                    <SelectItem key={platform} value={platform} className="cursor-pointer">
                       {platform}
                     </SelectItem>
                   ))}
@@ -185,6 +217,7 @@ export const AddAccountModal = ({ open, onOpenChange, onSubmit }: AddAccountModa
                 value={formData.login}
                 onChange={(e) => setFormData({ ...formData, login: e.target.value })}
                 required
+                className="bg-muted/30 border-border/50 focus:border-primary/50 transition-all"
               />
             </div>
 
@@ -197,6 +230,7 @@ export const AddAccountModal = ({ open, onOpenChange, onSubmit }: AddAccountModa
                 value={formData.password}
                 onChange={(e) => setFormData({ ...formData, password: e.target.value })}
                 required
+                className="bg-muted/30 border-border/50 focus:border-primary/50 transition-all"
               />
             </div>
 
@@ -208,6 +242,7 @@ export const AddAccountModal = ({ open, onOpenChange, onSubmit }: AddAccountModa
                 value={formData.server}
                 onChange={(e) => setFormData({ ...formData, server: e.target.value })}
                 required
+                className="bg-muted/30 border-border/50 focus:border-primary/50 transition-all"
               />
             </div>
 
@@ -223,19 +258,19 @@ export const AddAccountModal = ({ open, onOpenChange, onSubmit }: AddAccountModa
           </form>
         ) : step === 3 ? (
           /* Credentials Form (Step 3 for Evaluation/Funded) */
-          <form onSubmit={handleSubmit} className="space-y-4 py-4">
+          <form onSubmit={handleSubmit} className="space-y-4 py-4 animate-fade-in-up">
             <div className="space-y-2">
               <Label htmlFor="platform">Platform</Label>
               <Select
                 value={formData.platform}
                 onValueChange={(value) => setFormData({ ...formData, platform: value })}
               >
-                <SelectTrigger>
+                <SelectTrigger className="bg-muted/30 border-border/50">
                   <SelectValue />
                 </SelectTrigger>
-                <SelectContent>
+                <SelectContent className="bg-card/95 backdrop-blur-xl border-border/30">
                   {PLATFORMS.map((platform) => (
-                    <SelectItem key={platform} value={platform}>
+                    <SelectItem key={platform} value={platform} className="cursor-pointer">
                       {platform}
                     </SelectItem>
                   ))}
@@ -251,6 +286,7 @@ export const AddAccountModal = ({ open, onOpenChange, onSubmit }: AddAccountModa
                 value={formData.login}
                 onChange={(e) => setFormData({ ...formData, login: e.target.value })}
                 required
+                className="bg-muted/30 border-border/50 focus:border-primary/50 transition-all"
               />
             </div>
 
@@ -263,6 +299,7 @@ export const AddAccountModal = ({ open, onOpenChange, onSubmit }: AddAccountModa
                 value={formData.password}
                 onChange={(e) => setFormData({ ...formData, password: e.target.value })}
                 required
+                className="bg-muted/30 border-border/50 focus:border-primary/50 transition-all"
               />
             </div>
 
@@ -274,6 +311,7 @@ export const AddAccountModal = ({ open, onOpenChange, onSubmit }: AddAccountModa
                 value={formData.server}
                 onChange={(e) => setFormData({ ...formData, server: e.target.value })}
                 required
+                className="bg-muted/30 border-border/50 focus:border-primary/50 transition-all"
               />
             </div>
 
@@ -289,7 +327,7 @@ export const AddAccountModal = ({ open, onOpenChange, onSubmit }: AddAccountModa
           </form>
         ) : (
           /* Evaluation/Funded Account Form */
-          <form onSubmit={(e) => { e.preventDefault(); setStep(3); }} className="space-y-4 py-4">
+          <form onSubmit={(e) => { e.preventDefault(); setStep(3); }} className="space-y-4 py-4 animate-fade-in-up">
             <div className="space-y-2">
               <Label htmlFor="account_name">Account Name</Label>
               <Input
@@ -298,6 +336,7 @@ export const AddAccountModal = ({ open, onOpenChange, onSubmit }: AddAccountModa
                 value={formData.account_name}
                 onChange={(e) => setFormData({ ...formData, account_name: e.target.value })}
                 required
+                className="bg-muted/30 border-border/50 focus:border-primary/50 transition-all"
               />
             </div>
 
@@ -307,12 +346,12 @@ export const AddAccountModal = ({ open, onOpenChange, onSubmit }: AddAccountModa
                 value={formData.prop_firm}
                 onValueChange={(value) => setFormData({ ...formData, prop_firm: value })}
               >
-                <SelectTrigger>
+                <SelectTrigger className="bg-muted/30 border-border/50">
                   <SelectValue placeholder="Select prop firm" />
                 </SelectTrigger>
-                <SelectContent>
+                <SelectContent className="bg-card/95 backdrop-blur-xl border-border/30">
                   {PROP_FIRMS.map((firm) => (
-                    <SelectItem key={firm} value={firm}>
+                    <SelectItem key={firm} value={firm} className="cursor-pointer">
                       {firm}
                     </SelectItem>
                   ))}
@@ -326,12 +365,12 @@ export const AddAccountModal = ({ open, onOpenChange, onSubmit }: AddAccountModa
                 value={formData.account_size.toString()}
                 onValueChange={(value) => setFormData({ ...formData, account_size: parseInt(value) })}
               >
-                <SelectTrigger>
+                <SelectTrigger className="bg-muted/30 border-border/50">
                   <SelectValue placeholder="Select account size" />
                 </SelectTrigger>
-                <SelectContent>
+                <SelectContent className="bg-card/95 backdrop-blur-xl border-border/30">
                   {ACCOUNT_SIZES.map((size) => (
-                    <SelectItem key={size.value} value={size.value.toString()}>
+                    <SelectItem key={size.value} value={size.value.toString()} className="cursor-pointer">
                       {size.label}
                     </SelectItem>
                   ))}
@@ -339,8 +378,8 @@ export const AddAccountModal = ({ open, onOpenChange, onSubmit }: AddAccountModa
               </Select>
             </div>
 
-            <div className="flex items-center justify-between py-2">
-              <Label htmlFor="show_rules">Add Prop Firm Rules</Label>
+            <div className="flex items-center justify-between py-2 px-3 rounded-lg bg-muted/30 border border-border/30">
+              <Label htmlFor="show_rules" className="cursor-pointer">Add Prop Firm Rules</Label>
               <Switch
                 id="show_rules"
                 checked={showRules}
@@ -349,7 +388,7 @@ export const AddAccountModal = ({ open, onOpenChange, onSubmit }: AddAccountModa
             </div>
 
             {showRules && (
-              <div className="grid grid-cols-2 gap-4 p-4 rounded-lg bg-muted/50">
+              <div className="grid grid-cols-2 gap-4 p-4 rounded-lg bg-muted/30 border border-border/30 animate-fade-in-up">
                 <div className="space-y-2">
                   <Label htmlFor="profit_target">Profit Target (%)</Label>
                   <NumberInput
