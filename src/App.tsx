@@ -12,7 +12,6 @@ const DashboardOverview = lazy(() => import("./pages/app/DashboardOverview"));
 const Accounts = lazy(() => import("./pages/app/Accounts"));
 const DashboardAnalytics = lazy(() => import("./pages/app/DashboardAnalytics"));
 const TradeCopier = lazy(() => import("./pages/app/TradeCopier"));
-const Journal = lazy(() => import("./pages/app/Journal"));
 const DashboardCalculator = lazy(() => import("./pages/app/DashboardCalculator"));
 const Settings = lazy(() => import("./pages/app/Settings"));
 const Help = lazy(() => import("./pages/app/Help"));
@@ -41,7 +40,6 @@ const App = () => (
               <Route path="accounts" element={<Accounts />} />
               <Route path="analytics" element={<DashboardAnalytics />} />
               <Route path="copier" element={<TradeCopier />} />
-              <Route path="journal" element={<Journal />} />
               <Route path="calculator" element={<DashboardCalculator />} />
               <Route path="settings" element={<Settings />} />
               <Route path="help" element={<Help />} />

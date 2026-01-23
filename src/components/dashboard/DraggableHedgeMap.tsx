@@ -20,7 +20,7 @@ import {
   ZoomOut, 
   Maximize2,
   Plus,
-  AlignHorizontalDistributeCenter,
+  Sparkles,
   Trash2,
   Link2,
   GitBranch,
@@ -552,6 +552,31 @@ export const DraggableHedgeMap = ({
     setPan({ x: 0, y: 0 });
   };
 
+  // Wheel event handler for Ctrl+scroll zoom
+  const handleWheel = useCallback((e: React.WheelEvent) => {
+    if (e.ctrlKey) {
+      e.preventDefault();
+      e.stopPropagation();
+      const delta = -e.deltaY * 0.001;
+      setZoom(z => Math.max(0.3, Math.min(z + delta, 2)));
+    }
+  }, []);
+
+  // Add native wheel event listener to prevent browser zoom
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+
+    const handleNativeWheel = (e: WheelEvent) => {
+      if (e.ctrlKey) {
+        e.preventDefault();
+      }
+    };
+
+    container.addEventListener('wheel', handleNativeWheel, { passive: false });
+    return () => container.removeEventListener('wheel', handleNativeWheel);
+  }, []);
+
   const handleStartLink = () => {
     if (selectedNode) {
       const account = accounts.find(a => a.id === selectedNode);
@@ -762,7 +787,7 @@ export const DraggableHedgeMap = ({
             <Maximize2 className="h-4 w-4" />
           </Button>
           <Button variant="ghost" size="icon" onClick={autoAlign} className="h-8 w-8" title="Auto-align nodes">
-            <AlignHorizontalDistributeCenter className="h-4 w-4" />
+            <Sparkles className="h-4 w-4" />
           </Button>
         </div>
       </div>
@@ -877,6 +902,7 @@ export const DraggableHedgeMap = ({
         onMouseMove={handleMouseMove}
         onMouseUp={handleMouseUp}
         onMouseLeave={handleMouseUp}
+        onWheel={handleWheel}
       >
         {/* Subtle grid background */}
         <svg className="absolute inset-0 w-full h-full pointer-events-none opacity-[0.03]">
@@ -939,6 +965,8 @@ export const DraggableHedgeMap = ({
               const isDragging = draggingNode === account.id;
               const isSelected = selectedNode === account.id;
               const isLinkSource = linkSource === account.id;
+              // Base z-index: newer accounts (lower index) get higher z-index since accounts are sorted by created_at DESC
+              const baseZIndex = accounts.length - index;
               return (
                 <div
                   key={account.id}
@@ -947,7 +975,7 @@ export const DraggableHedgeMap = ({
                     left: pos.x,
                     top: pos.y,
                     transform: 'translate(-50%, -50%)',
-                    zIndex: isDragging ? 100 : isSelected ? 50 : isLinkSource ? 40 : 1,
+                    zIndex: isDragging ? 1000 : isSelected ? 500 : isLinkSource ? 400 : baseZIndex,
                     transition: isDragging ? 'none' : `left 0.4s cubic-bezier(0.4, 0, 0.2, 1) ${index * 30}ms, top 0.4s cubic-bezier(0.4, 0, 0.2, 1) ${index * 30}ms`,
                   }}
                 >

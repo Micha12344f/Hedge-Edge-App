@@ -124,6 +124,85 @@ export const HedgeNode = ({ account, isSelected, isDragging, isLinkSource, onCli
   const StatusIcon = statusConfig[connectionStatus].icon;
   const TypeIcon = config.icon;
 
+  // Render simplified version for hedge accounts
+  if (account.phase === 'live') {
+    return (
+      <div
+        onClick={onClick}
+        onMouseDown={onMouseDown}
+        style={position ? { 
+          position: 'absolute', 
+          left: position.x, 
+          top: position.y,
+          transform: 'translate(-50%, -50%)',
+          filter: isDragging ? 'drop-shadow(0 20px 30px rgba(0,0,0,0.4))' : undefined,
+        } : undefined}
+        className={cn(
+          'w-72 rounded-xl border-2 bg-card/90 backdrop-blur-md cursor-grab active:cursor-grabbing transition-all duration-300 select-none',
+          config.border,
+          config.glow,
+          config.hoverGlow,
+          isDragging && 'scale-105 z-50',
+          !isDragging && 'hover:scale-[1.02]',
+          isSelected && 'ring-2 ring-offset-2 ring-offset-background ring-white/50',
+          isLinkSource && 'ring-2 ring-primary ring-offset-2 ring-offset-background animate-pulse'
+        )}
+      >
+        <div className="px-4 py-3">
+          {/* Header Row */}
+          <div className="flex items-center gap-2 mb-2">
+            <div className={cn(
+              'w-8 h-8 rounded-lg flex items-center justify-center',
+              config.badge
+            )}>
+              <TypeIcon className="w-4 h-4" />
+            </div>
+            <Badge variant="outline" className={cn('text-[10px] px-2 py-0.5', config.badge)}>
+              {config.label}
+            </Badge>
+          </div>
+
+          {/* Platform Info */}
+          <p className="text-sm text-muted-foreground mb-3">
+            {account.platform || 'MT5'} - {account.login ? account.login.toString().charAt(0) : 'f'}
+          </p>
+
+          {/* Connection Details */}
+          <div className="grid grid-cols-2 gap-3 mb-3">
+            <div className="flex items-start gap-2">
+              <div className="w-4 h-4 text-muted-foreground mt-0.5">👤</div>
+              <div>
+                <p className="text-[10px] text-muted-foreground">Login</p>
+                <p className="text-xs font-medium text-foreground">{account.login || 'f'}</p>
+              </div>
+            </div>
+            <div className="flex items-start gap-2">
+              <div className="w-4 h-4 text-muted-foreground mt-0.5">🖥️</div>
+              <div>
+                <p className="text-[10px] text-muted-foreground">Server</p>
+                <p className="text-xs font-medium text-foreground truncate">{account.server || 'f'}</p>
+              </div>
+            </div>
+          </div>
+
+          {/* Footer Status */}
+          <div className="flex items-center justify-between pt-3 border-t border-border/30">
+            <p className="text-xs text-muted-foreground">Status</p>
+            <Badge variant="outline" className={cn(
+              'text-[10px] px-2 py-0.5 flex items-center gap-1',
+              statusConfig[connectionStatus].badge,
+              statusConfig[connectionStatus].pulse && 'animate-pulse'
+            )}>
+              <StatusIcon className="w-3 h-3" />
+              {statusConfig[connectionStatus].label}
+            </Badge>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // Regular node for evaluation and funded accounts
   return (
     <div
       onClick={onClick}

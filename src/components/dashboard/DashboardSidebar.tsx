@@ -6,7 +6,6 @@ import { Button } from '@/components/ui/button';
 import {
   LayoutDashboard,
   BarChart3,
-  BookOpen,
   Calculator,
   Settings,
   LogOut,
@@ -23,7 +22,6 @@ const navItems = [
   { icon: Wallet, label: 'Hedge Map', path: '/app/accounts' },
   { icon: BarChart3, label: 'Analytics', path: '/app/analytics' },
   { icon: Copy, label: 'Trade Copier', path: '/app/copier' },
-  { icon: BookOpen, label: 'Journal', path: '/app/journal' },
   { icon: Calculator, label: 'Calculator', path: '/app/calculator' },
 ];
 
@@ -45,7 +43,7 @@ export const DashboardSidebar = () => {
   return (
     <aside
       className={cn(
-        'h-screen bg-gradient-to-b from-muted/40 to-background border-r border-border/30 flex flex-col transition-all duration-500 ease-out backdrop-blur-sm',
+        'h-screen bg-gradient-to-b from-muted/40 to-background border-r border-border/30 flex flex-col transition-all duration-500 ease-out backdrop-blur-sm flex-shrink-0 sticky top-0',
         collapsed ? 'w-16' : 'w-64'
       )}
     >

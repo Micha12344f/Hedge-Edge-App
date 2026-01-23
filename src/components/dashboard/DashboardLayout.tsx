@@ -7,9 +7,9 @@ export const DashboardLayout = () => {
   return (
     <SidebarProvider>
       <AnimatedBackground>
-        <div className="min-h-screen flex">
+        <div className="min-h-screen flex overflow-hidden">
           <DashboardSidebar />
-          <main className="flex-1 overflow-auto">
+          <main className="flex-1 overflow-y-auto h-screen">
             <Outlet />
           </main>
         </div>

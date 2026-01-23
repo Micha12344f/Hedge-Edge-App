@@ -473,38 +473,40 @@ export const HedgeMap = ({
             transformOrigin: '0 0',
           }}
         >
-          {accounts.length === 0 ? (
-            <div className="absolute inset-0 flex items-center justify-center">
-              <div className="text-center space-y-4">
-                <div className="w-16 h-16 rounded-2xl bg-muted/50 flex items-center justify-center mx-auto">
-                  <Plus className="w-8 h-8 text-muted-foreground" />
-                </div>
-                <div>
-                  <h3 className="text-lg font-medium text-foreground">No accounts yet</h3>
-                  <p className="text-sm text-muted-foreground">
-                    Add your first trading account to start building your hedge map
-                  </p>
-                </div>
-                <Button onClick={onAddAccount} className="gap-2">
-                  <Plus className="h-4 w-4" />
-                  Add Account
-                </Button>
+          {accounts.length > 0 && accounts.map((account) => {
+            const position = getNodePosition(account.id);
+            return (
+              <HedgeNode
+                key={account.id}
+                account={account}
+                isSelected={selectedNode === account.id}
+                onClick={() => handleNodeClick(account.id)}
+                position={position}
+              />
+            );
+          })}
+        </div>
+
+        {/* Empty State - Outside Transform */}
+        {accounts.length === 0 && (
+          <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+            <div className="text-center space-y-4 pointer-events-auto">
+              <div className="w-16 h-16 rounded-2xl bg-muted/50 flex items-center justify-center mx-auto">
+                <Plus className="w-8 h-8 text-muted-foreground" />
               </div>
+              <div>
+                <h3 className="text-lg font-medium text-foreground">No accounts yet</h3>
+                <p className="text-sm text-muted-foreground">
+                  Add your first account to get started
+                </p>
+              </div>
+              <Button onClick={onAddAccount} className="gap-2">
+                <Plus className="h-4 w-4" />
+                Add Account
+              </Button>
             </div>
-          ) : (
-            accounts.map((account) => {
-              const position = getNodePosition(account.id);
-              return (
-                <HedgeNode
-                  key={account.id}
-                  account={account}
-                  isSelected={selectedNode === account.id}
-                  onClick={() => handleNodeClick(account.id)}
-                  position={position}
-                />
-              );
-            })
-          )}
+          </div>
+        )}
         </div>
       </div>
 
