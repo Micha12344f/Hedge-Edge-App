@@ -6,9 +6,12 @@ import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Switch } from '@/components/ui/switch';
 import { NumberInput } from '@/components/ui/number-input';
-import { Loader2, TrendingUp } from 'lucide-react';
+import { Loader2, TrendingUp, Info, CheckCircle2, XCircle, Server } from 'lucide-react';
 import { CreateAccountData, TradingAccount } from '@/hooks/useTradingAccounts';
 import { cn } from '@/lib/utils';
+import { toast } from 'sonner';
+import { validateMT5Credentials, checkVPSHealth, getVPSUrl } from '@/lib/vps-mt5-api';
+import { cachePassword } from '@/lib/mt5-password-cache';
 
 interface AddAccountModalProps {
   open: boolean;
@@ -88,6 +91,30 @@ export const AddAccountModal = ({ open, onOpenChange, onSubmit, defaultType, hed
   const [showRules, setShowRules] = useState(false);
   const [isHedgeMode, setIsHedgeMode] = useState(false);
   
+  // VPS validation states
+  const [isValidating, setIsValidating] = useState(false);
+  const [validationResult, setValidationResult] = useState<'valid' | 'invalid' | null>(null);
+  const [validatedAccount, setValidatedAccount] = useState<{
+    name: string;
+    broker: string;
+    balance: number;
+    equity: number;
+    currency: string;
+  } | null>(null);
+  const [vpsStatus, setVpsStatus] = useState<'checking' | 'online' | 'offline'>('checking');
+  
+  // Check VPS status when modal opens
+  useEffect(() => {
+    if (open) {
+      setVpsStatus('checking');
+      checkVPSHealth()
+        .then(result => {
+          setVpsStatus(result.status === 'healthy' ? 'online' : 'offline');
+        })
+        .catch(() => setVpsStatus('offline'));
+    }
+  }, [open]);
+  
   // Reset state when modal opens/closes or defaultType changes
   useEffect(() => {
     if (open) {
@@ -110,6 +137,9 @@ export const AddAccountModal = ({ open, onOpenChange, onSubmit, defaultType, hed
       setStep(1);
       setShowRules(false);
       setIsHedgeMode(false);
+      setValidationResult(null);
+      setValidatedAccount(null);
+      setIsValidating(false);
       setFormData({
         phase: 'evaluation',
         account_name: '',
@@ -147,6 +177,57 @@ export const AddAccountModal = ({ open, onOpenChange, onSubmit, defaultType, hed
     if (phase === 'live') {
       setIsHedgeMode(true);
     }
+    // Reset validation when changing phase
+    setValidationResult(null);
+    setValidatedAccount(null);
+    setStep(2);
+  };
+
+  // Validate MT5 credentials through VPS
+  const handleValidateCredentials = async () => {
+    if (!formData.login || !formData.password || !formData.server) {
+      toast.error('Please fill in all credential fields');
+      return;
+    }
+
+    setIsValidating(true);
+    setValidationResult(null);
+    setValidatedAccount(null);
+
+    try {
+      const result = await validateMT5Credentials(
+        formData.login,
+        formData.password,
+        formData.server
+      );
+
+      if (result.success && result.valid && result.account) {
+        setValidationResult('valid');
+        setValidatedAccount({
+          name: result.account.name,
+          broker: result.account.broker,
+          balance: result.account.balance,
+          equity: result.account.equity,
+          currency: result.account.currency,
+        });
+        toast.success('Credentials validated!', {
+          description: `Connected to ${result.account.broker}`,
+        });
+      } else {
+        setValidationResult('invalid');
+        toast.error('Invalid credentials', {
+          description: result.error || 'Could not connect to MT5 account',
+        });
+      }
+    } catch (error) {
+      setValidationResult('invalid');
+      toast.error('Validation failed', {
+        description: error instanceof Error ? error.message : 'Connection error',
+      });
+    } finally {
+      setIsValidating(false);
+    }
+  };
     setStep(2);
   };
 
@@ -164,7 +245,8 @@ export const AddAccountModal = ({ open, onOpenChange, onSubmit, defaultType, hed
     const data: CreateAccountData = {
       account_name: formData.account_name,
       prop_firm: formData.prop_firm || undefined,
-      account_size: formData.account_size || undefined,
+      account_size: formData.account_size || validatedAccount?.balance || undefined,
+      current_balance: validatedAccount?.balance || undefined,
       phase: formData.phase,
       platform: formData.platform,
       server: formData.server || undefined,
@@ -181,6 +263,16 @@ export const AddAccountModal = ({ open, onOpenChange, onSubmit, defaultType, hed
     setLoading(false);
     
     if (!error) {
+      // Cache the password for viewing live data later
+      if (formData.login && formData.password && formData.server) {
+        cachePassword(formData.login, formData.password, formData.server);
+      }
+      
+      toast.success('Account added!', {
+        description: validatedAccount 
+          ? `Connected to ${validatedAccount.broker} • Balance: ${validatedAccount.currency} ${validatedAccount.balance.toLocaleString()}`
+          : 'Click on the account to view live data',
+      });
       onOpenChange(false);
     }
   };
@@ -240,7 +332,11 @@ export const AddAccountModal = ({ open, onOpenChange, onSubmit, defaultType, hed
               <Label htmlFor="platform">Platform</Label>
               <Select
                 value={formData.platform}
-                onValueChange={(value) => setFormData({ ...formData, platform: value })}
+                onValueChange={(value) => {
+                  setFormData({ ...formData, platform: value });
+                  setValidationResult(null);
+                  setValidatedAccount(null);
+                }}
               >
                 <SelectTrigger className="bg-muted/30 border-border/50">
                   <SelectValue />
@@ -261,7 +357,11 @@ export const AddAccountModal = ({ open, onOpenChange, onSubmit, defaultType, hed
                 id="login"
                 placeholder="12345678"
                 value={formData.login}
-                onChange={(e) => setFormData({ ...formData, login: e.target.value })}
+                onChange={(e) => {
+                  setFormData({ ...formData, login: e.target.value });
+                  setValidationResult(null);
+                  setValidatedAccount(null);
+                }}
                 required
                 className="bg-muted/30 border-border/50 focus:border-primary/50 transition-all"
               />
@@ -274,7 +374,11 @@ export const AddAccountModal = ({ open, onOpenChange, onSubmit, defaultType, hed
                 type="password"
                 placeholder="••••••••"
                 value={formData.password}
-                onChange={(e) => setFormData({ ...formData, password: e.target.value })}
+                onChange={(e) => {
+                  setFormData({ ...formData, password: e.target.value });
+                  setValidationResult(null);
+                  setValidatedAccount(null);
+                }}
                 required
                 className="bg-muted/30 border-border/50 focus:border-primary/50 transition-all"
               />
@@ -286,17 +390,89 @@ export const AddAccountModal = ({ open, onOpenChange, onSubmit, defaultType, hed
                 id="server"
                 placeholder="Broker-Live"
                 value={formData.server}
-                onChange={(e) => setFormData({ ...formData, server: e.target.value })}
+                onChange={(e) => {
+                  setFormData({ ...formData, server: e.target.value });
+                  setValidationResult(null);
+                  setValidatedAccount(null);
+                }}
                 required
                 className="bg-muted/30 border-border/50 focus:border-primary/50 transition-all"
               />
             </div>
 
+            {/* VPS Status and Validation */}
+            {(formData.platform === 'MT5' || formData.platform === 'MT4') && (
+              <div className="space-y-3">
+                {/* VPS Status */}
+                <div className={cn(
+                  "flex items-center gap-2 p-3 rounded-lg border",
+                  vpsStatus === 'online' ? "bg-emerald-500/10 border-emerald-500/20 text-emerald-400" :
+                  vpsStatus === 'offline' ? "bg-red-500/10 border-red-500/20 text-red-400" :
+                  "bg-muted/30 border-border/30 text-muted-foreground"
+                )}>
+                  <Server className="h-4 w-4 shrink-0" />
+                  <span className="text-sm flex-1">
+                    {vpsStatus === 'checking' && 'Checking VPS server...'}
+                    {vpsStatus === 'online' && 'VPS MT5 Server Online'}
+                    {vpsStatus === 'offline' && 'VPS Server Offline - Check connection'}
+                  </span>
+                  {vpsStatus === 'checking' && <Loader2 className="h-4 w-4 animate-spin" />}
+                </div>
+
+                {/* Validate Button */}
+                {vpsStatus === 'online' && (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={handleValidateCredentials}
+                    disabled={isValidating || !formData.login || !formData.password || !formData.server}
+                    className="w-full"
+                  >
+                    {isValidating ? (
+                      <>
+                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                        Validating...
+                      </>
+                    ) : validationResult === 'valid' ? (
+                      <>
+                        <CheckCircle2 className="mr-2 h-4 w-4 text-emerald-400" />
+                        Credentials Valid
+                      </>
+                    ) : validationResult === 'invalid' ? (
+                      <>
+                        <XCircle className="mr-2 h-4 w-4 text-red-400" />
+                        Try Again
+                      </>
+                    ) : (
+                      'Validate Credentials'
+                    )}
+                  </Button>
+                )}
+
+                {/* Validation Result */}
+                {validatedAccount && (
+                  <div className="p-3 rounded-lg bg-emerald-500/10 border border-emerald-500/20">
+                    <p className="text-sm font-medium text-emerald-400 mb-2">✓ Account Verified</p>
+                    <div className="grid grid-cols-2 gap-2 text-xs text-muted-foreground">
+                      <div>Name: <span className="text-foreground">{validatedAccount.name}</span></div>
+                      <div>Broker: <span className="text-foreground">{validatedAccount.broker}</span></div>
+                      <div>Balance: <span className="text-foreground">{validatedAccount.currency} {validatedAccount.balance.toLocaleString()}</span></div>
+                      <div>Equity: <span className="text-foreground">{validatedAccount.currency} {validatedAccount.equity.toLocaleString()}</span></div>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
             <div className="flex gap-3 pt-4">
               <Button type="button" variant="outline" onClick={() => setStep(1)} className="flex-1">
                 Back
               </Button>
-              <Button type="submit" disabled={loading || !formData.account_name || !formData.login || !formData.password || !formData.server} className="flex-1">
+              <Button 
+                type="submit" 
+                disabled={loading || !formData.account_name || !formData.login || !formData.password || !formData.server || (vpsStatus === 'online' && validationResult !== 'valid')} 
+                className="flex-1"
+              >
                 {loading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
                 Add Account
               </Button>
@@ -360,6 +536,16 @@ export const AddAccountModal = ({ open, onOpenChange, onSubmit, defaultType, hed
                 className="bg-muted/30 border-border/50 focus:border-primary/50 transition-all"
               />
             </div>
+
+            {/* Info about local connection */}
+            {(formData.platform === 'MT5' || formData.platform === 'MT4') && (
+              <div className="flex items-start gap-2 p-3 rounded-lg bg-blue-500/10 border border-blue-500/20 text-blue-400">
+                <Info className="h-4 w-4 mt-0.5 shrink-0" />
+                <span className="text-sm">
+                  Live data requires MT5 terminal running locally with the Flask server started.
+                </span>
+              </div>
+            )}
 
             <div className="flex gap-3 pt-4">
               <Button type="button" variant="outline" onClick={() => setStep(2)} className="flex-1">

@@ -14,6 +14,7 @@ export interface TradingAccount {
   platform: string | null;
   server: string | null;
   login?: string | null;
+  metaapi_account_id?: string | null;
   profit_target: number | null;
   max_loss: number | null;
   max_daily_loss: number | null;
@@ -36,6 +37,7 @@ export interface CreateAccountData {
   platform?: string;
   server?: string;
   login?: string;
+  metaapi_account_id?: string;
   profit_target?: number;
   max_loss?: number;
   max_daily_loss?: number;
@@ -121,6 +123,7 @@ export const useTradingAccounts = () => {
         platform: data.platform || null,
         server: data.server || null,
         login: data.login || null,
+        metaapi_account_id: data.metaapi_account_id || null,
         profit_target: data.profit_target || null,
         max_loss: data.max_loss || null,
         max_daily_loss: data.max_daily_loss || null,
@@ -181,6 +184,52 @@ export const useTradingAccounts = () => {
     return { error: null };
   };
 
+  /**
+   * Sync account balance from MT5 data (silent update, no toast)
+   */
+  const syncAccountFromMT5 = async (id: string, mt5Data: { 
+    balance: number; 
+    equity: number; 
+    profit: number;
+  }) => {
+    const account = accounts.find(a => a.id === id);
+    if (!account) return;
+
+    const accountSize = Number(account.account_size) || 0;
+    const newBalance = mt5Data.balance;
+    const pnl = newBalance - accountSize;
+    const pnlPercent = accountSize > 0 ? (pnl / accountSize) * 100 : 0;
+
+    if (user) {
+      await supabase
+        .from('trading_accounts')
+        .update({
+          current_balance: newBalance,
+          pnl: pnl,
+          pnl_percent: pnlPercent,
+          last_sync_at: new Date().toISOString(),
+        })
+        .eq('id', id);
+    } else {
+      // Demo mode
+      const localAccounts = getLocalAccounts();
+      const updated = localAccounts.map(acc => 
+        acc.id === id ? { 
+          ...acc, 
+          current_balance: newBalance,
+          pnl: pnl,
+          pnl_percent: pnlPercent,
+          last_sync_at: new Date().toISOString(),
+          updated_at: new Date().toISOString() 
+        } : acc
+      );
+      saveLocalAccounts(updated);
+    }
+
+    // Update local state without showing toast
+    await fetchAccounts();
+  };
+
   const deleteAccount = async (id: string) => {
     if (user) {
       const { error } = await supabase
@@ -223,5 +272,6 @@ export const useTradingAccounts = () => {
     createAccount,
     updateAccount,
     deleteAccount,
+    syncAccountFromMT5,
   };
 };

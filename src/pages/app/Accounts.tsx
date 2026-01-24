@@ -1,7 +1,8 @@
 import { useState } from 'react';
-import { useTradingAccounts } from '@/hooks/useTradingAccounts';
+import { useTradingAccounts, TradingAccount } from '@/hooks/useTradingAccounts';
 import { DraggableHedgeMap, HedgeRelationship } from '@/components/dashboard/DraggableHedgeMap';
 import { AddAccountModal } from '@/components/dashboard/AddAccountModal';
+import { AccountDetailsModal } from '@/components/dashboard/AccountDetailsModal';
 import { useToast } from '@/hooks/use-toast';
 
 // Local storage key for relationships
@@ -21,10 +22,17 @@ const saveRelationships = (relationships: HedgeRelationship[]) => {
 };
 
 const Accounts = () => {
-  const { accounts, loading, createAccount, deleteAccount } = useTradingAccounts();
+  const { accounts, loading, createAccount, deleteAccount, syncAccountFromMT5 } = useTradingAccounts();
   const [addModalOpen, setAddModalOpen] = useState(false);
   const [relationships, setRelationships] = useState<HedgeRelationship[]>(getStoredRelationships);
+  const [selectedAccount, setSelectedAccount] = useState<TradingAccount | null>(null);
+  const [detailsModalOpen, setDetailsModalOpen] = useState(false);
   const { toast } = useToast();
+
+  const handleAccountClick = (account: TradingAccount) => {
+    setSelectedAccount(account);
+    setDetailsModalOpen(true);
+  };
 
   const handleCreateRelationship = (sourceId: string, targetId: string, logic: HedgeRelationship['logic'] = 'mirror', offsetPercentage: number = 100) => {
     // Check if relationship already exists
@@ -100,12 +108,20 @@ const Accounts = () => {
         onCreateRelationship={handleCreateRelationship}
         onDeleteRelationship={handleDeleteRelationship}
         onUpdateRelationship={handleUpdateRelationship}
+        onAccountClick={handleAccountClick}
       />
 
       <AddAccountModal
         open={addModalOpen}
         onOpenChange={setAddModalOpen}
         onSubmit={createAccount}
+      />
+
+      <AccountDetailsModal
+        account={selectedAccount}
+        open={detailsModalOpen}
+        onOpenChange={setDetailsModalOpen}
+        onSyncAccount={syncAccountFromMT5}
       />
     </div>
   );

@@ -1,7 +1,8 @@
 import { useState } from 'react';
-import { useTradingAccounts } from '@/hooks/useTradingAccounts';
+import { useTradingAccounts, TradingAccount } from '@/hooks/useTradingAccounts';
 import { AccountCard } from '@/components/dashboard/AccountCard';
 import { AddAccountModal } from '@/components/dashboard/AddAccountModal';
+import { AccountDetailsModal } from '@/components/dashboard/AccountDetailsModal';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -19,9 +20,16 @@ import {
 } from 'lucide-react';
 
 const DashboardOverview = () => {
-  const { accounts, loading, createAccount, deleteAccount } = useTradingAccounts();
+  const { accounts, loading, createAccount, deleteAccount, syncAccountFromMT5 } = useTradingAccounts();
   const [addModalOpen, setAddModalOpen] = useState(false);
   const [activeTab, setActiveTab] = useState('all');
+  const [selectedAccount, setSelectedAccount] = useState<TradingAccount | null>(null);
+  const [detailsModalOpen, setDetailsModalOpen] = useState(false);
+
+  const handleAccountClick = (account: TradingAccount) => {
+    setSelectedAccount(account);
+    setDetailsModalOpen(true);
+  };
 
   const filteredAccounts = accounts.filter((account) => {
     if (activeTab === 'all') return true;
@@ -205,6 +213,7 @@ const DashboardOverview = () => {
                       <AccountCard
                         account={account}
                         onDelete={deleteAccount}
+                        onClick={handleAccountClick}
                       />
                     </div>
                   ))}
@@ -219,6 +228,13 @@ const DashboardOverview = () => {
         open={addModalOpen}
         onOpenChange={setAddModalOpen}
         onSubmit={createAccount}
+      />
+
+      <AccountDetailsModal
+        account={selectedAccount}
+        open={detailsModalOpen}
+        onOpenChange={setDetailsModalOpen}
+        onSyncAccount={syncAccountFromMT5}
       />
     </div>
   );

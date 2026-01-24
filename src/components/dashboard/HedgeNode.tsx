@@ -1,5 +1,6 @@
 import { TradingAccount } from '@/hooks/useTradingAccounts';
 import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { 
   TrendingUp, 
@@ -9,7 +10,8 @@ import {
   Clock,
   Target,
   Shield,
-  Flame
+  Flame,
+  ExternalLink
 } from 'lucide-react';
 
 interface HedgeNodeProps {
@@ -25,17 +27,27 @@ interface HedgeNodeProps {
 type ConnectionStatus = 'connected' | 'lagging' | 'risk';
 
 export const HedgeNode = ({ account, isSelected, isDragging, isLinkSource, onClick, onMouseDown, position }: HedgeNodeProps) => {
-  const pnl = Number(account.pnl) || 0;
-  const pnlPercent = Number(account.pnl_percent) || 0;
-  const isProfit = pnl >= 0;
-  
   const profitTarget = Number(account.profit_target) || 0;
   const maxLoss = Number(account.max_loss) || 0;
   const maxDailyLoss = Number(account.max_daily_loss) || 0;
   const accountSize = Number(account.account_size) || 0;
   const currentBalance = Number(account.current_balance) || accountSize;
   
-  // Calculate distances
+  // Calculate P&L from balance - this is more accurate than stored pnl
+  const storedPnl = Number(account.pnl) || 0;
+  const storedPnlPercent = Number(account.pnl_percent) || 0;
+  
+  // Use calculated P&L from balance if balance differs from account size
+  // This catches cases where the stored pnl hasn't been synced
+  const calculatedPnl = currentBalance - accountSize;
+  const calculatedPnlPercent = accountSize > 0 ? (calculatedPnl / accountSize) * 100 : 0;
+  
+  // Use calculated values if they differ from stored (meaning balance was updated)
+  const pnl = currentBalance !== accountSize ? calculatedPnl : storedPnl;
+  const pnlPercent = currentBalance !== accountSize ? calculatedPnlPercent : storedPnlPercent;
+  const isProfit = pnl >= 0;
+  
+  // Calculate distances using the actual P&L percent
   const equity = currentBalance;
   const distanceToFail = maxLoss > 0 
     ? Math.max(((equity - (accountSize * (1 - maxLoss / 100))) / accountSize) * 100, 0)
@@ -187,7 +199,6 @@ export const HedgeNode = ({ account, isSelected, isDragging, isLinkSource, onCli
 
           {/* Footer Status */}
           <div className="flex items-center justify-between pt-3 border-t border-border/30">
-            <p className="text-xs text-muted-foreground">Status</p>
             <Badge variant="outline" className={cn(
               'text-[10px] px-2 py-0.5 flex items-center gap-1',
               statusConfig[connectionStatus].badge,
@@ -196,6 +207,20 @@ export const HedgeNode = ({ account, isSelected, isDragging, isLinkSource, onCli
               <StatusIcon className="w-3 h-3" />
               {statusConfig[connectionStatus].label}
             </Badge>
+            {onClick && (
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-6 px-2 text-xs hover:bg-primary/20 hover:text-primary"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onClick();
+                }}
+              >
+                <ExternalLink className="w-3 h-3 mr-1" />
+                Details
+              </Button>
+            )}
           </div>
         </div>
       </div>
@@ -332,6 +357,22 @@ export const HedgeNode = ({ account, isSelected, isDragging, isLinkSource, onCli
             {isProfit ? '+' : ''}{formatCurrency(pnl)} ({pnlPercent >= 0 ? '+' : ''}{pnlPercent.toFixed(2)}%)
           </span>
         </div>
+
+        {/* View Details Button */}
+        {onClick && (
+          <Button
+            variant="outline"
+            size="sm"
+            className="w-full h-7 text-xs hover:bg-primary/20 hover:text-primary hover:border-primary/50 mt-2"
+            onClick={(e) => {
+              e.stopPropagation();
+              onClick();
+            }}
+          >
+            <ExternalLink className="w-3 h-3 mr-1" />
+            View Live Details
+          </Button>
+        )}
       </div>
     </div>
   );

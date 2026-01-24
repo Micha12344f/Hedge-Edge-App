@@ -3,7 +3,7 @@ import { Card, CardContent, CardHeader } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Progress } from '@/components/ui/progress';
-import { MoreHorizontal, TrendingUp, TrendingDown, RefreshCw, Trash2, Server, User, Zap } from 'lucide-react';
+import { MoreHorizontal, TrendingUp, TrendingDown, RefreshCw, Trash2, Server, User, Zap, ExternalLink } from 'lucide-react';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -16,9 +16,10 @@ interface AccountCardProps {
   account: TradingAccount;
   onDelete: (id: string) => void;
   onSync?: (id: string) => void;
+  onClick?: (account: TradingAccount) => void;
 }
 
-export const AccountCard = ({ account, onDelete, onSync }: AccountCardProps) => {
+export const AccountCard = ({ account, onDelete, onSync, onClick }: AccountCardProps) => {
   const pnl = Number(account.pnl) || 0;
   const pnlPercent = Number(account.pnl_percent) || 0;
   const isProfit = pnl >= 0;
@@ -67,12 +68,22 @@ export const AccountCard = ({ account, onDelete, onSync }: AccountCardProps) => 
   const config = phaseConfig[account.phase];
   const isHedgeAccount = account.phase === 'live';
 
+  const handleCardClick = () => {
+    if (onClick) {
+      onClick(account);
+    }
+  };
+
   return (
-    <Card className={cn(
-      "border-border/30 bg-gradient-to-br from-card/80 to-card/40 backdrop-blur-sm transition-all duration-300 group cursor-default hover:shadow-lg",
-      config.border,
-      config.glow
-    )}>
+    <Card 
+      className={cn(
+        "border-border/30 bg-gradient-to-br from-card/80 to-card/40 backdrop-blur-sm transition-all duration-300 group hover:shadow-lg",
+        config.border,
+        config.glow,
+        onClick && "cursor-pointer"
+      )}
+      onClick={handleCardClick}
+    >
       <CardHeader className="flex flex-row items-start justify-between pb-2">
         <div className="space-y-1">
           <div className="flex items-center gap-2">

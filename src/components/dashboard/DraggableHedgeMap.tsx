@@ -52,6 +52,7 @@ interface DraggableHedgeMapProps {
   onDeleteRelationship?: (id: string) => void;
   onUpdateRelationship?: (id: string, updates: Partial<HedgeRelationship>) => void;
   onPositionsChange?: (positions: NodePosition[]) => void;
+  onAccountClick?: (account: TradingAccount) => void;
   autoAlignOnMount?: boolean;
 }
 
@@ -125,6 +126,7 @@ export const DraggableHedgeMap = ({
   onCreateRelationship,
   onDeleteRelationship,
   onUpdateRelationship,
+  onAccountClick,
   autoAlignOnMount = true,
 }: DraggableHedgeMapProps) => {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -985,6 +987,11 @@ export const DraggableHedgeMap = ({
                     isDragging={isDragging}
                     isLinkSource={isLinkSource}
                     onMouseDown={(e) => handleNodeMouseDown(account.id, e)}
+                    onClick={() => {
+                      if (onAccountClick && !isLinking) {
+                        onAccountClick(account);
+                      }
+                    }}
                   />
                 </div>
               );
