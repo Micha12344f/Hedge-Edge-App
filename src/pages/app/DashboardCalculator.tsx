@@ -1,8 +1,9 @@
 import { useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { PageBackground } from '@/components/ui/page-background';
 import { Label } from '@/components/ui/label';
 import { NumberInput } from '@/components/ui/number-input';
-import { Calculator, Target, AlertTriangle, DollarSign, TrendingUp } from 'lucide-react';
+import { Calculator, Target, AlertTriangle, DollarSign } from 'lucide-react';
 
 const DashboardCalculator = () => {
   const [accountSize, setAccountSize] = useState(100000);
@@ -22,10 +23,10 @@ const DashboardCalculator = () => {
   };
 
   return (
-    <div className="p-6 space-y-6 relative">
-      <TrendingUp className="absolute top-6 right-6 w-32 h-32 text-primary opacity-20 pointer-events-none" />
-      <div>
-        <h1 className="text-2xl font-bold text-foreground">Position Calculator</h1>
+    <PageBackground>
+      <div className="p-6 pt-16 space-y-6">
+        <div>
+          <h1 className="text-2xl font-bold text-foreground">Position Calculator</h1>
         <p className="text-muted-foreground">Calculate optimal position sizes based on your risk parameters</p>
       </div>
 
@@ -126,7 +127,8 @@ const DashboardCalculator = () => {
           </Card>
         </div>
       </div>
-    </div>
+      </div>
+    </PageBackground>
   );
 };
 

@@ -37,7 +37,8 @@ const DashboardOverview = () => {
   });
 
   // Calculate stats
-  const totalBalance = accounts.reduce((sum, acc) => sum + (Number(acc.current_balance) || Number(acc.account_size) || 0), 0);
+  const propAccounts = accounts.filter(a => a.phase === 'funded' || a.phase === 'evaluation');
+  const propBalance = propAccounts.reduce((sum, acc) => sum + (Number(acc.current_balance) || Number(acc.account_size) || 0), 0);
   const totalPnL = accounts.reduce((sum, acc) => sum + (Number(acc.pnl) || 0), 0);
   const totalAccountValue = accounts.reduce((sum, acc) => sum + (Number(acc.account_size) || 0), 0);
   const avgPnLPercent = accounts.length > 0 
@@ -59,9 +60,9 @@ const DashboardOverview = () => {
 
   const statsCards = [
     {
-      title: 'Total Balance',
+      title: 'Prop Balance',
       icon: Wallet,
-      value: formatCurrency(totalBalance),
+      value: formatCurrency(propBalance),
       className: 'text-foreground',
       iconClassName: 'text-muted-foreground',
     },

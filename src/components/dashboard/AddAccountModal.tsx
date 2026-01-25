@@ -152,7 +152,7 @@ export const AddAccountModal = ({ open, onOpenChange, onSubmit, defaultType, hed
         profit_target: 10,
         max_loss: 10,
         max_daily_loss: 5,
-        min_trading_days: 0,
+        min_trading_days: 4,
       });
     }
   }, [open, defaultType]);
@@ -169,7 +169,7 @@ export const AddAccountModal = ({ open, onOpenChange, onSubmit, defaultType, hed
     profit_target: 10,
     max_loss: 10,
     max_daily_loss: 5,
-    min_trading_days: 0,
+    min_trading_days: 4,
   });
 
   const handlePhaseSelect = (phase: 'evaluation' | 'funded' | 'live') => {
@@ -242,6 +242,10 @@ export const AddAccountModal = ({ open, onOpenChange, onSubmit, defaultType, hed
     e.preventDefault();
     setLoading(true);
     
+    // Always include profit target, max loss, max daily loss, and min trading days
+    // with default values (10%, 10%, 5%, 4) for evaluation and funded accounts
+    const isEvaluationOrFunded = formData.phase === 'evaluation' || formData.phase === 'funded';
+    
     const data: CreateAccountData = {
       account_name: formData.account_name,
       prop_firm: formData.prop_firm || undefined,
@@ -251,7 +255,8 @@ export const AddAccountModal = ({ open, onOpenChange, onSubmit, defaultType, hed
       platform: formData.platform,
       server: formData.server || undefined,
       login: formData.login || undefined,
-      ...(showRules && {
+      // Always include these for evaluation/funded accounts with defaults or user-edited values
+      ...(isEvaluationOrFunded && {
         profit_target: formData.profit_target,
         max_loss: formData.max_loss,
         max_daily_loss: formData.max_daily_loss,

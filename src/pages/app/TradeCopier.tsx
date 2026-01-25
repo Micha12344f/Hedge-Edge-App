@@ -1,12 +1,13 @@
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Copy, Zap, Shield, ArrowRightLeft, TrendingUp } from 'lucide-react';
+import { PageBackground } from '@/components/ui/page-background';
+import { Copy, Zap, Shield, ArrowRightLeft } from 'lucide-react';
 
 const TradeCopier = () => {
   return (
-    <div className="p-6 space-y-6 relative">
-      <TrendingUp className="absolute top-6 right-6 w-32 h-32 text-primary opacity-20 pointer-events-none" />
-      <div>
-        <h1 className="text-2xl font-bold text-foreground">Trade Copier</h1>
+    <PageBackground>
+      <div className="p-6 pt-16 space-y-6">
+        <div>
+          <h1 className="text-2xl font-bold text-foreground">Trade Copier</h1>
         <p className="text-muted-foreground">Copy trades across multiple accounts automatically</p>
       </div>
 
@@ -63,7 +64,8 @@ const TradeCopier = () => {
           </p>
         </CardContent>
       </Card>
-    </div>
+      </div>
+    </PageBackground>
   );
 };
 
