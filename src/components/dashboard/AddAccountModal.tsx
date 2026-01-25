@@ -228,8 +228,6 @@ export const AddAccountModal = ({ open, onOpenChange, onSubmit, defaultType, hed
       setIsValidating(false);
     }
   };
-    setStep(2);
-  };
 
   const getDialogTitle = () => {
     if (step === 1) return 'Select Account Type';
