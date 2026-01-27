@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -7,21 +7,38 @@ import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useToast } from '@/hooks/use-toast';
-import { Loader2, TrendingUp, Sparkles } from 'lucide-react';
-import { z } from 'zod';
+import { Loader2, TrendingUp, Sparkles, AlertTriangle } from 'lucide-react';
 import { AnimatedBackground } from '@/components/ui/animated-background';
-
-const emailSchema = z.string().email('Please enter a valid email address');
-const passwordSchema = z.string().min(6, 'Password must be at least 6 characters');
+import { 
+  emailSchema, 
+  passwordSchema,
+  sanitizeInput,
+  isAccountLocked,
+  getRemainingLockoutTime 
+} from '@/lib/security';
 
 const Auth = () => {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const { signIn, signUp, user } = useAuth();
   const { toast } = useToast();
   const [loading, setLoading] = useState(false);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [fullName, setFullName] = useState('');
+  const [lockoutMessage, setLockoutMessage] = useState<string | null>(null);
+
+  // Check for session timeout redirect
+  useEffect(() => {
+    const reason = searchParams.get('reason');
+    if (reason === 'idle') {
+      toast({
+        title: 'Session Expired ⏰',
+        description: 'Your session timed out due to inactivity. Please sign in again.',
+        variant: 'destructive',
+      });
+    }
+  }, [searchParams, toast]);
 
   // Redirect if already logged in
   useEffect(() => {
@@ -30,30 +47,88 @@ const Auth = () => {
     }
   }, [user, navigate]);
 
+  // Check for account lockout when email changes
+  useEffect(() => {
+    if (email && isAccountLocked(email)) {
+      const remaining = getRemainingLockoutTime(email);
+      const minutes = Math.ceil(remaining / 60000);
+      setLockoutMessage(`Account temporarily locked. Try again in ${minutes} minute${minutes > 1 ? 's' : ''}.`);
+    } else {
+      setLockoutMessage(null);
+    }
+  }, [email]);
+
   if (user) {
     return null;
   }
 
-  const validateInputs = () => {
-    try {
-      emailSchema.parse(email);
-      passwordSchema.parse(password);
-      return true;
-    } catch (error) {
-      if (error instanceof z.ZodError) {
-        toast({
-          title: 'Validation Error ⚠️',
-          description: error.errors[0].message,
-          variant: 'destructive',
-        });
-      }
+  const validateSignInInputs = () => {
+    // Validate email
+    const emailResult = emailSchema.safeParse(email);
+    if (!emailResult.success) {
+      toast({
+        title: 'Validation Error ⚠️',
+        description: emailResult.error.errors[0].message,
+        variant: 'destructive',
+      });
       return false;
     }
+
+    // For sign in, just check password is not empty
+    if (!password || password.length < 1) {
+      toast({
+        title: 'Validation Error ⚠️',
+        description: 'Password is required',
+        variant: 'destructive',
+      });
+      return false;
+    }
+
+    return true;
+  };
+
+  const validateSignUpInputs = () => {
+    // Validate email
+    const emailResult = emailSchema.safeParse(email);
+    if (!emailResult.success) {
+      toast({
+        title: 'Validation Error ⚠️',
+        description: emailResult.error.errors[0].message,
+        variant: 'destructive',
+      });
+      return false;
+    }
+
+    // Validate password with strong requirements for sign up
+    const passwordResult = passwordSchema.safeParse(password);
+    if (!passwordResult.success) {
+      toast({
+        title: 'Weak Password ⚠️',
+        description: passwordResult.error.errors[0].message,
+        variant: 'destructive',
+      });
+      return false;
+    }
+
+    return true;
   };
 
   const handleSignIn = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!validateInputs()) return;
+    
+    // Check for lockout before proceeding
+    if (isAccountLocked(email)) {
+      const remaining = getRemainingLockoutTime(email);
+      const minutes = Math.ceil(remaining / 60000);
+      toast({
+        title: 'Account Locked 🔒',
+        description: `Too many failed attempts. Try again in ${minutes} minute${minutes > 1 ? 's' : ''}.`,
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    if (!validateSignInInputs()) return;
     
     setLoading(true);
     const { error } = await signIn(email, password);
@@ -62,11 +137,16 @@ const Auth = () => {
     if (error) {
       toast({
         title: 'Sign in failed ❌',
-        description: error.message === 'Invalid login credentials' 
-          ? 'Invalid email or password. Please try again.' 
-          : error.message,
+        description: error.message,
         variant: 'destructive',
       });
+      
+      // Update lockout message if account is now locked
+      if (isAccountLocked(email)) {
+        const remaining = getRemainingLockoutTime(email);
+        const minutes = Math.ceil(remaining / 60000);
+        setLockoutMessage(`Account temporarily locked. Try again in ${minutes} minute${minutes > 1 ? 's' : ''}.`);
+      }
     } else {
       navigate('/app/overview');
     }
@@ -74,10 +154,12 @@ const Auth = () => {
 
   const handleSignUp = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!validateInputs()) return;
+    if (!validateSignUpInputs()) return;
 
     setLoading(true);
-    const { error } = await signUp(email, password, fullName);
+    // Sanitize the full name before sending
+    const sanitizedName = fullName ? sanitizeInput(fullName) : undefined;
+    const { error } = await signUp(email, password, sanitizedName);
     setLoading(false);
 
     if (error) {
@@ -137,6 +219,12 @@ const Auth = () => {
 
               <TabsContent value="signin" className="animate-fade-in-up">
                 <form onSubmit={handleSignIn} className="space-y-4">
+                  {lockoutMessage && (
+                    <div className="flex items-center gap-2 p-3 rounded-lg bg-destructive/10 border border-destructive/20 text-destructive text-sm">
+                      <AlertTriangle className="h-4 w-4 flex-shrink-0" />
+                      <span>{lockoutMessage}</span>
+                    </div>
+                  )}
                   <div className="space-y-2">
                     <Label htmlFor="signin-email" className="text-foreground">Email</Label>
                     <Input
@@ -146,6 +234,7 @@ const Auth = () => {
                       value={email}
                       onChange={(e) => setEmail(e.target.value)}
                       required
+                      autoComplete="email"
                       className="bg-muted/30 border-border/50 focus:border-primary/50 focus:ring-primary/20 transition-all"
                     />
                   </div>
@@ -156,6 +245,7 @@ const Auth = () => {
                       type="password"
                       placeholder="••••••••"
                       value={password}
+                      autoComplete="current-password"
                       onChange={(e) => setPassword(e.target.value)}
                       required
                       className="bg-muted/30 border-border/50 focus:border-primary/50 focus:ring-primary/20 transition-all"

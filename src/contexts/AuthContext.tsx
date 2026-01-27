@@ -1,6 +1,16 @@
-import React, { createContext, useContext, useEffect, useState } from 'react';
+import React, { createContext, useContext, useEffect, useState, useCallback } from 'react';
 import { User, Session } from '@supabase/supabase-js';
-import { supabase } from '@/integrations/supabase/client';
+import { supabase, secureSignOut, startSessionMonitoring } from '@/integrations/supabase/client';
+import { 
+  initializeCsrfProtection,
+  isAccountLocked,
+  recordLoginAttempt,
+  getRemainingLockoutTime,
+  sanitizeErrorMessage,
+  logSecurityEvent,
+  emailSchema,
+  loginPasswordSchema,
+} from '@/lib/security';
 
 interface AuthContextType {
   user: User | null;
@@ -9,6 +19,7 @@ interface AuthContextType {
   signIn: (email: string, password: string) => Promise<{ error: Error | null }>;
   signUp: (email: string, password: string, fullName?: string) => Promise<{ error: Error | null }>;
   signOut: () => Promise<void>;
+  csrfToken: string | null;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -17,6 +28,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [user, setUser] = useState<User | null>(null);
   const [session, setSession] = useState<Session | null>(null);
   const [loading, setLoading] = useState(true);
+  const [csrfToken, setCsrfToken] = useState<string | null>(null);
+
+  // Initialize CSRF protection on mount
+  useEffect(() => {
+    const token = initializeCsrfProtection();
+    setCsrfToken(token);
+  }, []);
 
   useEffect(() => {
     // Set up auth state listener FIRST
@@ -25,6 +43,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         setSession(session);
         setUser(session?.user ?? null);
         setLoading(false);
+        
+        // Start session monitoring when user signs in
+        if (event === 'SIGNED_IN' && session) {
+          startSessionMonitoring();
+        }
       }
     );
 
@@ -33,20 +56,71 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       setSession(session);
       setUser(session?.user ?? null);
       setLoading(false);
+      
+      // Start monitoring if already logged in
+      if (session) {
+        startSessionMonitoring();
+      }
     });
 
     return () => subscription.unsubscribe();
   }, []);
 
-  const signIn = async (email: string, password: string) => {
-    const { error } = await supabase.auth.signInWithPassword({ email, password });
-    return { error: error as Error | null };
-  };
+  const signIn = useCallback(async (email: string, password: string) => {
+    // Validate inputs
+    const emailResult = emailSchema.safeParse(email);
+    if (!emailResult.success) {
+      return { error: new Error(emailResult.error.errors[0].message) };
+    }
+    
+    const passwordResult = loginPasswordSchema.safeParse(password);
+    if (!passwordResult.success) {
+      return { error: new Error(passwordResult.error.errors[0].message) };
+    }
 
-  const signUp = async (email: string, password: string, fullName?: string) => {
+    // Check for account lockout
+    if (isAccountLocked(email)) {
+      const remainingTime = getRemainingLockoutTime(email);
+      const minutes = Math.ceil(remainingTime / 60000);
+      logSecurityEvent('login_attempt', { email, blocked: true, reason: 'lockout' });
+      return { 
+        error: new Error(`Account temporarily locked. Please try again in ${minutes} minute${minutes > 1 ? 's' : ''}.`)
+      };
+    }
+
+    logSecurityEvent('login_attempt', { email });
+
+    const { error } = await supabase.auth.signInWithPassword({ 
+      email: emailResult.data, 
+      password 
+    });
+    
+    if (error) {
+      recordLoginAttempt(email, false);
+      logSecurityEvent('login_failure', { email, error: sanitizeErrorMessage(error) });
+      return { error: new Error(sanitizeErrorMessage(error)) };
+    }
+    
+    recordLoginAttempt(email, true);
+    logSecurityEvent('login_success', { email });
+    return { error: null };
+  }, []);
+
+  const signUp = useCallback(async (email: string, password: string, fullName?: string) => {
+    // Validate inputs
+    const emailResult = emailSchema.safeParse(email);
+    if (!emailResult.success) {
+      return { error: new Error(emailResult.error.errors[0].message) };
+    }
+    
+    const passwordResult = loginPasswordSchema.safeParse(password);
+    if (!passwordResult.success) {
+      return { error: new Error(passwordResult.error.errors[0].message) };
+    }
+
     const redirectUrl = `${window.location.origin}/`;
     const { error } = await supabase.auth.signUp({
-      email,
+      email: emailResult.data,
       password,
       options: {
         emailRedirectTo: redirectUrl,
@@ -55,15 +129,23 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         },
       },
     });
-    return { error: error as Error | null };
-  };
+    
+    if (error) {
+      return { error: new Error(sanitizeErrorMessage(error)) };
+    }
+    
+    return { error: null };
+  }, []);
 
-  const signOut = async () => {
-    await supabase.auth.signOut();
-  };
+  const signOut = useCallback(async () => {
+    await secureSignOut();
+    // Regenerate CSRF token after logout
+    const token = initializeCsrfProtection();
+    setCsrfToken(token);
+  }, []);
 
   return (
-    <AuthContext.Provider value={{ user, session, loading, signIn, signUp, signOut }}>
+    <AuthContext.Provider value={{ user, session, loading, signIn, signUp, signOut, csrfToken }}>
       {children}
     </AuthContext.Provider>
   );

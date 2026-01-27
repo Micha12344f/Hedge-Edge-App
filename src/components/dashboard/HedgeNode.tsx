@@ -20,13 +20,14 @@ interface HedgeNodeProps {
   isDragging?: boolean;
   isLinkSource?: boolean;
   onClick?: () => void;
+  onDetailsClick?: () => void;
   onMouseDown?: (e: React.MouseEvent) => void;
   position?: { x: number; y: number };
 }
 
 type ConnectionStatus = 'connected' | 'lagging' | 'risk';
 
-export const HedgeNode = ({ account, isSelected, isDragging, isLinkSource, onClick, onMouseDown, position }: HedgeNodeProps) => {
+export const HedgeNode = ({ account, isSelected, isDragging, isLinkSource, onClick, onDetailsClick, onMouseDown, position }: HedgeNodeProps) => {
   const profitTarget = Number(account.profit_target) || 0;
   const maxLoss = Number(account.max_loss) || 0;
   const maxDailyLoss = Number(account.max_daily_loss) || 0;
@@ -150,7 +151,7 @@ export const HedgeNode = ({ account, isSelected, isDragging, isLinkSource, onCli
           filter: isDragging ? 'drop-shadow(0 20px 30px rgba(0,0,0,0.4))' : undefined,
         } : undefined}
         className={cn(
-          'w-72 rounded-xl border-2 bg-card/90 backdrop-blur-md cursor-grab active:cursor-grabbing transition-all duration-300 select-none',
+          'w-72 rounded-xl border-2 bg-card/90 backdrop-blur-md cursor-grab active:cursor-grabbing transition-all duration-300 select-none overflow-hidden',
           config.border,
           config.glow,
           config.hoverGlow,
@@ -164,7 +165,7 @@ export const HedgeNode = ({ account, isSelected, isDragging, isLinkSource, onCli
           {/* Header Row */}
           <div className="flex items-center gap-2 mb-2">
             <div className={cn(
-              'w-8 h-8 rounded-lg flex items-center justify-center',
+              'w-8 h-8 rounded-lg flex items-center justify-center shrink-0',
               config.badge
             )}>
               <TypeIcon className="w-4 h-4" />
@@ -175,24 +176,24 @@ export const HedgeNode = ({ account, isSelected, isDragging, isLinkSource, onCli
           </div>
 
           {/* Platform Info */}
-          <p className="text-sm text-muted-foreground mb-3">
-            {account.platform || 'MT5'} - {account.login ? account.login.toString().charAt(0) : 'f'}
+          <p className="text-sm text-muted-foreground mb-3 truncate">
+            {account.platform || 'MT5'} - {account.login || '—'}
           </p>
 
           {/* Connection Details */}
           <div className="grid grid-cols-2 gap-3 mb-3">
-            <div className="flex items-start gap-2">
-              <div className="w-4 h-4 text-muted-foreground mt-0.5">👤</div>
-              <div>
+            <div className="flex items-start gap-2 min-w-0">
+              <div className="w-4 h-4 text-muted-foreground mt-0.5 shrink-0">👤</div>
+              <div className="min-w-0 overflow-hidden">
                 <p className="text-[10px] text-muted-foreground">Login</p>
-                <p className="text-xs font-medium text-foreground">{account.login || 'f'}</p>
+                <p className="text-xs font-medium text-foreground truncate">{account.login || '—'}</p>
               </div>
             </div>
-            <div className="flex items-start gap-2">
-              <div className="w-4 h-4 text-muted-foreground mt-0.5">🖥️</div>
-              <div>
+            <div className="flex items-start gap-2 min-w-0">
+              <div className="w-4 h-4 text-muted-foreground mt-0.5 shrink-0">🖥️</div>
+              <div className="min-w-0 overflow-hidden">
                 <p className="text-[10px] text-muted-foreground">Server</p>
-                <p className="text-xs font-medium text-foreground truncate">{account.server || 'f'}</p>
+                <p className="text-xs font-medium text-foreground truncate">{account.server || '—'}</p>
               </div>
             </div>
           </div>
@@ -207,20 +208,18 @@ export const HedgeNode = ({ account, isSelected, isDragging, isLinkSource, onCli
               <StatusIcon className="w-3 h-3" />
               {statusConfig[connectionStatus].label}
             </Badge>
-            {onClick && (
-              <Button
-                variant="ghost"
-                size="sm"
-                className="h-6 px-2 text-xs hover:bg-primary/20 hover:text-primary"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onClick();
-                }}
-              >
-                <ExternalLink className="w-3 h-3 mr-1" />
-                Details
-              </Button>
-            )}
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-6 px-2 text-xs hover:bg-primary/20 hover:text-primary"
+              onClick={(e) => {
+                e.stopPropagation();
+                onDetailsClick?.();
+              }}
+            >
+              <ExternalLink className="w-3 h-3 mr-1" />
+              Details
+            </Button>
           </div>
         </div>
       </div>
@@ -240,7 +239,7 @@ export const HedgeNode = ({ account, isSelected, isDragging, isLinkSource, onCli
         filter: isDragging ? 'drop-shadow(0 20px 30px rgba(0,0,0,0.4))' : undefined,
       } : undefined}
       className={cn(
-        'w-72 rounded-xl border-2 bg-card/90 backdrop-blur-md cursor-grab active:cursor-grabbing transition-all duration-300 select-none',
+        'w-72 rounded-xl border-2 bg-card/90 backdrop-blur-md cursor-grab active:cursor-grabbing transition-all duration-300 select-none overflow-hidden',
         config.border,
         config.glow,
         config.hoverGlow,
@@ -252,30 +251,30 @@ export const HedgeNode = ({ account, isSelected, isDragging, isLinkSource, onCli
       )}
     >
       {/* Header */}
-      <div className="px-4 py-3 border-b border-border/30 flex items-center justify-between">
-        <div className="flex items-center gap-2">
+      <div className="px-4 py-3 border-b border-border/30 flex items-center justify-between gap-2">
+        <div className="flex items-center gap-2 min-w-0 flex-1">
           <div className={cn(
-            'w-8 h-8 rounded-lg flex items-center justify-center',
+            'w-8 h-8 rounded-lg flex items-center justify-center shrink-0',
             config.badge
           )}>
             <TypeIcon className="w-4 h-4" />
           </div>
-          <div>
+          <div className="min-w-0 flex-1 overflow-hidden">
             <div className="flex items-center gap-2">
-              <span className="font-bold text-sm text-foreground truncate max-w-[120px]">
+              <span className="font-bold text-sm text-foreground truncate">
                 {account.account_name}
               </span>
-              <Badge variant="outline" className={cn('text-[10px] px-1.5 py-0', config.badge)}>
+              <Badge variant="outline" className={cn('text-[10px] px-1.5 py-0 shrink-0', config.badge)}>
                 {config.label}
               </Badge>
             </div>
-            <p className="text-xs text-muted-foreground">
+            <p className="text-xs text-muted-foreground truncate">
               {account.prop_firm || account.platform || 'Personal'}
             </p>
           </div>
         </div>
         <Badge variant="outline" className={cn(
-          'text-[10px] px-1.5 py-0.5 flex items-center gap-1',
+          'text-[10px] px-1.5 py-0.5 flex items-center gap-1 shrink-0',
           statusConfig[connectionStatus].badge,
           statusConfig[connectionStatus].pulse && 'animate-pulse'
         )}>
@@ -359,20 +358,18 @@ export const HedgeNode = ({ account, isSelected, isDragging, isLinkSource, onCli
         </div>
 
         {/* View Details Button */}
-        {onClick && (
-          <Button
-            variant="outline"
-            size="sm"
-            className="w-full h-7 text-xs hover:bg-primary/20 hover:text-primary hover:border-primary/50 mt-2"
-            onClick={(e) => {
-              e.stopPropagation();
-              onClick();
-            }}
-          >
-            <ExternalLink className="w-3 h-3 mr-1" />
-            View Live Details
-          </Button>
-        )}
+        <Button
+          variant="outline"
+          size="sm"
+          className="w-full h-7 text-xs hover:bg-primary/20 hover:text-primary hover:border-primary/50 mt-2"
+          onClick={(e) => {
+            e.stopPropagation();
+            onDetailsClick?.();
+          }}
+        >
+          <ExternalLink className="w-3 h-3 mr-1" />
+          View Live Details
+        </Button>
       </div>
     </div>
   );

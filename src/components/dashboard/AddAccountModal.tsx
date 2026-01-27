@@ -21,29 +21,59 @@ interface AddAccountModalProps {
   hedgeAccounts?: TradingAccount[];
 }
 
-const PROP_FIRMS = [
-  'FTMO',
-  'The 5%ers',
-  'MyForexFunds',
-  'Funded Trading Plus',
-  'True Forex Funds',
-  'Alpha Capital',
-  'Funding Pips',
-  'TopStep',
-  'Apex',
-  'Other',
+export const PROP_FIRMS = [
+  { name: 'Funding Pips', logo: 'https://www.google.com/s2/favicons?domain=fundingpips.com&sz=64' },
+  { name: 'The5ers', logo: 'https://www.google.com/s2/favicons?domain=the5ers.com&sz=64' },
+  { name: 'Alpha Capital', logo: 'https://www.google.com/s2/favicons?domain=alphacapitalgroup.uk&sz=64' },
+  { name: 'Blueberry Funded', logo: 'https://www.google.com/s2/favicons?domain=blueberryfunded.com&sz=64' },
+  { name: 'ThinkCapital', logo: 'https://www.google.com/s2/favicons?domain=thinkcapital.com&sz=64' },
+  { name: 'ATFunded', logo: 'https://www.google.com/s2/favicons?domain=atfunded.com&sz=64' },
+  { name: 'Hantec Trader', logo: 'https://www.google.com/s2/favicons?domain=htrader.com&sz=64' },
+  { name: 'QT Funded', logo: 'https://www.google.com/s2/favicons?domain=qtfunded.com&sz=64' },
+  { name: 'Blue Guardian', logo: 'https://www.google.com/s2/favicons?domain=blueguardian.com&sz=64' },
+  { name: 'BrightFunded', logo: 'https://www.google.com/s2/favicons?domain=brightfunded.com&sz=64' },
+  { name: 'AquaFunded', logo: 'https://www.google.com/s2/favicons?domain=aquafunded.com&sz=64' },
+  { name: 'City Traders Imperium', logo: 'https://www.google.com/s2/favicons?domain=citytradersimperium.com&sz=64' },
+  { name: 'Lark Funding', logo: 'https://www.google.com/s2/favicons?domain=larkfunding.com&sz=64' },
+  { name: 'Audacity Capital', logo: 'https://www.google.com/s2/favicons?domain=audacitycapital.co.uk&sz=64' },
+  { name: 'Funded Trading Plus', logo: 'https://www.google.com/s2/favicons?domain=fundedtradingplus.com&sz=64' },
+  { name: 'Alpha Futures', logo: 'https://www.google.com/s2/favicons?domain=alpha-futures.com&sz=64' },
+  { name: 'E8 Markets', logo: 'https://www.google.com/s2/favicons?domain=e8markets.com&sz=64' },
+  { name: 'FundedNext', logo: 'https://www.google.com/s2/favicons?domain=fundednext.com&sz=64' },
+  { name: 'Goat Funded Trader', logo: 'https://www.google.com/s2/favicons?domain=goatfundedtrader.com&sz=64' },
+  { name: 'Top One Trader', logo: 'https://www.google.com/s2/favicons?domain=toponetrader.com&sz=64' },
+  { name: 'Blueberry Futures', logo: 'https://www.google.com/s2/favicons?domain=blueberryfutures.com&sz=64' },
+  { name: 'For Traders', logo: 'https://www.google.com/s2/favicons?domain=fortraders.com&sz=64' },
+  { name: 'E8 Futures', logo: 'https://www.google.com/s2/favicons?domain=e8markets.com&sz=64' },
+  { name: 'Funded Elite', logo: 'https://www.google.com/s2/favicons?domain=fundedelite.com&sz=64' },
+  { name: 'Futures Elite', logo: 'https://www.google.com/s2/favicons?domain=futureselite.com&sz=64' },
+  { name: 'FTMO', logo: 'https://www.google.com/s2/favicons?domain=ftmo.com&sz=64' },
+  { name: 'FundedElite', logo: 'https://www.google.com/s2/favicons?domain=fundedelite.com&sz=64' },
+  { name: 'OANDA Prop Trader', logo: 'https://www.google.com/s2/favicons?domain=oanda.com&sz=64' },
+  { name: 'Seacrest Markets', logo: 'https://www.google.com/s2/favicons?domain=seacrestmarkets.io&sz=64' },
+  { name: 'Fintokei', logo: 'https://www.google.com/s2/favicons?domain=fintokei.com&sz=64' },
+  { name: 'Finotive Funding', logo: 'https://www.google.com/s2/favicons?domain=finotivefunding.com&sz=64' },
+  { name: 'Crypto Fund Trader', logo: 'https://www.google.com/s2/favicons?domain=cryptofundtrader.com&sz=64' },
+  { name: 'Nordic Funder', logo: 'https://www.google.com/s2/favicons?domain=nordicfunder.com&sz=64' },
+  { name: 'FXIFY', logo: 'https://www.google.com/s2/favicons?domain=fxify.com&sz=64' },
+  { name: 'Axi Select', logo: 'https://www.google.com/s2/favicons?domain=axi.com&sz=64' },
 ];
 
 const ACCOUNT_SIZES = [
-  { label: '$5,000', value: 5000 },
-  { label: '$10,000', value: 10000 },
-  { label: '$25,000', value: 25000 },
-  { label: '$50,000', value: 50000 },
-  { label: '$100,000', value: 100000 },
-  { label: '$200,000', value: 200000 },
+  { label: '$5k', value: 5000 },
+  { label: '$10k', value: 10000 },
+  { label: '$25k', value: 25000 },
+  { label: '$50k', value: 50000 },
+  { label: '$100k', value: 100000 },
+  { label: '$150k', value: 150000 },
+  { label: '$200k', value: 200000 },
+  { label: '$250k', value: 250000 },
+  { label: '$500k', value: 500000 },
+  { label: '$1M', value: 1000000 },
+  { label: '$2M', value: 2000000 },
 ];
 
-const PLATFORMS = ['MT4', 'MT5', 'cTrader', 'TradingView', 'Other'];
+const PLATFORMS = ['MT4', 'MT5', 'cTrader'];
 
 const ACCOUNT_TYPES = [
   {
@@ -403,10 +433,10 @@ export const AddAccountModal = ({ open, onOpenChange, onSubmit, defaultType, hed
               />
             </div>
 
-            {/* VPS Status and Validation */}
+            {/* Connection Status and Validation */}
             {(formData.platform === 'MT5' || formData.platform === 'MT4') && (
               <div className="space-y-3">
-                {/* VPS Status */}
+                {/* Connection Status */}
                 <div className={cn(
                   "flex items-center gap-2 p-3 rounded-lg border",
                   vpsStatus === 'online' ? "bg-emerald-500/10 border-emerald-500/20 text-emerald-400" :
@@ -415,9 +445,9 @@ export const AddAccountModal = ({ open, onOpenChange, onSubmit, defaultType, hed
                 )}>
                   <Server className="h-4 w-4 shrink-0" />
                   <span className="text-sm flex-1">
-                    {vpsStatus === 'checking' && 'Checking VPS server...'}
-                    {vpsStatus === 'online' && 'VPS MT5 Server Online'}
-                    {vpsStatus === 'offline' && 'VPS Server Offline - Check connection'}
+                    {vpsStatus === 'checking' && 'Checking connectivity...'}
+                    {vpsStatus === 'online' && 'Account Connectivity Ready'}
+                    {vpsStatus === 'offline' && 'Connection Unavailable - Please try again later'}
                   </span>
                   {vpsStatus === 'checking' && <Loader2 className="h-4 w-4 animate-spin" />}
                 </div>
@@ -582,12 +612,38 @@ export const AddAccountModal = ({ open, onOpenChange, onSubmit, defaultType, hed
                 onValueChange={(value) => setFormData({ ...formData, prop_firm: value })}
               >
                 <SelectTrigger className="bg-muted/30 border-border/50">
-                  <SelectValue placeholder="Select prop firm" />
+                  <SelectValue placeholder="Select prop firm">
+                    {formData.prop_firm && (
+                      <div className="flex items-center gap-2">
+                        {PROP_FIRMS.find(f => f.name === formData.prop_firm)?.logo && (
+                          <img 
+                            src={PROP_FIRMS.find(f => f.name === formData.prop_firm)?.logo || ''} 
+                            alt="" 
+                            className="w-5 h-5 rounded object-contain"
+                            referrerPolicy="no-referrer"
+                            onError={(e) => { e.currentTarget.style.display = 'none'; }}
+                          />
+                        )}
+                        <span>{formData.prop_firm}</span>
+                      </div>
+                    )}
+                  </SelectValue>
                 </SelectTrigger>
-                <SelectContent className="bg-card/95 backdrop-blur-xl border-border/30">
+                <SelectContent className="bg-card/95 backdrop-blur-xl border-border/30 max-h-[300px]">
                   {PROP_FIRMS.map((firm) => (
-                    <SelectItem key={firm} value={firm} className="cursor-pointer">
-                      {firm}
+                    <SelectItem key={firm.name} value={firm.name} className="cursor-pointer">
+                      <div className="flex items-center gap-2">
+                        {firm.logo && (
+                          <img 
+                            src={firm.logo} 
+                            alt="" 
+                            className="w-5 h-5 rounded object-contain"
+                            referrerPolicy="no-referrer"
+                            onError={(e) => { e.currentTarget.style.display = 'none'; }}
+                          />
+                        )}
+                        <span>{firm.name}</span>
+                      </div>
                     </SelectItem>
                   ))}
                 </SelectContent>

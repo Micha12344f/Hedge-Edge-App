@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useTradingAccounts, TradingAccount } from '@/hooks/useTradingAccounts';
 import { DraggableHedgeMap, HedgeRelationship } from '@/components/dashboard/DraggableHedgeMap';
 import { AddAccountModal } from '@/components/dashboard/AddAccountModal';
@@ -56,6 +56,17 @@ const Accounts = () => {
   const [detailsModalOpen, setDetailsModalOpen] = useState(false);
   const [hedgeMapAccountIds, setHedgeMapAccountIds] = useState<string[]>(getStoredHedgeMapAccounts);
   const { toast } = useToast();
+
+  // Clean up invalid hedge map account IDs only after accounts have loaded
+  useEffect(() => {
+    if (!loading && accounts.length > 0) {
+      const validIds = hedgeMapAccountIds.filter(id => accounts.some(acc => acc.id === id));
+      if (validIds.length !== hedgeMapAccountIds.length) {
+        setHedgeMapAccountIds(validIds);
+        saveHedgeMapAccounts(validIds);
+      }
+    }
+  }, [accounts, loading]); // Only run when accounts change or loading finishes
 
   const handleAccountClick = (account: TradingAccount) => {
     setSelectedAccount(account);
@@ -121,21 +132,11 @@ const Accounts = () => {
   };
 
   // Filter accounts to only show those added to the hedge map
-  // Also clean up any IDs that no longer exist in the accounts list
-  const validHedgeMapAccountIds = hedgeMapAccountIds.filter(id => 
-    accounts.some(acc => acc.id === id)
-  );
-  
-  // Update localStorage if we cleaned up invalid IDs
-  if (validHedgeMapAccountIds.length !== hedgeMapAccountIds.length) {
-    setHedgeMapAccountIds(validHedgeMapAccountIds);
-    saveHedgeMapAccounts(validHedgeMapAccountIds);
-  }
-  
-  const hedgeMapAccounts = accounts.filter(acc => validHedgeMapAccountIds.includes(acc.id));
+  // hedgeMapAccountIds are already cleaned up via useEffect above
+  const hedgeMapAccounts = accounts.filter(acc => hedgeMapAccountIds.includes(acc.id));
   
   // Available accounts to add (not already in the hedge map)
-  const availableAccounts = accounts.filter(acc => !validHedgeMapAccountIds.includes(acc.id));
+  const availableAccounts = accounts.filter(acc => !hedgeMapAccountIds.includes(acc.id));
 
   const handleAddAccountToMap = () => {
     if (selectedAccountToAdd) {

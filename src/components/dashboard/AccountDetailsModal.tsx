@@ -208,19 +208,19 @@ export function AccountDetailsModal({
           {/* VPS and Connection Status */}
           <div className="flex items-center justify-between p-2 bg-muted/50 rounded-lg mt-2">
             <div className="flex items-center gap-2">
-              {/* VPS Status */}
+              {/* Connection Status */}
               <Badge
                 variant="outline"
                 className={
                   vpsStatus === 'online' 
-                    ? "bg-blue-500/10 text-blue-500 border-blue-500/20"
+                    ? "bg-primary/10 text-primary border-primary/20"
                     : vpsStatus === 'offline'
                     ? "bg-red-500/10 text-red-500 border-red-500/20"
                     : "bg-muted text-muted-foreground"
                 }
               >
                 <Server className="h-3 w-3 mr-1" />
-                VPS {vpsStatus === 'checking' ? '...' : vpsStatus}
+                {vpsStatus === 'checking' ? 'Connecting...' : vpsStatus === 'online' ? 'Connected' : 'Offline'}
               </Badge>
               
               {/* MT5 Connection */}
@@ -228,7 +228,7 @@ export function AccountDetailsModal({
                 isConnected ? (
                   <Badge
                     variant="outline"
-                    className="bg-green-500/10 text-green-600 border-green-500/20"
+                    className="bg-primary/10 text-primary border-primary/20"
                   >
                     <Wifi className="h-3 w-3 mr-1" />
                     MT5 Connected
@@ -236,7 +236,7 @@ export function AccountDetailsModal({
                 ) : (
                   <Badge
                     variant="outline"
-                    className="bg-red-500/10 text-red-600 border-red-500/20"
+                    className="bg-red-500/10 text-red-500 border-red-500/20"
                   >
                     <WifiOff className="h-3 w-3 mr-1" />
                     Disconnected
@@ -321,25 +321,19 @@ export function AccountDetailsModal({
               </Card>
             )}
 
-            {/* VPS Offline */}
+            {/* Connection Unavailable */}
             {vpsStatus === 'offline' && (
               <Card className="border-orange-500/50">
                 <CardHeader>
                   <CardTitle className="flex items-center gap-2 text-orange-500 text-sm">
                     <Server className="h-4 w-4" />
-                    VPS Server Offline
+                    Connection Unavailable
                   </CardTitle>
                 </CardHeader>
                 <CardContent className="space-y-3">
                   <p className="text-sm text-muted-foreground">
-                    Cannot connect to the MT5 VPS server. Make sure the server is running.
+                    Unable to connect to your MT5 account. Please try again later.
                   </p>
-                  <div className="p-3 bg-muted rounded-lg space-y-1">
-                    <p className="text-xs font-medium">For development:</p>
-                    <code className="text-xs block bg-background p-2 rounded">
-                      python mt5_vps_server.py
-                    </code>
-                  </div>
                   <Button 
                     onClick={() => {
                       setVpsStatus('checking');
@@ -358,12 +352,12 @@ export function AccountDetailsModal({
               </Card>
             )}
 
-            {/* VPS Checking */}
+            {/* Checking Connection */}
             {vpsStatus === 'checking' && (
               <div className="flex flex-col items-center justify-center p-8 space-y-4">
                 <Loader2 className="h-8 w-8 animate-spin text-primary" />
                 <p className="text-muted-foreground">
-                  Checking VPS server...
+                  Checking connection...
                 </p>
               </div>
             )}
@@ -373,7 +367,7 @@ export function AccountDetailsModal({
               <div className="flex flex-col items-center justify-center p-8 space-y-4">
                 <Loader2 className="h-8 w-8 animate-spin text-primary" />
                 <p className="text-muted-foreground">
-                  Connecting to MT5 via VPS...
+                  Connecting to MT5...
                 </p>
               </div>
             )}
@@ -478,24 +472,24 @@ export function AccountDetailsModal({
                     </CardContent>
                   </Card>
 
-                  <Card className={isProfit ? "bg-green-500/5" : "bg-red-500/5"}>
+                  <Card className={isProfit ? "bg-primary/5" : "bg-red-500/5"}>
                     <CardHeader className="pb-1 pt-3 px-3">
                       <CardTitle className="text-xs font-medium text-muted-foreground flex items-center gap-1">
                         {isProfit ? (
-                          <TrendingUp className="h-3 w-3 text-green-600" />
+                          <TrendingUp className="h-3 w-3 text-primary" />
                         ) : (
-                          <TrendingDown className="h-3 w-3 text-red-600" />
+                          <TrendingDown className="h-3 w-3 text-red-500" />
                         )}
                         Total P&L
                       </CardTitle>
                     </CardHeader>
                     <CardContent className="px-3 pb-3">
-                      <div className={`text-xl font-bold ${isProfit ? "text-green-600" : "text-red-600"}`}>
+                      <div className={`text-xl font-bold ${isProfit ? "text-primary" : "text-red-500"}`}>
                         {snapshot 
                           ? formatCurrency(actualPnL, snapshot.currency)
                           : formatCurrency(actualPnL)}
                       </div>
-                      <p className={`text-xs ${isProfit ? "text-green-600" : "text-red-600"}`}>
+                      <p className={`text-xs ${isProfit ? "text-primary" : "text-red-500"}`}>
                         {formatPercent(actualPnLPercent)}
                       </p>
                     </CardContent>
@@ -504,11 +498,11 @@ export function AccountDetailsModal({
 
                 {/* Floating P&L (unrealized) */}
                 {snapshot && snapshot.profit !== 0 && (
-                  <Card className={snapshot.profit >= 0 ? "bg-green-500/5 border-green-500/20" : "bg-red-500/5 border-red-500/20"}>
+                  <Card className={snapshot.profit >= 0 ? "bg-primary/5 border-primary/20" : "bg-red-500/5 border-red-500/20"}>
                     <CardContent className="p-3">
                       <div className="flex items-center justify-between">
                         <span className="text-sm text-muted-foreground">Floating P&L (Unrealized)</span>
-                        <span className={`text-lg font-bold ${snapshot.profit >= 0 ? "text-green-600" : "text-red-600"}`}>
+                        <span className={`text-lg font-bold ${snapshot.profit >= 0 ? "text-primary" : "text-red-500"}`}>
                           {formatCurrency(snapshot.profit, snapshot.currency)}
                         </span>
                       </div>
@@ -614,13 +608,13 @@ function PositionRow({
       <div className="flex items-center gap-2">
         <div
           className={`p-1.5 rounded-full ${
-            isBuy ? "bg-green-500/10" : "bg-red-500/10"
+            isBuy ? "bg-primary/10" : "bg-red-500/10"
           }`}
         >
           {isBuy ? (
-            <ArrowUpRight className="h-3 w-3 text-green-600" />
+            <ArrowUpRight className="h-3 w-3 text-primary" />
           ) : (
-            <ArrowDownRight className="h-3 w-3 text-red-600" />
+            <ArrowDownRight className="h-3 w-3 text-red-500" />
           )}
         </div>
         <div>
@@ -645,7 +639,7 @@ function PositionRow({
         </div>
         <div
           className={`text-xs font-medium ${
-            isProfit ? "text-green-600" : "text-red-600"
+            isProfit ? "text-primary" : "text-red-500"
           }`}
         >
           {isProfit ? "+" : ""}

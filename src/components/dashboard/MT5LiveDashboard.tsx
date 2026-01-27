@@ -91,8 +91,8 @@ export function MT5LiveDashboard() {
     );
   }
 
-  const profitColor = (snapshot.profit || 0) >= 0 ? "text-green-600" : "text-red-600";
-  const profitBg = (snapshot.profit || 0) >= 0 ? "bg-green-500/10" : "bg-red-500/10";
+  const profitColor = (snapshot.profit || 0) >= 0 ? "text-primary" : "text-red-500";
+  const profitBg = (snapshot.profit || 0) >= 0 ? "bg-primary/10" : "bg-red-500/10";
 
   return (
     <div className="space-y-6">
@@ -100,12 +100,12 @@ export function MT5LiveDashboard() {
       <div className="flex items-center justify-between p-3 bg-muted/50 rounded-lg">
         <div className="flex items-center gap-3">
           {isConnected ? (
-            <Badge variant="outline" className="bg-green-500/10 text-green-600 border-green-500/20">
+            <Badge variant="outline" className="bg-primary/10 text-primary border-primary/20">
               <Wifi className="h-3 w-3 mr-1" />
               Connected
             </Badge>
           ) : (
-            <Badge variant="outline" className="bg-red-500/10 text-red-600 border-red-500/20">
+            <Badge variant="outline" className="bg-red-500/10 text-red-500 border-red-500/20">
               <WifiOff className="h-3 w-3 mr-1" />
               Disconnected
             </Badge>
@@ -183,9 +183,9 @@ export function MT5LiveDashboard() {
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-medium">Floating P/L</CardTitle>
             {(snapshot.profit || 0) >= 0 ? (
-              <TrendingUp className="h-4 w-4 text-green-600" />
+              <TrendingUp className="h-4 w-4 text-primary" />
             ) : (
-              <TrendingDown className="h-4 w-4 text-red-600" />
+              <TrendingDown className="h-4 w-4 text-red-500" />
             )}
           </CardHeader>
           <CardContent>
@@ -267,11 +267,11 @@ function PositionRow({ position, currency }: { position: MT5Position; currency: 
   return (
     <div className="flex items-center justify-between p-4 border rounded-lg hover:bg-muted/50 transition-colors">
       <div className="flex items-center gap-4">
-        <div className={`p-2 rounded-full ${isBuy ? 'bg-green-500/10' : 'bg-red-500/10'}`}>
+        <div className={`p-2 rounded-full ${isBuy ? 'bg-primary/10' : 'bg-red-500/10'}`}>
           {isBuy ? (
-            <ArrowUpRight className="h-4 w-4 text-green-600" />
+            <ArrowUpRight className="h-4 w-4 text-primary" />
           ) : (
-            <ArrowDownRight className="h-4 w-4 text-red-600" />
+            <ArrowDownRight className="h-4 w-4 text-red-500" />
           )}
         </div>
         <div>
@@ -291,7 +291,7 @@ function PositionRow({ position, currency }: { position: MT5Position; currency: 
         <div className="font-medium">
           {formatPrice(position.price_current)}
         </div>
-        <div className={`text-sm font-medium ${isProfit ? 'text-green-600' : 'text-red-600'}`}>
+        <div className={`text-sm font-medium ${isProfit ? 'text-primary' : 'text-red-500'}`}>
           {isProfit ? '+' : ''}{formatCurrency(position.profit, currency)}
         </div>
       </div>
@@ -317,11 +317,11 @@ function TickCard({ symbol, tick }: { symbol: string; tick: MT5Tick }) {
       <div className="space-y-2">
         <div className="flex justify-between items-center">
           <span className="text-sm text-muted-foreground">Bid</span>
-          <span className="font-mono text-red-600">{formatPrice(tick.bid, decimals)}</span>
+          <span className="font-mono text-red-500">{formatPrice(tick.bid, decimals)}</span>
         </div>
         <div className="flex justify-between items-center">
           <span className="text-sm text-muted-foreground">Ask</span>
-          <span className="font-mono text-green-600">{formatPrice(tick.ask, decimals)}</span>
+          <span className="font-mono text-primary">{formatPrice(tick.ask, decimals)}</span>
         </div>
       </div>
     </div>

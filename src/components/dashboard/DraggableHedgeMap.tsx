@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { TradingAccount } from '@/hooks/useTradingAccounts';
 import { HedgeNode } from './HedgeNode';
+import { MapNode } from './MapNode';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { useToast } from '@/hooks/use-toast';
@@ -58,6 +59,8 @@ interface DraggableHedgeMapProps {
 
 // Local storage key for positions
 const POSITIONS_KEY = 'hedge_edge_node_positions';
+const ZOOM_KEY = 'hedge_edge_map_zoom';
+const PAN_KEY = 'hedge_edge_map_pan';
 const GRID_SIZE = 20; // Snap grid size
 
 // Card dimensions for layout calculations
@@ -79,10 +82,39 @@ const savePositions = (positions: NodePosition[]) => {
   localStorage.setItem(POSITIONS_KEY, JSON.stringify(positions));
 };
 
+const getStoredZoom = (): number => {
+  try {
+    const stored = localStorage.getItem(ZOOM_KEY);
+    return stored ? parseFloat(stored) : 1;
+  } catch {
+    return 1;
+  }
+};
+
+const saveZoom = (zoom: number) => {
+  localStorage.setItem(ZOOM_KEY, zoom.toString());
+};
+
+const getStoredPan = (): { x: number; y: number } => {
+  try {
+    const stored = localStorage.getItem(PAN_KEY);
+    return stored ? JSON.parse(stored) : { x: 0, y: 0 };
+  } catch {
+    return { x: 0, y: 0 };
+  }
+};
+
+const savePan = (pan: { x: number; y: number }) => {
+  localStorage.setItem(PAN_KEY, JSON.stringify(pan));
+};
+
 // Snap to grid helper
 const snapToGrid = (value: number): number => {
   return Math.round(value / GRID_SIZE) * GRID_SIZE;
 };
+
+// Circular node dimensions (MapNode for evaluation/funded accounts)
+const CIRCLE_NODE_RADIUS = 48; // w-24 h-24 = 96px diameter, so radius = 48
 
 // Calculate edge point of a card for line attachment
 const getCardEdgePoint = (
@@ -118,6 +150,25 @@ const getCardEdgePoint = (
   return { x: cardPos.x + edgeX, y: cardPos.y + edgeY };
 };
 
+// Calculate edge point for circular nodes (MapNode)
+const getCircleEdgePoint = (
+  circlePos: { x: number; y: number },
+  targetPos: { x: number; y: number },
+  radius: number = CIRCLE_NODE_RADIUS
+): { x: number; y: number } => {
+  const dx = targetPos.x - circlePos.x;
+  const dy = targetPos.y - circlePos.y;
+  const distance = Math.sqrt(dx * dx + dy * dy);
+  
+  if (distance === 0) return circlePos;
+  
+  // Normalize and multiply by radius to get edge point
+  const edgeX = circlePos.x + (dx / distance) * radius;
+  const edgeY = circlePos.y + (dy / distance) * radius;
+  
+  return { x: edgeX, y: edgeY };
+};
+
 export const DraggableHedgeMap = ({ 
   accounts, 
   relationships = [],
@@ -134,8 +185,8 @@ export const DraggableHedgeMap = ({
   const autoAlignRef = useRef<(() => void) | null>(null);
   const { toast } = useToast();
   const { collapsed, setCollapsed } = useSidebar();
-  const [zoom, setZoom] = useState(1);
-  const [pan, setPan] = useState({ x: 0, y: 0 });
+  const [zoom, setZoom] = useState(getStoredZoom);
+  const [pan, setPan] = useState(getStoredPan);
   const [isPanning, setIsPanning] = useState(false);
   const [panStart, setPanStart] = useState({ x: 0, y: 0 });
   const [selectedNode, setSelectedNode] = useState<string | null>(null);
@@ -174,13 +225,22 @@ export const DraggableHedgeMap = ({
   }, []);
 
   // Auto-align on mount when container and accounts are ready
+  // BUT only if no positions exist for these accounts (fresh start)
   useEffect(() => {
     if (autoAlignOnMount && !hasAutoAligned.current && containerSize.width > 0 && accounts.length > 0) {
+      // Check if we already have stored positions for any of these accounts
+      const storedPositions = getStoredPositions();
+      const accountIds = accounts.map(a => a.id);
+      const hasExistingPositions = accountIds.some(id => storedPositions.some(p => p.id === id));
+      
       hasAutoAligned.current = true;
-      // Small delay to ensure everything is rendered
-      setTimeout(() => {
-        autoAlignRef.current?.();
-      }, 100);
+      
+      // Only auto-align if there are no existing positions
+      if (!hasExistingPositions) {
+        setTimeout(() => {
+          autoAlignRef.current?.();
+        }, 100);
+      }
     }
   }, [autoAlignOnMount, containerSize, accounts.length]);
 
@@ -297,6 +357,7 @@ export const DraggableHedgeMap = ({
     setNodePositions(newPositions);
     savePositions(newPositions);
     setPan({ x: 0, y: 0 });
+    savePan({ x: 0, y: 0 });
     
     // Calculate actual bounding box from positions
     const allX = newPositions.map(p => p.x);
@@ -320,7 +381,9 @@ export const DraggableHedgeMap = ({
     const fitZoom = Math.min(zoomX, zoomY, 0.85);
     
     // Clamp zoom - never go above 0.85 to ensure spacing
-    setZoom(Math.max(0.25, Math.min(fitZoom, 0.85)));
+    const newZoom = Math.max(0.25, Math.min(fitZoom, 0.85));
+    setZoom(newZoom);
+    saveZoom(newZoom);
   };
 
   // Keep ref updated
@@ -351,9 +414,11 @@ export const DraggableHedgeMap = ({
     
     // Clamp and apply
     const finalZoom = Math.max(0.25, Math.min(fitZoom * 0.9, 1.2));
+    const newPan = { x: -centerX * finalZoom, y: -centerY * finalZoom };
     setZoom(finalZoom);
-    setPan({ x: -centerX * finalZoom, y: -centerY * finalZoom });    setZoom(Math.max(0.3, Math.min(fitZoom, 1)));
-    setPan({ x: -centerX * fitZoom, y: -centerY * fitZoom });
+    setPan(newPan);
+    saveZoom(finalZoom);
+    savePan(newPan);
   };
 
   // Mouse handlers for panning
@@ -406,6 +471,9 @@ export const DraggableHedgeMap = ({
   const handleMouseUp = () => {
     if (draggingNode) {
       savePositions(nodePositions);
+    }
+    if (isPanning) {
+      savePan(pan);
     }
     setIsPanning(false);
     setDraggingNode(null);
@@ -547,11 +615,21 @@ export const DraggableHedgeMap = ({
   };
 
   // Zoom handlers
-  const handleZoomIn = () => setZoom(z => Math.min(z + 0.2, 2));
-  const handleZoomOut = () => setZoom(z => Math.max(z - 0.2, 0.3));
+  const handleZoomIn = () => setZoom(z => {
+    const newZoom = Math.min(z + 0.2, 2);
+    saveZoom(newZoom);
+    return newZoom;
+  });
+  const handleZoomOut = () => setZoom(z => {
+    const newZoom = Math.max(z - 0.2, 0.3);
+    saveZoom(newZoom);
+    return newZoom;
+  });
   const handleResetView = () => {
     setZoom(1);
     setPan({ x: 0, y: 0 });
+    saveZoom(1);
+    savePan({ x: 0, y: 0 });
   };
 
   // Wheel event handler for Ctrl+scroll zoom
@@ -560,7 +638,11 @@ export const DraggableHedgeMap = ({
       e.preventDefault();
       e.stopPropagation();
       const delta = -e.deltaY * 0.001;
-      setZoom(z => Math.max(0.3, Math.min(z + delta, 2)));
+      setZoom(z => {
+        const newZoom = Math.max(0.3, Math.min(z + delta, 2));
+        saveZoom(newZoom);
+        return newZoom;
+      });
     }
   }, []);
 
@@ -655,6 +737,19 @@ export const DraggableHedgeMap = ({
     const lines: JSX.Element[] = [];
     const hedgesWithRouters = new Set(routers.map(r => r.hedgeId));
     
+    // Helper to get the correct edge point based on account type
+    const getEdgePoint = (accountId: string, pos: { x: number; y: number }, targetPos: { x: number; y: number }) => {
+      const account = accounts.find(a => a.id === accountId);
+      if (!account) return pos;
+      
+      // Circular nodes for evaluation/funded, card nodes for hedge (live)
+      if (account.phase === 'evaluation' || account.phase === 'funded') {
+        return getCircleEdgePoint(pos, targetPos);
+      } else {
+        return getCardEdgePoint(pos, targetPos);
+      }
+    };
+    
     relationships
       .filter((rel) => {
         const sourceAccount = accounts.find(a => a.id === rel.sourceId);
@@ -681,9 +776,9 @@ export const DraggableHedgeMap = ({
           const hedgePos = getNodePosition(hedgeId)!;
           const linkedPos = getNodePosition(linkedId)!;
           
-          // Edge points
-          const hedgeEdge = getCardEdgePoint(hedgePos, router.position);
-          const linkedEdge = getCardEdgePoint(linkedPos, router.position);
+          // Edge points using correct calculation based on node type
+          const hedgeEdge = getEdgePoint(hedgeId, hedgePos, router.position);
+          const linkedEdge = getEdgePoint(linkedId, linkedPos, router.position);
           
           // Hedge to router
           if (!lines.some(l => l.key === `router-line-${hedgeId}`)) {
@@ -714,8 +809,8 @@ export const DraggableHedgeMap = ({
           );
         } else {
           // Direct line with edge attachment
-          const sourceEdge = getCardEdgePoint(sourcePos, targetPos);
-          const targetEdge = getCardEdgePoint(targetPos, sourcePos);
+          const sourceEdge = getEdgePoint(rel.sourceId, sourcePos, targetPos);
+          const targetEdge = getEdgePoint(rel.targetId, targetPos, sourcePos);
           const path = `M ${sourceEdge.x} ${sourceEdge.y} L ${targetEdge.x} ${targetEdge.y}`;
           
           lines.push(
@@ -740,6 +835,9 @@ export const DraggableHedgeMap = ({
 
   // Render routers
   const renderRouters = () => {
+    // Disable transitions when any node is being dragged
+    const isAnyNodeDragging = draggingNode !== null;
+    
     return routers.map((router, index) => {
       return (
         <div
@@ -750,7 +848,7 @@ export const DraggableHedgeMap = ({
             top: router.position.y,
             transform: 'translate(-50%, -50%)',
             zIndex: 10,
-            transition: `left 0.4s cubic-bezier(0.4, 0, 0.2, 1) ${index * 50 + 100}ms, top 0.4s cubic-bezier(0.4, 0, 0.2, 1) ${index * 50 + 100}ms`,
+            transition: isAnyNodeDragging ? 'none' : `left 0.4s cubic-bezier(0.4, 0, 0.2, 1) ${index * 50 + 100}ms, top 0.4s cubic-bezier(0.4, 0, 0.2, 1) ${index * 50 + 100}ms`,
           }}
         >
           <div className="relative">
@@ -926,14 +1024,21 @@ export const DraggableHedgeMap = ({
             transformOrigin: '0 0',
           }}
         >
-          {/* Connections SVG */}
+          {/* Connections SVG - transitions sync with node movements */}
           <svg
             className="absolute overflow-visible"
-            style={{ left: 0, top: 0 }}
+            style={{ 
+              left: 0, 
+              top: 0,
+              // Disable pointer events on the SVG container, individual paths handle clicks
+              pointerEvents: 'none',
+            }}
             width="1"
             height="1"
           >
-            {renderConnections()}
+            <g style={{ pointerEvents: 'auto' }}>
+              {renderConnections()}
+            </g>
           </svg>
 
           {/* Router nodes */}
@@ -969,6 +1074,10 @@ export const DraggableHedgeMap = ({
               const isLinkSource = linkSource === account.id;
               // Base z-index: newer accounts (lower index) get higher z-index since accounts are sorted by created_at DESC
               const baseZIndex = accounts.length - index;
+              // Use circular MapNode for evaluation/funded, HedgeNode for hedge (live) accounts
+              const isCircularNode = account.phase === 'evaluation' || account.phase === 'funded';
+              // Disable ALL transitions when ANY node is being dragged to keep lines attached
+              const isAnyNodeDragging = draggingNode !== null;
               return (
                 <div
                   key={account.id}
@@ -978,21 +1087,36 @@ export const DraggableHedgeMap = ({
                     top: pos.y,
                     transform: 'translate(-50%, -50%)',
                     zIndex: isDragging ? 1000 : isSelected ? 500 : isLinkSource ? 400 : baseZIndex,
-                    transition: isDragging ? 'none' : `left 0.4s cubic-bezier(0.4, 0, 0.2, 1) ${index * 30}ms, top 0.4s cubic-bezier(0.4, 0, 0.2, 1) ${index * 30}ms`,
+                    transition: isAnyNodeDragging ? 'none' : `left 0.4s cubic-bezier(0.4, 0, 0.2, 1) ${index * 30}ms, top 0.4s cubic-bezier(0.4, 0, 0.2, 1) ${index * 30}ms`,
                   }}
                 >
-                  <HedgeNode
-                    account={account}
-                    isSelected={isSelected}
-                    isDragging={isDragging}
-                    isLinkSource={isLinkSource}
-                    onMouseDown={(e) => handleNodeMouseDown(account.id, e)}
-                    onClick={() => {
-                      if (onAccountClick && !isLinking) {
-                        onAccountClick(account);
-                      }
-                    }}
-                  />
+                  {isCircularNode ? (
+                    <MapNode
+                      account={account}
+                      isSelected={isSelected}
+                      isDragging={isDragging}
+                      isLinkSource={isLinkSource}
+                      onMouseDown={(e) => handleNodeMouseDown(account.id, e)}
+                      onDetailsClick={() => {
+                        if (onAccountClick) {
+                          onAccountClick(account);
+                        }
+                      }}
+                    />
+                  ) : (
+                    <HedgeNode
+                      account={account}
+                      isSelected={isSelected}
+                      isDragging={isDragging}
+                      isLinkSource={isLinkSource}
+                      onMouseDown={(e) => handleNodeMouseDown(account.id, e)}
+                      onDetailsClick={() => {
+                        if (onAccountClick) {
+                          onAccountClick(account);
+                        }
+                      }}
+                    />
+                  )}
                 </div>
               );
             })

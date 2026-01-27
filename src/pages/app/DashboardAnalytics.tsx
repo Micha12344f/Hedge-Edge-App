@@ -25,19 +25,9 @@ import {
   ReferenceLine,
 } from 'recharts';
 
-// Color palette for different prop firms
-const PROP_FIRM_COLORS = [
-  '#39FF14', // Neon green (primary)
-  '#00BFFF', // Deep sky blue
-  '#FF6B6B', // Coral red
-  '#FFD93D', // Yellow
-  '#6BCB77', // Green
-  '#9B59B6', // Purple
-  '#E74C3C', // Red
-  '#3498DB', // Blue
-  '#1ABC9C', // Teal
-  '#F39C12', // Orange
-];
+// Uniform bar color - dark themed with 50% transparency
+const BAR_COLOR = 'hsla(120, 70%, 35%, 0.5)'; // Darker green with 50% opacity
+const BAR_STROKE = 'hsl(120, 70%, 40%)'; // Darker green for border
 
 const DashboardAnalytics = () => {
   const { accounts, loading } = useTradingAccounts();
@@ -83,10 +73,7 @@ const DashboardAnalytics = () => {
       return acc;
     }, {} as Record<string, { name: string; balance: number; count: number }>);
 
-  const barChartData = Object.values(propFirmData).map((firm, index) => ({
-    ...firm,
-    color: PROP_FIRM_COLORS[index % PROP_FIRM_COLORS.length],
-  }));
+  const barChartData = Object.values(propFirmData);
 
   // Get starting balance for selected account
   const startingBalance = selectedAccount 
@@ -322,16 +309,14 @@ const DashboardAnalytics = () => {
                     {selectedAccountId === 'all' ? (
                       // Bar chart for all accounts - grouped by prop firm
                       <BarChart 
-                        data={barChartData.length > 0 ? barChartData : [{ name: 'No accounts', balance: 0, count: 0, color: PROP_FIRM_COLORS[0] }]} 
+                        data={barChartData.length > 0 ? barChartData : [{ name: 'No accounts', balance: 0, count: 0 }]} 
                         margin={{ top: 10, right: 10, bottom: 50, left: 10 }}
                       >
                         <defs>
-                          {barChartData.map((entry, index) => (
-                            <linearGradient key={`gradient-${index}`} id={`barGradient-${index}`} x1="0" y1="0" x2="0" y2="1">
-                              <stop offset="0%" stopColor={entry.color} stopOpacity={1} />
-                              <stop offset="100%" stopColor={entry.color} stopOpacity={0.3} />
-                            </linearGradient>
-                          ))}
+                          <linearGradient id="barGradient" x1="0" y1="0" x2="0" y2="1">
+                            <stop offset="0%" stopColor="hsl(120, 70%, 35%)" stopOpacity={0.5} />
+                            <stop offset="100%" stopColor="hsl(120, 70%, 35%)" stopOpacity={0.2} />
+                          </linearGradient>
                         </defs>
                         <CartesianGrid 
                           strokeDasharray="5 5" 
@@ -374,7 +359,7 @@ const DashboardAnalytics = () => {
                                 <div className="bg-card border border-border rounded-lg p-3 shadow-lg">
                                   <p className="text-foreground text-sm font-medium">{data.name}</p>
                                   <p className="text-sm flex items-center gap-2 mt-1">
-                                    <span className="w-2 h-2 rounded-full" style={{ backgroundColor: data.color }}></span>
+                                    <span className="w-2 h-2 rounded-full" style={{ backgroundColor: BAR_STROKE }}></span>
                                     <span className="text-foreground">
                                       Balance: {formatCurrency(data.balance)}
                                     </span>
@@ -388,11 +373,13 @@ const DashboardAnalytics = () => {
                             return null;
                           }}
                         />
-                        <Bar dataKey="balance" radius={[4, 4, 0, 0]}>
-                          {barChartData.map((entry, index) => (
-                            <Cell key={`cell-${index}`} fill={`url(#barGradient-${index})`} stroke={entry.color} strokeWidth={1} />
-                          ))}
-                        </Bar>
+                        <Bar 
+                          dataKey="balance" 
+                          radius={[4, 4, 0, 0]} 
+                          fill="url(#barGradient)" 
+                          stroke={BAR_STROKE} 
+                          strokeWidth={1} 
+                        />
                       </BarChart>
                     ) : (
                       // Area chart for individual account
