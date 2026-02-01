@@ -3,6 +3,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { useSidebar } from '@/contexts/SidebarContext';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
 import {
   LayoutDashboard,
   BarChart3,
@@ -15,7 +16,13 @@ import {
   Wallet,
   Copy,
   HelpCircle,
+  Wifi,
+  WifiOff,
+  Key,
+  AlertTriangle,
 } from 'lucide-react';
+import { useConnectionsFeed } from '@/hooks/useConnectionsFeed';
+import { useLicenseStatus } from '@/hooks/useLicenseStatus';
 
 const navItems = [
   { icon: LayoutDashboard, label: 'Overview', path: '/app/overview' },
@@ -34,6 +41,19 @@ export const DashboardSidebar = () => {
   const { collapsed, toggleCollapsed } = useSidebar();
   const { signOut, user } = useAuth();
   const navigate = useNavigate();
+  
+  // Get connection status for all accounts
+  const { snapshots } = useConnectionsFeed({ autoStart: true, pollingInterval: 5000 });
+  
+  // Get license status
+  const { license, status: licenseStatus, isValid: isLicenseValid, isExpired: isLicenseExpired, hasError: hasLicenseError } = useLicenseStatus({ autoStart: true, pollingInterval: 60000 });
+  
+  // Calculate connection summary
+  const connectionIds = Object.keys(snapshots);
+  const connectedCount = connectionIds.filter(id => snapshots[id]?.session.status === 'connected').length;
+  const hasConnections = connectionIds.length > 0;
+  const allConnected = hasConnections && connectedCount === connectionIds.length;
+  const someConnected = connectedCount > 0 && connectedCount < connectionIds.length;
 
   const handleSignOut = async () => {
     await signOut();
@@ -64,6 +84,99 @@ export const DashboardSidebar = () => {
           {collapsed ? <ChevronRight className="h-4 w-4" /> : <ChevronLeft className="h-4 w-4" />}
         </Button>
       </div>
+
+      {/* Connection Status Indicator */}
+      {hasConnections && (
+        <div className={cn(
+          "px-4 py-2 border-b border-border/30",
+          collapsed ? "flex justify-center" : ""
+        )}>
+          <div className={cn(
+            "flex items-center gap-2 p-2 rounded-lg transition-colors",
+            allConnected ? "bg-primary/10" : someConnected ? "bg-yellow-500/10" : "bg-muted/30"
+          )}>
+            {allConnected ? (
+              <Wifi className="h-4 w-4 text-primary flex-shrink-0" />
+            ) : someConnected ? (
+              <Wifi className="h-4 w-4 text-yellow-500 flex-shrink-0" />
+            ) : (
+              <WifiOff className="h-4 w-4 text-muted-foreground flex-shrink-0" />
+            )}
+            {!collapsed && (
+              <div className="flex-1 min-w-0">
+                <p className={cn(
+                  "text-xs font-medium truncate",
+                  allConnected ? "text-primary" : someConnected ? "text-yellow-500" : "text-muted-foreground"
+                )}>
+                  {allConnected 
+                    ? `${connectedCount} Connected` 
+                    : someConnected 
+                    ? `${connectedCount}/${connectionIds.length} Connected`
+                    : 'No Connections'}
+                </p>
+              </div>
+            )}
+            {collapsed && connectedCount > 0 && (
+              <Badge variant="secondary" className="text-[10px] px-1 min-w-[18px] justify-center">
+                {connectedCount}
+              </Badge>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* License Status Indicator */}
+      {licenseStatus !== 'not-configured' && (
+        <div className={cn(
+          "px-4 py-2 border-b border-border/30",
+          collapsed ? "flex justify-center" : ""
+        )}>
+          <div className={cn(
+            "flex items-center gap-2 p-2 rounded-lg transition-colors cursor-pointer hover:opacity-80",
+            isLicenseValid ? "bg-primary/10" : 
+            isLicenseExpired ? "bg-yellow-500/10" : 
+            hasLicenseError ? "bg-destructive/10" : "bg-muted/30"
+          )}
+          onClick={() => navigate('/app/settings')}
+          title="Manage License"
+          >
+            {isLicenseValid ? (
+              <Key className="h-4 w-4 text-primary flex-shrink-0" />
+            ) : isLicenseExpired ? (
+              <AlertTriangle className="h-4 w-4 text-yellow-500 flex-shrink-0" />
+            ) : hasLicenseError ? (
+              <AlertTriangle className="h-4 w-4 text-destructive flex-shrink-0" />
+            ) : (
+              <Key className="h-4 w-4 text-muted-foreground flex-shrink-0" />
+            )}
+            {!collapsed && (
+              <div className="flex-1 min-w-0">
+                <p className={cn(
+                  "text-xs font-medium truncate",
+                  isLicenseValid ? "text-primary" : 
+                  isLicenseExpired ? "text-yellow-500" : 
+                  hasLicenseError ? "text-destructive" : "text-muted-foreground"
+                )}>
+                  {isLicenseValid 
+                    ? license?.daysRemaining && license.daysRemaining <= 30
+                      ? `Licensed (${license.daysRemaining}d)`
+                      : 'Licensed'
+                    : isLicenseExpired
+                    ? 'License Expired'
+                    : hasLicenseError
+                    ? 'License Invalid'
+                    : 'Checking...'}
+                </p>
+              </div>
+            )}
+            {collapsed && isLicenseExpired && (
+              <Badge variant="secondary" className="text-[10px] px-1 bg-yellow-500/20 text-yellow-500">
+                !
+              </Badge>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Main Navigation */}
       <nav className="flex-1 py-4 px-2 space-y-1">

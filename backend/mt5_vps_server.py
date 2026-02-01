@@ -31,8 +31,14 @@ CORS(app)  # Enable CORS for web app access
 # CONFIGURATION
 # =============================================================================
 
-# API Key for securing endpoints (set in .env or environment)
-API_KEY = os.getenv('MT5_API_KEY', 'your-secret-api-key-change-this')
+# API Key for securing endpoints (REQUIRED - set in .env or environment)
+# SECURITY: No default value - server will fail to start without proper API key
+API_KEY = os.getenv('MT5_API_KEY')
+if not API_KEY:
+    raise RuntimeError(
+        'CRITICAL: MT5_API_KEY environment variable is required. '
+        'Set a strong, unique API key in your .env file or environment.'
+    )
 
 # MT5 Terminal path (adjust for your VPS)
 MT5_PATH = os.getenv('MT5_PATH', r"C:\Program Files\MetaTrader 5\terminal64.exe")

@@ -5,6 +5,19 @@
  * This is a desktop-only application - all code assumes Electron context.
  */
 
+import type {
+  ConnectionSnapshot,
+  ConnectionSnapshotMap,
+  ConnectParams,
+  ConnectionStatus,
+  ConnectionPlatform,
+  ConnectionRole,
+} from '@/types/connections';
+
+// ============================================================================
+// Environment Detection
+// ============================================================================
+
 /**
  * Check if running inside Electron desktop app
  * Should always return true in production builds
@@ -21,6 +34,17 @@ export function assertElectron(): void {
     throw new Error('HedgeEdge must run as a desktop application');
   }
 }
+
+/**
+ * Check if connections API is available
+ */
+export function isConnectionsApiAvailable(): boolean {
+  return isElectron() && !!window.electronAPI?.connections;
+}
+
+// ============================================================================
+// App Info
+// ============================================================================
 
 /**
  * Get the application version
@@ -50,6 +74,10 @@ export async function getPlatformInfo(): Promise<{
     isPackaged: false,
   };
 }
+
+// ============================================================================
+// External Links
+// ============================================================================
 
 /**
  * Open a URL in the external browser
@@ -86,4 +114,292 @@ export function handleExternalLink(event: React.MouseEvent, url: string): void {
     openExternal(url);
   }
   // In browser, let the default behavior handle it
+}
+
+// ============================================================================
+// Connection Supervisor
+// ============================================================================
+
+/**
+ * Connection supervisor manages per-account session state and provides
+ * a unified interface for connection management across the app.
+ */
+
+export interface ConnectionSupervisorState {
+  snapshots: ConnectionSnapshotMap;
+  isInitialized: boolean;
+  lastUpdate: Date | null;
+}
+
+type ConnectionListener = (snapshots: ConnectionSnapshotMap) => void;
+
+class ConnectionSupervisor {
+  private state: ConnectionSupervisorState = {
+    snapshots: {},
+    isInitialized: false,
+    lastUpdate: null,
+  };
+  
+  private listeners: Set<ConnectionListener> = new Set();
+  private unsubscribe: (() => void) | null = null;
+  private pollingInterval: number = 3000;
+
+  /**
+   * Initialize the supervisor and start listening for updates
+   */
+  async initialize(pollingInterval: number = 3000): Promise<void> {
+    if (!isConnectionsApiAvailable()) {
+      console.warn('[ConnectionSupervisor] Connections API not available');
+      return;
+    }
+
+    this.pollingInterval = pollingInterval;
+
+    // Get initial state
+    try {
+      const snapshots = await window.electronAPI!.connections.list();
+      this.state.snapshots = snapshots;
+      this.state.isInitialized = true;
+      this.state.lastUpdate = new Date();
+      this.notifyListeners();
+    } catch (error) {
+      console.error('[ConnectionSupervisor] Failed to get initial state:', error);
+    }
+
+    // Start listening for updates
+    this.unsubscribe = window.electronAPI!.connections.onSnapshotUpdate(
+      (snapshots) => {
+        this.state.snapshots = snapshots;
+        this.state.lastUpdate = new Date();
+        this.notifyListeners();
+      },
+      this.pollingInterval
+    );
+  }
+
+  /**
+   * Shutdown the supervisor
+   */
+  shutdown(): void {
+    if (this.unsubscribe) {
+      this.unsubscribe();
+      this.unsubscribe = null;
+    }
+    this.listeners.clear();
+    this.state = {
+      snapshots: {},
+      isInitialized: false,
+      lastUpdate: null,
+    };
+  }
+
+  /**
+   * Subscribe to snapshot updates
+   */
+  subscribe(listener: ConnectionListener): () => void {
+    this.listeners.add(listener);
+    
+    // Immediately notify with current state
+    if (this.state.isInitialized) {
+      listener(this.state.snapshots);
+    }
+
+    return () => {
+      this.listeners.delete(listener);
+    };
+  }
+
+  /**
+   * Notify all listeners of state change
+   */
+  private notifyListeners(): void {
+    for (const listener of this.listeners) {
+      try {
+        listener(this.state.snapshots);
+      } catch (error) {
+        console.error('[ConnectionSupervisor] Listener error:', error);
+      }
+    }
+  }
+
+  /**
+   * Get current state
+   */
+  getState(): ConnectionSupervisorState {
+    return { ...this.state };
+  }
+
+  /**
+   * Get snapshot for a specific account
+   */
+  getSnapshot(accountId: string): ConnectionSnapshot | null {
+    return this.state.snapshots[accountId] || null;
+  }
+
+  /**
+   * Connect an account
+   */
+  async connect(params: ConnectParams): Promise<{ success: boolean; error?: string }> {
+    if (!isConnectionsApiAvailable()) {
+      return { success: false, error: 'Connections API not available' };
+    }
+
+    const result = await window.electronAPI!.connections.connect(params);
+    
+    // Refresh state after connection attempt
+    if (result.success) {
+      const snapshots = await window.electronAPI!.connections.list();
+      this.state.snapshots = snapshots;
+      this.state.lastUpdate = new Date();
+      this.notifyListeners();
+    }
+
+    return result;
+  }
+
+  /**
+   * Disconnect an account
+   */
+  async disconnect(accountId: string, reason?: string): Promise<{ success: boolean; error?: string }> {
+    if (!isConnectionsApiAvailable()) {
+      return { success: false, error: 'Connections API not available' };
+    }
+
+    const result = await window.electronAPI!.connections.disconnect({ accountId, reason });
+    
+    // Refresh state after disconnection
+    const snapshots = await window.electronAPI!.connections.list();
+    this.state.snapshots = snapshots;
+    this.state.lastUpdate = new Date();
+    this.notifyListeners();
+
+    return result;
+  }
+
+  /**
+   * Refresh data for a specific account
+   */
+  async refresh(accountId: string): Promise<{ success: boolean; error?: string }> {
+    if (!isConnectionsApiAvailable()) {
+      return { success: false, error: 'Connections API not available' };
+    }
+
+    const result = await window.electronAPI!.connections.refresh(accountId);
+    
+    // Get updated state
+    const snapshots = await window.electronAPI!.connections.list();
+    this.state.snapshots = snapshots;
+    this.state.lastUpdate = new Date();
+    this.notifyListeners();
+
+    return result;
+  }
+
+  /**
+   * Refresh all connected accounts
+   */
+  async refreshAll(): Promise<void> {
+    if (!isConnectionsApiAvailable()) {
+      return;
+    }
+
+    const accountIds = Object.keys(this.state.snapshots);
+    await Promise.all(
+      accountIds
+        .filter(id => this.state.snapshots[id]?.session.status === 'connected')
+        .map(id => window.electronAPI!.connections.refresh(id).catch(() => {}))
+    );
+
+    // Get updated state
+    const snapshots = await window.electronAPI!.connections.list();
+    this.state.snapshots = snapshots;
+    this.state.lastUpdate = new Date();
+    this.notifyListeners();
+  }
+
+  /**
+   * Check if an account is connected
+   */
+  isConnected(accountId: string): boolean {
+    const snapshot = this.state.snapshots[accountId];
+    return snapshot?.session.status === 'connected';
+  }
+
+  /**
+   * Get connection status for an account
+   */
+  getStatus(accountId: string): ConnectionStatus {
+    const snapshot = this.state.snapshots[accountId];
+    return snapshot?.session.status || 'disconnected';
+  }
+}
+
+// Singleton instance
+export const connectionSupervisor = new ConnectionSupervisor();
+
+// ============================================================================
+// Connection Helper Functions
+// ============================================================================
+
+/**
+ * Build connect params from account data
+ */
+export function buildConnectParams(
+  accountId: string,
+  login: string,
+  password: string,
+  server: string,
+  platform: ConnectionPlatform = 'mt5',
+  role: ConnectionRole = 'local',
+  autoReconnect: boolean = false
+): ConnectParams {
+  return {
+    accountId,
+    platform,
+    role,
+    credentials: { login, password, server },
+    autoReconnect,
+  };
+}
+
+/**
+ * Format connection status for display
+ */
+export function formatConnectionStatus(status: ConnectionStatus): string {
+  const statusLabels: Record<ConnectionStatus, string> = {
+    disconnected: 'Disconnected',
+    connecting: 'Connecting...',
+    connected: 'Connected',
+    error: 'Error',
+    reconnecting: 'Reconnecting...',
+  };
+  return statusLabels[status] || status;
+}
+
+/**
+ * Get status color class for Tailwind
+ */
+export function getStatusColorClass(status: ConnectionStatus): string {
+  const colorClasses: Record<ConnectionStatus, string> = {
+    disconnected: 'text-muted-foreground',
+    connecting: 'text-yellow-500',
+    connected: 'text-primary',
+    error: 'text-destructive',
+    reconnecting: 'text-yellow-500',
+  };
+  return colorClasses[status] || 'text-muted-foreground';
+}
+
+/**
+ * Get status badge variant
+ */
+export function getStatusBadgeClass(status: ConnectionStatus): string {
+  const badgeClasses: Record<ConnectionStatus, string> = {
+    disconnected: 'bg-muted/50 text-muted-foreground border-border/50',
+    connecting: 'bg-yellow-500/10 text-yellow-500 border-yellow-500/20',
+    connected: 'bg-primary/10 text-primary border-primary/20',
+    error: 'bg-destructive/10 text-destructive border-destructive/20',
+    reconnecting: 'bg-yellow-500/10 text-yellow-500 border-yellow-500/20',
+  };
+  return badgeClasses[status] || 'bg-muted/50 text-muted-foreground';
 }

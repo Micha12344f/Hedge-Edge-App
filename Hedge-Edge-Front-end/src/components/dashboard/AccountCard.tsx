@@ -3,23 +3,43 @@ import { Card, CardContent, CardHeader } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Progress } from '@/components/ui/progress';
-import { MoreHorizontal, TrendingUp, TrendingDown, RefreshCw, Trash2, Server, User, Zap, ExternalLink } from 'lucide-react';
+import { MoreHorizontal, TrendingUp, TrendingDown, RefreshCw, Trash2, Server, User, Zap, ExternalLink, Wifi, WifiOff, Loader2, Power, PowerOff, Key, AlertTriangle } from 'lucide-react';
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { cn } from '@/lib/utils';
+import type { ConnectionSnapshot, ConnectionStatus, LicenseStatus } from '@/types/connections';
+import { getStatusBadgeClass, formatConnectionStatus } from '@/lib/desktop';
 
 interface AccountCardProps {
   account: TradingAccount;
   onDelete: (id: string) => void;
   onSync?: (id: string) => void;
   onClick?: (account: TradingAccount) => void;
+  /** Connection snapshot for this account (from useConnectionsFeed) */
+  connectionSnapshot?: ConnectionSnapshot | null;
+  /** Callback to connect the account */
+  onConnect?: (account: TradingAccount) => void;
+  /** Callback to disconnect the account */
+  onDisconnect?: (account: TradingAccount) => void;
+  /** Whether a connection operation is in progress */
+  isConnecting?: boolean;
 }
 
-export const AccountCard = ({ account, onDelete, onSync, onClick }: AccountCardProps) => {
+export const AccountCard = ({ 
+  account, 
+  onDelete, 
+  onSync, 
+  onClick,
+  connectionSnapshot,
+  onConnect,
+  onDisconnect,
+  isConnecting = false,
+}: AccountCardProps) => {
   const pnl = Number(account.pnl) || 0;
   const pnlPercent = Number(account.pnl_percent) || 0;
   const isProfit = pnl >= 0;
@@ -34,6 +54,25 @@ export const AccountCard = ({ account, onDelete, onSync, onClick }: AccountCardP
   // Calculate remaining drawdown
   const drawdownUsed = pnl < 0 ? Math.abs(pnlPercent) : 0;
   const drawdownRemaining = maxLoss > 0 ? Math.max(maxLoss - drawdownUsed, 0) : maxLoss;
+
+  // Connection state
+  const connectionStatus: ConnectionStatus = connectionSnapshot?.session.status || 'disconnected';
+  const isConnected = connectionStatus === 'connected';
+  const isConnectionActive = connectionStatus === 'connecting' || connectionStatus === 'reconnecting';
+  const hasConnectionError = connectionStatus === 'error';
+  
+  // License state from connection snapshot
+  const licenseStatus: LicenseStatus = connectionSnapshot?.license?.status || connectionSnapshot?.session.licenseStatus || 'not-configured';
+  const isLicenseValid = licenseStatus === 'valid';
+  const isLicenseExpired = licenseStatus === 'expired';
+  const hasLicenseError = licenseStatus === 'error' || licenseStatus === 'invalid';
+  const licenseErrorMsg = connectionSnapshot?.license?.errorMessage || connectionSnapshot?.session.licenseError;
+  
+  // Live metrics from connection (if connected)
+  const liveBalance = connectionSnapshot?.metrics?.balance;
+  const liveEquity = connectionSnapshot?.metrics?.equity;
+  const liveProfit = connectionSnapshot?.metrics?.profit;
+  const positionCount = connectionSnapshot?.metrics?.positionCount ?? 0;
 
   const formatCurrency = (value: number) => {
     return new Intl.NumberFormat('en-US', {
@@ -112,6 +151,26 @@ export const AccountCard = ({ account, onDelete, onSync, onClick }: AccountCardP
                 Sync Account
               </DropdownMenuItem>
             )}
+            {/* Connection controls */}
+            {isHedgeAccount && onConnect && !isConnected && !isConnectionActive && (
+              <DropdownMenuItem 
+                onClick={(e) => { e.stopPropagation(); onConnect(account); }} 
+                className="cursor-pointer"
+              >
+                <Power className="mr-2 h-4 w-4" />
+                Connect
+              </DropdownMenuItem>
+            )}
+            {isHedgeAccount && onDisconnect && isConnected && (
+              <DropdownMenuItem 
+                onClick={(e) => { e.stopPropagation(); onDisconnect(account); }} 
+                className="cursor-pointer"
+              >
+                <PowerOff className="mr-2 h-4 w-4" />
+                Disconnect
+              </DropdownMenuItem>
+            )}
+            <DropdownMenuSeparator />
             <DropdownMenuItem 
               onClick={() => onDelete(account.id)}
               className="text-destructive focus:text-destructive cursor-pointer"
@@ -126,6 +185,122 @@ export const AccountCard = ({ account, onDelete, onSync, onClick }: AccountCardP
         {isHedgeAccount ? (
           /* Hedge Account Display */
           <>
+            {/* Connection Status Banner */}
+            <div className={cn(
+              "flex items-center justify-between p-2 rounded-lg mb-3 transition-colors",
+              isConnected ? "bg-primary/10" : 
+              hasConnectionError ? "bg-destructive/10" : 
+              isConnectionActive ? "bg-yellow-500/10" : "bg-muted/30"
+            )}>
+              <div className="flex items-center gap-2">
+                {isConnectionActive || isConnecting ? (
+                  <Loader2 className="h-3.5 w-3.5 animate-spin text-yellow-500" />
+                ) : isConnected ? (
+                  <Wifi className="h-3.5 w-3.5 text-primary" />
+                ) : hasConnectionError ? (
+                  <WifiOff className="h-3.5 w-3.5 text-destructive" />
+                ) : (
+                  <WifiOff className="h-3.5 w-3.5 text-muted-foreground" />
+                )}
+                <span className={cn(
+                  "text-xs font-medium",
+                  isConnected ? "text-primary" :
+                  hasConnectionError ? "text-destructive" :
+                  isConnectionActive ? "text-yellow-500" : "text-muted-foreground"
+                )}>
+                  {isConnecting ? 'Connecting...' : formatConnectionStatus(connectionStatus)}
+                </span>
+              </div>
+              {isConnected && positionCount > 0 && (
+                <Badge variant="outline" className="text-[10px] bg-primary/10 text-primary border-primary/30">
+                  {positionCount} position{positionCount !== 1 ? 's' : ''}
+                </Badge>
+              )}
+            </div>
+
+            {/* License Status Banner (show only when there's an issue or not valid) */}
+            {isConnected && licenseStatus !== 'not-configured' && !isLicenseValid && (
+              <div className={cn(
+                "flex items-center justify-between p-2 rounded-lg mb-3 transition-colors",
+                isLicenseExpired ? "bg-yellow-500/10" :
+                hasLicenseError ? "bg-destructive/10" : "bg-muted/30"
+              )}>
+                <div className="flex items-center gap-2">
+                  {isLicenseExpired ? (
+                    <AlertTriangle className="h-3.5 w-3.5 text-yellow-500" />
+                  ) : hasLicenseError ? (
+                    <Key className="h-3.5 w-3.5 text-destructive" />
+                  ) : (
+                    <Key className="h-3.5 w-3.5 text-muted-foreground" />
+                  )}
+                  <span className={cn(
+                    "text-xs font-medium",
+                    isLicenseExpired ? "text-yellow-500" :
+                    hasLicenseError ? "text-destructive" : "text-muted-foreground"
+                  )}>
+                    {isLicenseExpired ? 'License Expired' :
+                     hasLicenseError ? 'License Invalid' :
+                     licenseStatus === 'checking' ? 'Checking License...' : 'No License'}
+                  </span>
+                </div>
+                {connectionSnapshot?.license?.daysRemaining != null && connectionSnapshot.license.daysRemaining <= 7 && (
+                  <Badge variant="outline" className="text-[10px] bg-yellow-500/10 text-yellow-500 border-yellow-500/30">
+                    {connectionSnapshot.license.daysRemaining}d left
+                  </Badge>
+                )}
+              </div>
+            )}
+
+            {/* License Valid Indicator (subtle when valid) */}
+            {isConnected && isLicenseValid && connectionSnapshot?.license?.daysRemaining != null && connectionSnapshot.license.daysRemaining <= 30 && (
+              <div className="flex items-center justify-between p-2 rounded-lg mb-3 bg-primary/5">
+                <div className="flex items-center gap-2">
+                  <Key className="h-3.5 w-3.5 text-primary" />
+                  <span className="text-xs font-medium text-primary">Licensed</span>
+                </div>
+                <Badge variant="outline" className="text-[10px] bg-primary/10 text-primary border-primary/30">
+                  {connectionSnapshot.license.daysRemaining}d remaining
+                </Badge>
+              </div>
+            )}
+
+            {/* Live Metrics (if connected) */}
+            {isConnected && liveBalance != null && (
+              <div className="grid grid-cols-2 gap-3 mb-3">
+                <div className="p-2 rounded-lg bg-muted/20">
+                  <p className="text-xs text-muted-foreground">Balance</p>
+                  <p className="text-sm font-semibold text-foreground">
+                    {formatCurrency(liveBalance)}
+                  </p>
+                </div>
+                <div className="p-2 rounded-lg bg-muted/20">
+                  <p className="text-xs text-muted-foreground">Equity</p>
+                  <p className="text-sm font-semibold text-foreground">
+                    {formatCurrency(liveEquity ?? liveBalance)}
+                  </p>
+                </div>
+              </div>
+            )}
+
+            {/* Live P&L (if connected and has floating) */}
+            {isConnected && liveProfit != null && liveProfit !== 0 && (
+              <div className={cn(
+                "p-2 rounded-lg mb-3",
+                liveProfit >= 0 ? "bg-primary/10" : "bg-destructive/10"
+              )}>
+                <div className="flex items-center justify-between">
+                  <span className="text-xs text-muted-foreground">Floating P&L</span>
+                  <span className={cn(
+                    "text-sm font-semibold",
+                    liveProfit >= 0 ? "text-primary" : "text-destructive"
+                  )}>
+                    {liveProfit >= 0 ? '+' : ''}{formatCurrency(liveProfit)}
+                  </span>
+                </div>
+              </div>
+            )}
+
+            {/* Account Details */}
             <div className="grid grid-cols-2 gap-4">
               <div className="flex items-center gap-2 p-2 rounded-lg bg-muted/30 transition-colors hover:bg-muted/50">
                 <User className="h-4 w-4 text-muted-foreground" />
@@ -142,15 +317,33 @@ export const AccountCard = ({ account, onDelete, onSync, onClick }: AccountCardP
                 </div>
               </div>
             </div>
-            <div className="pt-2 border-t border-border/30">
-              <div className="flex justify-between text-sm items-center">
-                <span className="text-muted-foreground">Status</span>
-                <Badge variant="outline" className="bg-primary/10 text-primary border-primary/30 animate-pulse">
-                  <Zap className="w-3 h-3 mr-1" />
-                  Connected
-                </Badge>
+
+            {/* Quick Connect Button (if not connected) */}
+            {!isConnected && !isConnectionActive && onConnect && (
+              <div className="pt-3 border-t border-border/30 mt-3">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="w-full"
+                  onClick={(e) => { e.stopPropagation(); onConnect(account); }}
+                  disabled={isConnecting}
+                >
+                  {isConnecting ? (
+                    <Loader2 className="w-3.5 h-3.5 mr-2 animate-spin" />
+                  ) : (
+                    <Power className="w-3.5 h-3.5 mr-2" />
+                  )}
+                  Connect Account
+                </Button>
               </div>
-            </div>
+            )}
+
+            {/* Connection Error */}
+            {hasConnectionError && connectionSnapshot?.session.error && (
+              <div className="pt-2 text-xs text-destructive">
+                {connectionSnapshot.session.error}
+              </div>
+            )}
           </>
         ) : (
           /* Evaluation/Funded Account Display */

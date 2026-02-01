@@ -59,6 +59,29 @@ interface AgentConfigSummary {
 }
 
 // ============================================================================
+// Types for Terminal Detection
+// ============================================================================
+
+type TerminalType = 'mt4' | 'mt5' | 'ctrader';
+
+interface DetectedTerminal {
+  id: string;
+  type: TerminalType;
+  name: string;
+  executablePath: string;
+  installPath: string;
+  broker?: string;
+  version?: string;
+  isRunning?: boolean;
+}
+
+interface DetectionResult {
+  success: boolean;
+  terminals: DetectedTerminal[];
+  error?: string;
+}
+
+// ============================================================================
 // Trading Bridge API
 // ============================================================================
 
@@ -261,6 +284,602 @@ const agentAPI = {
 };
 
 // ============================================================================
+// Terminal Detection API
+// ============================================================================
+
+const terminalsAPI = {
+  /**
+   * Detect installed trading terminals (MT4/MT5/cTrader) - fast scan
+   */
+  detect: (): Promise<DetectionResult> => {
+    return ipcRenderer.invoke('terminals:detect');
+  },
+
+  /**
+   * Deep scan for terminals (SLOW - scans entire system)
+   */
+  detectDeep: (): Promise<DetectionResult> => {
+    return ipcRenderer.invoke('terminals:detectDeep');
+  },
+
+  /**
+   * Launch a terminal by executable path, optionally with credentials
+   */
+  launch: (
+    executablePath: string, 
+    credentials?: { login?: string; password?: string; server?: string }
+  ): Promise<{ success: boolean; error?: string }> => {
+    if (!executablePath || typeof executablePath !== 'string') {
+      return Promise.resolve({ success: false, error: 'Invalid executable path' });
+    }
+    return ipcRenderer.invoke('terminals:launch', executablePath, credentials);
+  },
+};
+
+// ============================================================================
+// Secure Storage API (encrypted credential storage)
+// ============================================================================
+
+interface SecureStorageResult {
+  success: boolean;
+  data?: string;
+  error?: string;
+}
+
+// ============================================================================
+// Connection Management Types
+// ============================================================================
+
+type ConnectionPlatform = 'mt5' | 'ctrader';
+type ConnectionRole = 'local' | 'vps' | 'cloud';
+type ConnectionStatus = 'disconnected' | 'connecting' | 'connected' | 'error' | 'reconnecting';
+
+interface ConnectionEndpoint {
+  host: string;
+  port: number;
+  secure?: boolean;
+}
+
+interface ConnectionMetrics {
+  balance: number;
+  equity: number;
+  profit: number;
+  positionCount: number;
+  margin?: number;
+  freeMargin?: number;
+  marginLevel?: number;
+}
+
+interface ConnectionPosition {
+  ticket: number;
+  symbol: string;
+  type: 'buy' | 'sell';
+  volume: number;
+  openPrice: number;
+  currentPrice: number;
+  profit: number;
+  stopLoss?: number;
+  takeProfit?: number;
+  openTime: string;
+  magic?: number;
+  comment?: string;
+}
+
+interface ConnectionSession {
+  id: string;
+  accountId: string;
+  platform: ConnectionPlatform;
+  role: ConnectionRole;
+  endpoint?: ConnectionEndpoint;
+  status: ConnectionStatus;
+  lastUpdate: string;
+  lastConnected?: string;
+  error?: string;
+  reconnectAttempts?: number;
+  autoReconnect?: boolean;
+}
+
+interface ConnectionSnapshot {
+  session: ConnectionSession;
+  metrics?: ConnectionMetrics;
+  positions?: ConnectionPosition[];
+  timestamp: string;
+}
+
+type ConnectionSnapshotMap = Record<string, ConnectionSnapshot>;
+
+interface ConnectParams {
+  accountId: string;
+  platform: ConnectionPlatform;
+  role: ConnectionRole;
+  credentials: {
+    login: string;
+    password: string;
+    server: string;
+  };
+  endpoint?: ConnectionEndpoint;
+  autoReconnect?: boolean;
+}
+
+interface DisconnectParams {
+  accountId: string;
+  reason?: string;
+}
+
+// ============================================================================
+// Connection Management API
+// ============================================================================
+
+const connectionsAPI = {
+  /**
+   * List all connection snapshots
+   */
+  list: (): Promise<ConnectionSnapshotMap> => {
+    return ipcRenderer.invoke('connections:list');
+  },
+
+  /**
+   * Connect an account
+   */
+  connect: (params: ConnectParams): Promise<{ success: boolean; error?: string }> => {
+    // Validate required fields
+    if (!params.accountId || !params.credentials?.login || !params.credentials?.server) {
+      return Promise.resolve({ success: false, error: 'Account ID, login, and server are required' });
+    }
+    return ipcRenderer.invoke('connections:connect', params);
+  },
+
+  /**
+   * Disconnect an account
+   */
+  disconnect: (params: DisconnectParams): Promise<{ success: boolean; error?: string }> => {
+    if (!params.accountId) {
+      return Promise.resolve({ success: false, error: 'Account ID is required' });
+    }
+    return ipcRenderer.invoke('connections:disconnect', params);
+  },
+
+  /**
+   * Get status for a specific account
+   */
+  status: (accountId: string): Promise<ConnectionSnapshot | null> => {
+    if (!accountId) {
+      return Promise.resolve(null);
+    }
+    return ipcRenderer.invoke('connections:status', accountId);
+  },
+
+  /**
+   * Refresh connection data for an account
+   */
+  refresh: (accountId: string): Promise<{ success: boolean; error?: string }> => {
+    if (!accountId) {
+      return Promise.resolve({ success: false, error: 'Account ID is required' });
+    }
+    return ipcRenderer.invoke('connections:refresh', accountId);
+  },
+
+  /**
+   * Subscribe to connection snapshot updates (polling-based)
+   * Returns an unsubscribe function
+   */
+  onSnapshotUpdate: (
+    callback: (snapshots: ConnectionSnapshotMap) => void,
+    intervalMs = 3000
+  ): (() => void) => {
+    let active = true;
+
+    const poll = async () => {
+      if (!active) return;
+
+      try {
+        const snapshots = await ipcRenderer.invoke('connections:list');
+        if (active) {
+          callback(snapshots);
+        }
+      } catch (error) {
+        console.error('Failed to get connection snapshots:', error);
+      }
+
+      if (active) {
+        setTimeout(poll, intervalMs);
+      }
+    };
+
+    // Start polling
+    poll();
+
+    // Return unsubscribe function
+    return () => {
+      active = false;
+    };
+  },
+};
+
+const secureStorageAPI = {
+  /**
+   * Check if secure storage (OS keychain encryption) is available
+   */
+  isAvailable: (): Promise<boolean> => {
+    return ipcRenderer.invoke('secureStorage:isAvailable');
+  },
+
+  /**
+   * Encrypt a string using OS keychain (Windows DPAPI, macOS Keychain, Linux Secret Service)
+   * @param plainText - The plain text to encrypt
+   * @returns Encrypted data as base64 string
+   */
+  encrypt: (plainText: string): Promise<SecureStorageResult> => {
+    return ipcRenderer.invoke('secureStorage:encrypt', plainText);
+  },
+
+  /**
+   * Decrypt a string previously encrypted with safeStorage
+   * @param encryptedBase64 - The base64-encoded encrypted data
+   * @returns Decrypted plain text
+   */
+  decrypt: (encryptedBase64: string): Promise<SecureStorageResult> => {
+    return ipcRenderer.invoke('secureStorage:decrypt', encryptedBase64);
+  },
+};
+
+// ============================================================================
+// License Management Types
+// ============================================================================
+
+type LicenseStatus = 'valid' | 'expired' | 'invalid' | 'not-configured' | 'checking' | 'error';
+
+interface LicenseInfo {
+  status: LicenseStatus;
+  maskedKey?: string;
+  lastChecked?: string;
+  nextCheckAt?: string;
+  expiresAt?: string;
+  daysRemaining?: number;
+  errorMessage?: string;
+  features?: string[];
+  email?: string;
+  tier?: string;
+}
+
+interface LicenseResult {
+  success: boolean;
+  license?: LicenseInfo;
+  error?: string;
+}
+
+// ============================================================================
+// Installer Types
+// ============================================================================
+
+type InstallableAssetType = 'mt4-ea' | 'mt5-ea' | 'mt4-dll' | 'mt5-dll' | 'ctrader-cbot';
+
+interface InstallationPrecheck {
+  passed: boolean;
+  checks: {
+    terminalInstalled: boolean;
+    terminalClosed: boolean;
+    dataFolderWritable: boolean;
+    assetsAvailable: boolean;
+  };
+  messages: string[];
+}
+
+interface AssetInstallResult {
+  success: boolean;
+  data?: { installedPath: string };
+  error?: string;
+}
+
+interface AssetsAvailability {
+  mt4: { ea: boolean; dll: boolean };
+  mt5: { ea: boolean; dll: boolean };
+  ctrader: { cbot: boolean };
+}
+
+// ============================================================================
+// License Management API
+// ============================================================================
+
+const licenseAPI = {
+  /**
+   * Get current license status
+   */
+  getStatus: (): Promise<{ success: boolean; data?: LicenseInfo; error?: string }> => {
+    return ipcRenderer.invoke('license:getStatus');
+  },
+
+  /**
+   * Activate a license key
+   * @param licenseKey - The license key to validate and activate
+   */
+  activate: (licenseKey: string): Promise<LicenseResult> => {
+    if (!licenseKey || typeof licenseKey !== 'string') {
+      return Promise.resolve({ success: false, error: 'License key is required' });
+    }
+    return ipcRenderer.invoke('license:activate', licenseKey);
+  },
+
+  /**
+   * Refresh the current license status
+   */
+  refresh: (): Promise<LicenseResult> => {
+    return ipcRenderer.invoke('license:refresh');
+  },
+
+  /**
+   * Remove the current license
+   */
+  remove: (): Promise<{ success: boolean; error?: string }> => {
+    return ipcRenderer.invoke('license:remove');
+  },
+
+  /**
+   * Check if secure storage (OS keychain) is available
+   */
+  isSecureStorageAvailable: (): Promise<{ success: boolean; data?: boolean }> => {
+    return ipcRenderer.invoke('license:isSecureStorageAvailable');
+  },
+
+  /**
+   * Subscribe to license status changes (polling-based)
+   * Returns an unsubscribe function
+   */
+  onStatusChange: (
+    callback: (status: LicenseInfo) => void,
+    intervalMs = 60000 // Check every minute
+  ): (() => void) => {
+    let active = true;
+
+    const poll = async () => {
+      if (!active) return;
+
+      try {
+        const result = await ipcRenderer.invoke('license:getStatus');
+        if (active && result.success && result.data) {
+          callback(result.data);
+        }
+      } catch (error) {
+        console.error('Failed to get license status:', error);
+      }
+
+      if (active) {
+        setTimeout(poll, intervalMs);
+      }
+    };
+
+    // Start polling
+    poll();
+
+    // Return unsubscribe function
+    return () => {
+      active = false;
+    };
+  },
+};
+
+// ============================================================================
+// Installer API
+// ============================================================================
+
+const installerAPI = {
+  /**
+   * Run installation prechecks for a terminal
+   * @param terminalId - The ID of the terminal to check
+   */
+  precheck: (terminalId: string): Promise<{ success: boolean; data?: InstallationPrecheck; error?: string }> => {
+    if (!terminalId || typeof terminalId !== 'string') {
+      return Promise.resolve({ success: false, error: 'Terminal ID is required' });
+    }
+    return ipcRenderer.invoke('installer:precheck', terminalId);
+  },
+
+  /**
+   * Install a single asset to a terminal
+   * @param terminalId - The ID of the target terminal
+   * @param assetType - The type of asset to install
+   */
+  installAsset: (terminalId: string, assetType: InstallableAssetType): Promise<AssetInstallResult> => {
+    if (!terminalId || typeof terminalId !== 'string') {
+      return Promise.resolve({ success: false, error: 'Terminal ID is required' });
+    }
+    if (!assetType || typeof assetType !== 'string') {
+      return Promise.resolve({ success: false, error: 'Asset type is required' });
+    }
+    return ipcRenderer.invoke('installer:installAsset', terminalId, assetType);
+  },
+
+  /**
+   * Select a custom installation path via folder picker
+   * @param terminalType - The type of terminal (mt4, mt5, ctrader)
+   */
+  selectPath: (terminalType: string): Promise<{ 
+    success: boolean; 
+    data?: { path: string; isValidStructure: boolean }; 
+    error?: string 
+  }> => {
+    return ipcRenderer.invoke('installer:selectPath', terminalType);
+  },
+
+  /**
+   * Install asset to a custom path
+   * @param customPath - The custom data folder path
+   * @param assetType - The type of asset to install
+   */
+  installToPath: (customPath: string, assetType: InstallableAssetType): Promise<AssetInstallResult> => {
+    if (!customPath || typeof customPath !== 'string') {
+      return Promise.resolve({ success: false, error: 'Custom path is required' });
+    }
+    if (!assetType || typeof assetType !== 'string') {
+      return Promise.resolve({ success: false, error: 'Asset type is required' });
+    }
+    return ipcRenderer.invoke('installer:installToPath', customPath, assetType);
+  },
+
+  /**
+   * Open the data folder for a terminal in the file explorer
+   * @param terminalId - The ID of the terminal
+   */
+  openDataFolder: (terminalId: string): Promise<{ success: boolean; error?: string }> => {
+    if (!terminalId || typeof terminalId !== 'string') {
+      return Promise.resolve({ success: false, error: 'Terminal ID is required' });
+    }
+    return ipcRenderer.invoke('installer:openDataFolder', terminalId);
+  },
+
+  /**
+   * Get information about available installation assets
+   */
+  getAssets: (): Promise<{ success: boolean; data?: AssetsAvailability; error?: string }> => {
+    return ipcRenderer.invoke('installer:getAssets');
+  },
+};
+
+// ============================================================================
+// MT5 WebRequest Whitelist API
+// ============================================================================
+
+interface WebRequestWhitelistStatus {
+  success: boolean;
+  isWhitelisted: boolean;
+  currentWhitelist: string[];
+  error?: string;
+  configPath?: string;
+}
+
+const mt5WhitelistAPI = {
+  /**
+   * Check if Hedge Edge API URL is in WebRequest whitelist
+   * @param terminalId - The ID of the MT5 terminal
+   */
+  checkWhitelist: (terminalId: string): Promise<{ success: boolean; data?: WebRequestWhitelistStatus; error?: string }> => {
+    if (!terminalId || typeof terminalId !== 'string') {
+      return Promise.resolve({ success: false, error: 'Terminal ID is required' });
+    }
+    return ipcRenderer.invoke('mt5:checkWhitelist', terminalId);
+  },
+
+  /**
+   * Add Hedge Edge API URL to WebRequest whitelist
+   * @param terminalId - The ID of the MT5 terminal
+   */
+  addToWhitelist: (terminalId: string): Promise<{ success: boolean; restartRequired?: boolean; error?: string }> => {
+    if (!terminalId || typeof terminalId !== 'string') {
+      return Promise.resolve({ success: false, error: 'Terminal ID is required' });
+    }
+    return ipcRenderer.invoke('mt5:addToWhitelist', terminalId);
+  },
+
+  /**
+   * Get manual whitelist instructions
+   */
+  getInstructions: (): Promise<{ 
+    success: boolean; 
+    data?: { url: string; instructions: string[] }; 
+    error?: string 
+  }> => {
+    return ipcRenderer.invoke('mt5:getWhitelistInstructions');
+  },
+};
+
+// ============================================================================
+// Agent Data Channel API
+// ============================================================================
+
+interface AgentSnapshot {
+  timestamp: string;
+  platform: 'MT5' | 'cTrader';
+  accountId: string;
+  broker: string;
+  balance: number;
+  equity: number;
+  margin: number;
+  freeMargin: number;
+  marginLevel: number;
+  floatingPnL: number;
+  currency: string;
+  leverage: number;
+  status: string;
+  isLicenseValid: boolean;
+  isPaused: boolean;
+  lastError: string | null;
+  positions: unknown[];
+}
+
+interface AgentCommand {
+  action: 'PAUSE' | 'RESUME' | 'CLOSE_ALL' | 'CLOSE_POSITION' | 'STATUS';
+  params?: Record<string, string | number>;
+}
+
+const agentChannelAPI = {
+  /**
+   * Read agent snapshot from data channel
+   * @param terminalId - The ID of the terminal
+   */
+  readSnapshot: (terminalId: string): Promise<{ 
+    success: boolean; 
+    data?: AgentSnapshot; 
+    error?: string;
+    lastModified?: string;
+  }> => {
+    if (!terminalId || typeof terminalId !== 'string') {
+      return Promise.resolve({ success: false, error: 'Terminal ID is required' });
+    }
+    return ipcRenderer.invoke('agent:readSnapshot', terminalId);
+  },
+
+  /**
+   * Send command to agent
+   * @param terminalId - The ID of the terminal
+   * @param command - The command to send
+   */
+  sendCommand: (terminalId: string, command: AgentCommand): Promise<{ 
+    success: boolean; 
+    response?: unknown; 
+    error?: string 
+  }> => {
+    if (!terminalId || typeof terminalId !== 'string') {
+      return Promise.resolve({ success: false, error: 'Terminal ID is required' });
+    }
+    if (!command || typeof command !== 'object') {
+      return Promise.resolve({ success: false, error: 'Command is required' });
+    }
+    return ipcRenderer.invoke('agent:sendCommand', terminalId, command);
+  },
+};
+
+// ============================================================================
+// Secure Storage API (legacy - kept for compatibility)
+// ============================================================================
+
+const secureStorageAPI = {
+  /**
+   * Check if secure storage (OS keychain encryption) is available
+   */
+  isAvailable: (): Promise<boolean> => {
+    return ipcRenderer.invoke('secureStorage:isAvailable');
+  },
+
+  /**
+   * Encrypt a string using OS keychain (Windows DPAPI, macOS Keychain, Linux Secret Service)
+   * @param plainText - The plain text to encrypt
+   * @returns Encrypted data as base64 string
+   */
+  encrypt: (plainText: string): Promise<SecureStorageResult> => {
+    return ipcRenderer.invoke('secureStorage:encrypt', plainText);
+  },
+
+  /**
+   * Decrypt a string previously encrypted with safeStorage
+   * @param encryptedBase64 - The base64-encoded encrypted data
+   * @returns Decrypted plain text
+   */
+  decrypt: (encryptedBase64: string): Promise<SecureStorageResult> => {
+    return ipcRenderer.invoke('secureStorage:decrypt', encryptedBase64);
+  },
+};
+
+// ============================================================================
 // Core App API
 // ============================================================================
 
@@ -316,6 +935,41 @@ const electronAPI = {
    * Agent management for controlling bundled/external agents
    */
   agent: agentAPI,
+
+  /**
+   * Terminal detection for finding installed MT4/MT5/cTrader terminals
+   */
+  terminals: terminalsAPI,
+
+  /**
+   * Secure storage for encrypted credential handling via OS keychain
+   */
+  secureStorage: secureStorageAPI,
+
+  /**
+   * Connection management for multi-account session tracking
+   */
+  connections: connectionsAPI,
+
+  /**
+   * License management for subscription validation
+   */
+  license: licenseAPI,
+
+  /**
+   * Installer for deploying EA/DLL/cBot assets to terminals
+   */
+  installer: installerAPI,
+
+  /**
+   * MT5 WebRequest whitelist management
+   */
+  mt5Whitelist: mt5WhitelistAPI,
+
+  /**
+   * Agent data channel for reading EA/cBot snapshots
+   */
+  agentChannel: agentChannelAPI,
 };
 
 // Expose the API to the renderer process via window.electronAPI

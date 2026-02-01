@@ -1,13 +1,20 @@
+import { useState } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
-import { User, Bell, Shield, Palette } from 'lucide-react';
+import { Separator } from '@/components/ui/separator';
+import { User, Bell, Shield, Palette, Key, Download, Cpu } from 'lucide-react';
+import { LicenseKeySection } from '@/components/dashboard/LicenseKeySection';
+import { InstallationManagerModal } from '@/components/dashboard/InstallationManagerModal';
+import { useLicenseStatus } from '@/hooks/useLicenseStatus';
 
 const Settings = () => {
   const { user } = useAuth();
+  const { license, activate, refresh, remove } = useLicenseStatus();
+  const [installModalOpen, setInstallModalOpen] = useState(false);
 
   return (
     <div className="p-6 space-y-6 max-w-4xl">
@@ -17,6 +24,46 @@ const Settings = () => {
       </div>
 
       <div className="space-y-6">
+        {/* License Management Section */}
+        <LicenseKeySection
+          licenseInfo={license}
+          onLicenseUpdate={async (key) => {
+            const result = await activate(key);
+            return { 
+              success: result.success, 
+              license: license || undefined,
+              error: result.error 
+            };
+          }}
+          onRefresh={refresh}
+          onRemove={remove}
+        />
+
+        {/* EA/cBot Installation Section */}
+        <Card className="border-border/50 bg-card/50">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <Download className="h-5 w-5" />
+              EA & cBot Installation
+            </CardTitle>
+            <CardDescription>
+              Install trading components on your terminals
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <p className="text-sm text-muted-foreground">
+              Install the Hedge Edge Expert Advisor (EA), DLL bridge, or cBot to enable automated 
+              trade copying and hedge detection on your trading terminals.
+            </p>
+            <div className="flex items-center gap-4">
+              <Button onClick={() => setInstallModalOpen(true)}>
+                <Cpu className="h-4 w-4 mr-2" />
+                Open Installation Manager
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+
         <Card className="border-border/50 bg-card/50">
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
@@ -68,6 +115,13 @@ const Settings = () => {
               </div>
               <Switch defaultChecked />
             </div>
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="font-medium text-foreground">License Expiry Reminder</p>
+                <p className="text-sm text-muted-foreground">Get notified before license expires</p>
+              </div>
+              <Switch defaultChecked />
+            </div>
           </CardContent>
         </Card>
 
@@ -110,6 +164,12 @@ const Settings = () => {
           </CardContent>
         </Card>
       </div>
+
+      {/* Installation Manager Modal */}
+      <InstallationManagerModal
+        open={installModalOpen}
+        onOpenChange={setInstallModalOpen}
+      />
     </div>
   );
 };

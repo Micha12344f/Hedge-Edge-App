@@ -51,6 +51,19 @@ export interface Position {
   comment: string;
 }
 
+export interface Order {
+  ticket: number;
+  symbol: string;
+  type: string;
+  volume: number;
+  price_open: number;
+  sl: number;
+  tp: number;
+  time: string;
+  magic: number;
+  comment: string;
+}
+
 export interface AccountSnapshot {
   login: number;
   server: string;
@@ -66,7 +79,7 @@ export interface AccountSnapshot {
   leverage: number;
   positions: Position[];
   positions_count: number;
-  orders: any[];
+  orders: Order[];
   orders_count: number;
   timestamp: string;
 }

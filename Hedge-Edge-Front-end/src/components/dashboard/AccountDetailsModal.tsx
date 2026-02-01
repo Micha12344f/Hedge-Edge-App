@@ -4,6 +4,8 @@ import { useVPSMT5Feed } from "@/hooks/useVPSMT5Feed";
 import { getCachedPassword, cachePassword } from "@/lib/mt5-password-cache";
 import { mt5, ctrader, isBridgeAvailable, type TradingPlatform } from "@/lib/local-trading-bridge";
 import type { Position } from "@/lib/local-trading-bridge";
+import type { ConnectionSnapshot, ConnectionStatus as ConnectionStatusType } from "@/types/connections";
+import { getStatusBadgeClass, formatConnectionStatus } from "@/lib/desktop";
 import {
   Sheet,
   SheetContent,
@@ -34,6 +36,8 @@ import {
   WifiOff,
   Lock,
   Server,
+  Power,
+  PowerOff,
 } from "lucide-react";
 
 // Type alias for backwards compatibility  
@@ -65,6 +69,12 @@ interface AccountDetailsModalProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onSyncAccount?: (id: string, data: { balance: number; equity: number; profit: number }) => void;
+  /** Connection snapshot for this account (from useConnectionsFeed) */
+  connectionSnapshot?: ConnectionSnapshot | null;
+  /** Callback to connect the account */
+  onConnect?: (account: TradingAccount, password: string) => Promise<{ success: boolean; error?: string }>;
+  /** Callback to disconnect the account */
+  onDisconnect?: (account: TradingAccount) => Promise<{ success: boolean; error?: string }>;
 }
 
 export function AccountDetailsModal({
@@ -72,6 +82,9 @@ export function AccountDetailsModal({
   open,
   onOpenChange,
   onSyncAccount,
+  connectionSnapshot,
+  onConnect,
+  onDisconnect,
 }: AccountDetailsModalProps) {
   // Password state for accounts without cached password
   const [password, setPassword] = useState("");
@@ -86,6 +99,11 @@ export function AccountDetailsModal({
   const getBridge = (platform: string | null | undefined) => {
     return platform?.toLowerCase() === 'ctrader' ? ctrader : mt5;
   };
+
+  // Connection state from supervisor (if provided)
+  const supervisedStatus: ConnectionStatusType = connectionSnapshot?.session.status || 'disconnected';
+  const isSupervisedConnected = supervisedStatus === 'connected';
+  const hasSupervisedMetrics = connectionSnapshot?.metrics != null;
 
   // Check for cached password and terminal status when modal opens
   useEffect(() => {
@@ -161,14 +179,27 @@ export function AccountDetailsModal({
   }, [snapshot, account, onSyncAccount]);
 
   // Handle password submission
-  const handlePasswordSubmit = (e: React.FormEvent) => {
+  const handlePasswordSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!password || !account?.login || !account?.server) return;
     
     setIsSubmittingPassword(true);
-    cachePassword(account.login, password, account.server);
-    setCachedPassword(password);
-    setNeedsPassword(false);
+    
+    // If we have the connection supervisor callback, use it
+    if (onConnect) {
+      const result = await onConnect(account, password);
+      if (result.success) {
+        cachePassword(account.login, password, account.server);
+        setCachedPassword(password);
+        setNeedsPassword(false);
+      }
+    } else {
+      // Legacy behavior - just cache the password
+      cachePassword(account.login, password, account.server);
+      setCachedPassword(password);
+      setNeedsPassword(false);
+    }
+    
     setIsSubmittingPassword(false);
   };
 
@@ -221,23 +252,42 @@ export function AccountDetailsModal({
           {/* VPS and Connection Status */}
           <div className="flex items-center justify-between p-2 bg-muted/50 rounded-lg mt-2">
             <div className="flex items-center gap-2">
-              {/* Connection Status */}
-              <Badge
-                variant="outline"
-                className={
-                  terminalStatus === 'running' 
-                    ? "bg-primary/10 text-primary border-primary/20"
-                    : terminalStatus === 'not-running'
-                    ? "bg-red-500/10 text-red-500 border-red-500/20"
-                    : "bg-muted text-muted-foreground"
-                }
-              >
-                <Server className="h-3 w-3 mr-1" />
-                {terminalStatus === 'checking' ? 'Connecting...' : terminalStatus === 'running' ? 'Connected' : 'Offline'}
-              </Badge>
+              {/* Supervised Connection Status (if using connection supervisor) */}
+              {connectionSnapshot && (
+                <Badge
+                  variant="outline"
+                  className={getStatusBadgeClass(supervisedStatus)}
+                >
+                  {isSupervisedConnected ? (
+                    <Wifi className="h-3 w-3 mr-1" />
+                  ) : supervisedStatus === 'connecting' || supervisedStatus === 'reconnecting' ? (
+                    <Loader2 className="h-3 w-3 mr-1 animate-spin" />
+                  ) : (
+                    <WifiOff className="h-3 w-3 mr-1" />
+                  )}
+                  {formatConnectionStatus(supervisedStatus)}
+                </Badge>
+              )}
               
-              {/* MT5 Connection */}
-              {!needsPassword && terminalStatus === 'running' && (
+              {/* Legacy Connection Status (fallback when not using supervisor) */}
+              {!connectionSnapshot && (
+                <Badge
+                  variant="outline"
+                  className={
+                    terminalStatus === 'running' 
+                      ? "bg-primary/10 text-primary border-primary/20"
+                      : terminalStatus === 'not-running'
+                      ? "bg-red-500/10 text-red-500 border-red-500/20"
+                      : "bg-muted text-muted-foreground"
+                  }
+                >
+                  <Server className="h-3 w-3 mr-1" />
+                  {terminalStatus === 'checking' ? 'Connecting...' : terminalStatus === 'running' ? 'Connected' : 'Offline'}
+                </Badge>
+              )}
+              
+              {/* MT5 Connection (legacy) */}
+              {!connectionSnapshot && !needsPassword && terminalStatus === 'running' && (
                 isConnected ? (
                   <Badge
                     variant="outline"
@@ -256,20 +306,63 @@ export function AccountDetailsModal({
                   </Badge>
                 )
               )}
-              {snapshot && (
+              
+              {/* Live metrics indicator */}
+              {hasSupervisedMetrics && connectionSnapshot?.metrics?.positionCount != null && (
+                <Badge variant="secondary" className="text-xs">
+                  {connectionSnapshot.metrics.positionCount} position{connectionSnapshot.metrics.positionCount !== 1 ? 's' : ''}
+                </Badge>
+              )}
+              
+              {snapshot && !connectionSnapshot && (
                 <span className="text-xs text-muted-foreground">
                   #{snapshot.login}
                 </span>
               )}
             </div>
             <div className="flex items-center gap-2">
-              {lastUpdate && (
+              {/* Last update time */}
+              {(connectionSnapshot?.timestamp || lastUpdate) && (
                 <span className="text-xs text-muted-foreground flex items-center gap-1">
                   <Clock className="h-3 w-3" />
-                  {lastUpdate.toLocaleTimeString()}
+                  {connectionSnapshot?.timestamp 
+                    ? new Date(connectionSnapshot.timestamp).toLocaleTimeString()
+                    : lastUpdate?.toLocaleTimeString()}
                 </span>
               )}
-              {!needsPassword && terminalStatus === 'running' && (
+              
+              {/* Connect/Disconnect buttons */}
+              {onConnect && onDisconnect && !isSupervisedConnected && supervisedStatus !== 'connecting' && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    if (cachedPassword && account) {
+                      onConnect(account, cachedPassword);
+                    } else {
+                      setNeedsPassword(true);
+                    }
+                  }}
+                  disabled={!cachedPassword && !needsPassword}
+                >
+                  <Power className="h-3.5 w-3.5 mr-1" />
+                  Connect
+                </Button>
+              )}
+              
+              {onDisconnect && isSupervisedConnected && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => account && onDisconnect(account)}
+                >
+                  <PowerOff className="h-3.5 w-3.5 mr-1" />
+                  Disconnect
+                </Button>
+              )}
+              
+              {/* Refresh button (legacy) */}
+              {!connectionSnapshot && !needsPassword && terminalStatus === 'running' && (
                 <Button
                   variant="ghost"
                   size="sm"
@@ -289,7 +382,7 @@ export function AccountDetailsModal({
           <div className="space-y-4 pr-4">
             
             {/* Password Required */}
-            {needsPassword && terminalStatus === 'running' && (
+            {needsPassword && (terminalStatus === 'running' || connectionSnapshot) && (
               <Card>
                 <CardHeader>
                   <CardTitle className="flex items-center gap-2 text-sm">
@@ -326,12 +419,116 @@ export function AccountDetailsModal({
                     >
                       {isSubmittingPassword ? (
                         <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                      ) : null}
+                      ) : (
+                        <Power className="h-4 w-4 mr-2" />
+                      )}
                       Connect to Account
                     </Button>
                   </form>
                 </CardContent>
               </Card>
+            )}
+
+            {/* Live Metrics from Connection Supervisor */}
+            {hasSupervisedMetrics && connectionSnapshot?.metrics && (
+              <>
+                <div className="grid grid-cols-2 gap-3">
+                  <Card>
+                    <CardHeader className="pb-1 pt-3 px-3">
+                      <CardTitle className="text-xs font-medium text-muted-foreground flex items-center gap-1">
+                        <Wallet className="h-3 w-3" />
+                        Balance
+                      </CardTitle>
+                    </CardHeader>
+                    <CardContent className="px-3 pb-3">
+                      <div className="text-xl font-bold">
+                        {formatCurrency(connectionSnapshot.metrics.balance)}
+                      </div>
+                    </CardContent>
+                  </Card>
+
+                  <Card>
+                    <CardHeader className="pb-1 pt-3 px-3">
+                      <CardTitle className="text-xs font-medium text-muted-foreground flex items-center gap-1">
+                        <PiggyBank className="h-3 w-3" />
+                        Equity
+                      </CardTitle>
+                    </CardHeader>
+                    <CardContent className="px-3 pb-3">
+                      <div className="text-xl font-bold">
+                        {formatCurrency(connectionSnapshot.metrics.equity)}
+                      </div>
+                      {connectionSnapshot.metrics.freeMargin != null && (
+                        <p className="text-xs text-muted-foreground">
+                          Free: {formatCurrency(connectionSnapshot.metrics.freeMargin)}
+                        </p>
+                      )}
+                    </CardContent>
+                  </Card>
+
+                  <Card>
+                    <CardHeader className="pb-1 pt-3 px-3">
+                      <CardTitle className="text-xs font-medium text-muted-foreground flex items-center gap-1">
+                        <Activity className="h-3 w-3" />
+                        Used Margin
+                      </CardTitle>
+                    </CardHeader>
+                    <CardContent className="px-3 pb-3">
+                      <div className="text-xl font-bold">
+                        {formatCurrency(connectionSnapshot.metrics.margin ?? 0)}
+                      </div>
+                      {connectionSnapshot.metrics.marginLevel != null && (
+                        <p className="text-xs text-muted-foreground">
+                          Level: {connectionSnapshot.metrics.marginLevel.toFixed(1)}%
+                        </p>
+                      )}
+                    </CardContent>
+                  </Card>
+
+                  <Card className={connectionSnapshot.metrics.profit >= 0 ? "bg-primary/5" : "bg-red-500/5"}>
+                    <CardHeader className="pb-1 pt-3 px-3">
+                      <CardTitle className="text-xs font-medium text-muted-foreground flex items-center gap-1">
+                        {connectionSnapshot.metrics.profit >= 0 ? (
+                          <TrendingUp className="h-3 w-3 text-primary" />
+                        ) : (
+                          <TrendingDown className="h-3 w-3 text-red-500" />
+                        )}
+                        Floating P&L
+                      </CardTitle>
+                    </CardHeader>
+                    <CardContent className="px-3 pb-3">
+                      <div className={`text-xl font-bold ${connectionSnapshot.metrics.profit >= 0 ? "text-primary" : "text-red-500"}`}>
+                        {connectionSnapshot.metrics.profit >= 0 ? '+' : ''}{formatCurrency(connectionSnapshot.metrics.profit)}
+                      </div>
+                    </CardContent>
+                  </Card>
+                </div>
+
+                {/* Positions from Connection Supervisor */}
+                {connectionSnapshot.positions && connectionSnapshot.positions.length > 0 && (
+                  <Card>
+                    <CardHeader className="pb-2">
+                      <CardTitle className="text-sm flex items-center gap-2">
+                        <Activity className="h-4 w-4" />
+                        Open Positions
+                        <Badge variant="secondary" className="ml-auto">
+                          {connectionSnapshot.positions.length}
+                        </Badge>
+                      </CardTitle>
+                    </CardHeader>
+                    <CardContent>
+                      <div className="space-y-2">
+                        {connectionSnapshot.positions.map((position) => (
+                          <ConnectionPositionRow
+                            key={position.ticket}
+                            position={position}
+                          />
+                        ))}
+                      </div>
+                    </CardContent>
+                  </Card>
+                )}
+              </>
             )}
 
             {/* Connection Unavailable */}
@@ -419,8 +616,8 @@ export function AccountDetailsModal({
               </Card>
             )}
 
-            {/* Account Overview Cards */}
-            {(snapshot || (!needsPassword && !error)) && terminalStatus === 'running' && (
+            {/* Account Overview Cards (legacy - when not using connection supervisor) */}
+            {!hasSupervisedMetrics && (snapshot || (!needsPassword && !error)) && terminalStatus === 'running' && (
               <>
                 <div className="grid grid-cols-2 gap-3">
                   <Card>
@@ -601,6 +798,72 @@ export function AccountDetailsModal({
         </ScrollArea>
       </SheetContent>
     </Sheet>
+  );
+}
+
+/**
+ * Position Row Component (for Connection Supervisor positions)
+ */
+function ConnectionPositionRow({
+  position,
+}: {
+  position: {
+    ticket: number;
+    symbol: string;
+    type: 'buy' | 'sell';
+    volume: number;
+    openPrice: number;
+    currentPrice: number;
+    profit: number;
+  };
+}) {
+  const isBuy = position.type === 'buy';
+  const isProfit = position.profit >= 0;
+
+  return (
+    <div className="flex items-center justify-between p-2 border rounded-lg hover:bg-muted/50 transition-colors">
+      <div className="flex items-center gap-2">
+        <div
+          className={`p-1.5 rounded-full ${
+            isBuy ? "bg-primary/10" : "bg-red-500/10"
+          }`}
+        >
+          {isBuy ? (
+            <ArrowUpRight className="h-3 w-3 text-primary" />
+          ) : (
+            <ArrowDownRight className="h-3 w-3 text-red-500" />
+          )}
+        </div>
+        <div>
+          <div className="text-sm font-medium flex items-center gap-1">
+            {position.symbol}
+            <Badge
+              variant={isBuy ? "default" : "destructive"}
+              className="text-[10px] px-1 py-0"
+            >
+              {position.type.toUpperCase()}
+            </Badge>
+          </div>
+          <div className="text-xs text-muted-foreground">
+            {formatLots(position.volume)} lots @ {formatPrice(position.openPrice)}
+          </div>
+        </div>
+      </div>
+
+      <div className="text-right">
+        <div className="text-sm font-medium">
+          {formatPrice(position.currentPrice)}
+        </div>
+        <div
+          className={`text-xs font-medium ${
+            isProfit ? "text-primary" : "text-red-500"
+          }`}
+        >
+          {isProfit ? "+" : ""}
+          {formatCurrency(position.profit)}
+        </div>
+      </div>
+    </div>
   );
 }
 

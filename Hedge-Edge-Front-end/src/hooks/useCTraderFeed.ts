@@ -186,9 +186,10 @@ export function useCTraderFeed(options?: UseCTraderFeedOptions): UseCTraderFeedR
         throw new Error(result.error || 'Failed to fetch snapshot');
       }
       
-    } catch (err: any) {
-      console.error('Error fetching cTrader snapshot:', err);
-      const errorMessage = err.message || 'Failed to connect to cTrader';
+    } catch (err: unknown) {
+      const error = err instanceof Error ? err : new Error(String(err));
+      console.error('Error fetching cTrader snapshot:', error);
+      const errorMessage = error.message || 'Failed to connect to cTrader';
       setError(errorMessage);
       setIsConnected(false);
       

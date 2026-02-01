@@ -154,7 +154,7 @@ const DashboardAnalytics = () => {
   };
 
   // Custom dot component for the area chart
-  const CustomDot = (props: any) => {
+  const CustomDot = (props: { cx?: number; cy?: number }) => {
     const { cx, cy } = props;
     if (cx === undefined || cy === undefined) return null;
     return (

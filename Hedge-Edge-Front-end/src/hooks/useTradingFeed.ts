@@ -228,9 +228,10 @@ export function useTradingFeed(options?: UseTradingFeedOptions): UseTradingFeedR
         throw new Error(result.error || 'Failed to fetch snapshot');
       }
       
-    } catch (err: any) {
-      console.error(`Error fetching ${config.platform} snapshot:`, err);
-      const errorMessage = err.message || `Failed to connect to ${config.platform.toUpperCase()}`;
+    } catch (err: unknown) {
+      const error = err instanceof Error ? err : new Error(String(err));
+      console.error(`Error fetching ${config.platform} snapshot:`, error);
+      const errorMessage = error.message || `Failed to connect to ${config.platform.toUpperCase()}`;
       setError(errorMessage);
       setIsConnected(false);
       
