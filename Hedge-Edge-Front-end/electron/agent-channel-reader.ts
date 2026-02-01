@@ -195,7 +195,29 @@ export async function readMT5Snapshot(terminalDataPath: string): Promise<Channel
     // Trim any leading/trailing whitespace and null characters
     content = content.replace(/^\s*/, '').replace(/\s*$/, '').replace(/\0/g, '');
     
-    const data = JSON.parse(content) as AgentSnapshot;
+    // Handle corrupted files where EA appends instead of overwrites
+    // Find the first complete JSON object by matching braces
+    let jsonContent = content;
+    if (content.startsWith('{')) {
+      let braceCount = 0;
+      let endIndex = -1;
+      for (let i = 0; i < content.length; i++) {
+        if (content[i] === '{') braceCount++;
+        else if (content[i] === '}') {
+          braceCount--;
+          if (braceCount === 0) {
+            endIndex = i + 1;
+            break;
+          }
+        }
+      }
+      if (endIndex > 0 && endIndex < content.length) {
+        console.log(`[AgentChannelReader] Truncating JSON at position ${endIndex} (file has ${content.length} chars, likely corrupted)`);
+        jsonContent = content.substring(0, endIndex);
+      }
+    }
+    
+    const data = JSON.parse(jsonContent) as AgentSnapshot;
     
     // Validate basic structure
     if (!data.timestamp || !data.platform) {

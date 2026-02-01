@@ -257,6 +257,8 @@ interface ConnectionsAPI {
   disconnect: (params: DisconnectParams) => Promise<{ success: boolean; error?: string }>;
   status: (accountId: string) => Promise<ConnectionSnapshot | null>;
   refresh: (accountId: string) => Promise<{ success: boolean; error?: string }>;
+  reconnect: () => Promise<{ reconnected: number; failed: number }>;
+  refreshFromEA: () => Promise<{ found: number; reconnected: number }>;
   onSnapshotUpdate: (
     callback: (snapshots: ConnectionSnapshotMap) => void,
     intervalMs?: number

@@ -545,6 +545,35 @@ const connectionsAPI = {
   },
 
   /**
+   * Scan for running EAs and reconnect all available accounts
+   * Useful for restoring connections after app restart
+   */
+  reconnect: async (): Promise<{ success: boolean; sessionsCount?: number; connectedCount?: number; error?: string }> => {
+    try {
+      return await ipcRenderer.invoke('connections:reconnect');
+    } catch (err) {
+      console.error('[Preload] connections:reconnect error:', err);
+      return { success: false, error: err instanceof Error ? err.message : String(err) };
+    }
+  },
+
+  /**
+   * Refresh connection data for an account by re-reading EA file
+   * More thorough than refresh() - re-scans terminal files
+   */
+  refreshFromEA: async (accountId: string): Promise<{ success: boolean; error?: string }> => {
+    if (!accountId) {
+      return { success: false, error: 'Account ID is required' };
+    }
+    try {
+      return await ipcRenderer.invoke('connections:refreshFromEA', accountId);
+    } catch (err) {
+      console.error('[Preload] connections:refreshFromEA error:', err);
+      return { success: false, error: err instanceof Error ? err.message : String(err) };
+    }
+  },
+
+  /**
    * Subscribe to connection snapshot updates (polling-based)
    * Returns an unsubscribe function
    */

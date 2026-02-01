@@ -5,6 +5,7 @@ import { ScrollToTop } from "@/components/ScrollToTop";
 import { AuthProvider } from "@/contexts/AuthContext";
 import { Toaster } from "@/components/ui/toaster";
 import { DashboardLayout } from "@/components/dashboard/DashboardLayout";
+import { PageErrorBoundary } from "@/components/ErrorBoundary";
 import { Loader2 } from "lucide-react";
 
 // Lazy load pages for code splitting
@@ -24,35 +25,37 @@ const PageLoader = () => (
 
 // Use HashRouter for desktop (file:// protocol) and web compatibility
 const App = () => (
-  <AuthProvider>
-    <TooltipProvider>
-      <HashRouter>
-        <ScrollToTop />
-        <Toaster />
-        <Suspense fallback={<PageLoader />}>
-          <Routes>
-            {/* Redirect root to dashboard */}
-            <Route path="/" element={<Navigate to="/app/overview" replace />} />
-            
-            {/* Dashboard routes */}
-            <Route path="/app" element={<DashboardLayout />}>
-              <Route index element={<Navigate to="/app/overview" replace />} />
-              <Route path="overview" element={<DashboardOverview />} />
-              <Route path="accounts" element={<Accounts />} />
-              <Route path="analytics" element={<DashboardAnalytics />} />
-              <Route path="copier" element={<TradeCopier />} />
-              <Route path="calculator" element={<DashboardCalculator />} />
-              <Route path="settings" element={<Settings />} />
-              <Route path="help" element={<Help />} />
-            </Route>
+  <PageErrorBoundary pageName="App">
+    <AuthProvider>
+      <TooltipProvider>
+        <HashRouter>
+          <ScrollToTop />
+          <Toaster />
+          <Suspense fallback={<PageLoader />}>
+            <Routes>
+              {/* Redirect root to dashboard */}
+              <Route path="/" element={<Navigate to="/app/overview" replace />} />
+              
+              {/* Dashboard routes */}
+              <Route path="/app" element={<DashboardLayout />}>
+                <Route index element={<Navigate to="/app/overview" replace />} />
+                <Route path="overview" element={<DashboardOverview />} />
+                <Route path="accounts" element={<Accounts />} />
+                <Route path="analytics" element={<DashboardAnalytics />} />
+                <Route path="copier" element={<TradeCopier />} />
+                <Route path="calculator" element={<DashboardCalculator />} />
+                <Route path="settings" element={<Settings />} />
+                <Route path="help" element={<Help />} />
+              </Route>
 
-            {/* Catch all - redirect to dashboard */}
-            <Route path="*" element={<Navigate to="/app/overview" replace />} />
-          </Routes>
-        </Suspense>
-      </HashRouter>
-    </TooltipProvider>
-  </AuthProvider>
+              {/* Catch all - redirect to dashboard */}
+              <Route path="*" element={<Navigate to="/app/overview" replace />} />
+            </Routes>
+          </Suspense>
+        </HashRouter>
+      </TooltipProvider>
+    </AuthProvider>
+  </PageErrorBoundary>
 );
 
 export default App;

@@ -65,6 +65,34 @@ const LOCALAPPDATA = process.env.LOCALAPPDATA || '';
 const USERPROFILE = process.env.USERPROFILE || '';
 
 // ============================================================================
+// Caching & Logging Configuration
+// ============================================================================
+
+// Cache for terminal detection results
+let cachedTerminals: DetectedTerminal[] | null = null;
+let cacheTimestamp: number = 0;
+const CACHE_TTL_MS = 30000; // 30 seconds cache
+
+// Verbose logging flag - set to true only when debugging
+let verboseLogging = false;
+
+/**
+ * Enable or disable verbose terminal detection logging
+ */
+export function setTerminalDetectorVerbose(verbose: boolean): void {
+  verboseLogging = verbose;
+}
+
+/**
+ * Log only when verbose mode is explicitly enabled
+ */
+function debugLog(message: string, ...args: unknown[]): void {
+  if (verboseLogging) {
+    console.log(message, ...args);
+  }
+}
+
+// ============================================================================
 // Utility Functions
 // ============================================================================
 
@@ -141,33 +169,45 @@ async function getRunningProcessPaths(processNames: string[]): Promise<string[]>
   }
   
   try {
-    // Use WMIC to get full process paths
-    const filter = processNames.map(name => `Name='${name}'`).join(' OR ');
-    const { stdout } = await execAsync(
-      `wmic process where "${filter}" get ExecutablePath /format:csv`,
-      { windowsHide: true, timeout: 5000 }
-    );
+    // Use PowerShell Get-Process instead of deprecated WMIC
+    // Build filter for process names (without .exe extension)
+    const processNamesNoExt = processNames.map(name => name.replace(/\.exe$/i, ''));
+    const filter = processNamesNoExt.map(name => `'${name}'`).join(',');
     
-    // Parse CSV output - format is "Node,ExecutablePath"
+    const psCommand = `Get-Process -Name ${filter} -ErrorAction SilentlyContinue | Where-Object { $_.Path } | Select-Object -ExpandProperty Path`;
+    
+    // Use try/catch here because PowerShell exits with code 1 if not ALL process names are found
+    // but we still want to capture the stdout which contains found processes
+    let stdout = '';
+    try {
+      const result = await execAsync(
+        `powershell -NoProfile -NonInteractive -Command "${psCommand}"`,
+        { windowsHide: true, timeout: 10000 }
+      );
+      stdout = result.stdout;
+    } catch (execError: any) {
+      // PowerShell exits with code 1 when not all processes found, but stdout still has valid data
+      if (execError.stdout) {
+        stdout = execError.stdout;
+      }
+    }
+    
+    // Parse output - one path per line
     const paths: string[] = [];
     const lines = stdout.trim().split('\n');
     
     for (const line of lines) {
       const trimmed = line.trim();
-      if (!trimmed || trimmed.startsWith('Node')) continue;
-      
-      // CSV format: COMPUTERNAME,C:\path\to\executable.exe
-      const parts = trimmed.split(',');
-      if (parts.length >= 2) {
-        const exePath = parts.slice(1).join(',').trim(); // Handle paths with commas
-        if (exePath && exePath.length > 0) {
-          paths.push(exePath.toLowerCase());
-        }
+      if (trimmed && trimmed.length > 0) {
+        paths.push(trimmed.toLowerCase());
       }
     }
     
+    debugLog(`[Terminal Detector] Running terminal paths: ${JSON.stringify(paths)}`);
+    debugLog(`[Terminal Detector] Running terminal paths:`, paths);
     return paths;
   } catch (error) {
+    // Process not found is normal - not an error
     console.warn('[Terminal Detector] Failed to get running process paths:', error);
     return [];
   }
@@ -276,14 +316,14 @@ async function listDirectories(dirPath: string): Promise<string[]> {
  * Find executable in a directory (checks for MT5/MT4/cTrader executables)
  */
 async function findExecutableInDir(dirPath: string): Promise<{ exe: string; type: TerminalType } | null> {
-  console.log(`[Terminal Detector] Looking for executables in: ${dirPath}`);
+  debugLog(`[Terminal Detector] Looking for executables in: ${dirPath}`);
   
   // Check MT5 first (most common)
   for (const exe of EXECUTABLES.MT5) {
     const exePath = path.join(dirPath, exe);
-    console.log(`[Terminal Detector] Checking: ${exePath}`);
+    debugLog(`[Terminal Detector] Checking: ${exePath}`);
     const exists = await fileExists(exePath);
-    console.log(`[Terminal Detector] ${exePath} exists: ${exists}`);
+    debugLog(`[Terminal Detector] ${exePath} exists: ${exists}`);
     if (exists) {
       // Distinguish MT4 from MT5 by checking for terminal64.exe
       if (exe === 'terminal64.exe') {
@@ -322,33 +362,33 @@ async function scanMetaQuotesTerminalFolder(): Promise<DetectedTerminal[]> {
   const terminals: DetectedTerminal[] = [];
   const metaQuotesPath = path.join(APPDATA, 'MetaQuotes', 'Terminal');
   
-  console.log(`[Terminal Detector] APPDATA = ${APPDATA}`);
-  console.log(`[Terminal Detector] MetaQuotes path = ${metaQuotesPath}`);
+  debugLog(`[Terminal Detector] APPDATA = ${APPDATA}`);
+  debugLog(`[Terminal Detector] MetaQuotes path = ${metaQuotesPath}`);
   
   if (!await dirExists(metaQuotesPath)) {
-    console.log('[Terminal Detector] MetaQuotes Terminal folder does not exist');
+    debugLog('[Terminal Detector] MetaQuotes Terminal folder does not exist');
     return terminals;
   }
   
-  console.log('[Terminal Detector] Scanning MetaQuotes Terminal folder...');
+  debugLog('[Terminal Detector] Scanning MetaQuotes Terminal folder...');
   
   const guidFolders = await listDirectories(metaQuotesPath);
-  console.log(`[Terminal Detector] Found ${guidFolders.length} GUID folders`);
+  debugLog(`[Terminal Detector] Found ${guidFolders.length} GUID folders`);
   
   for (const guidFolder of guidFolders) {
     const folderName = path.basename(guidFolder);
-    console.log(`[Terminal Detector] Checking folder: ${folderName}`);
+    debugLog(`[Terminal Detector] Checking folder: ${folderName}`);
     
     // Skip non-GUID folders
     if (!/^[A-F0-9]{32}$/i.test(folderName)) {
-      console.log(`[Terminal Detector] Skipping non-GUID folder: ${folderName}`);
+      debugLog(`[Terminal Detector] Skipping non-GUID folder: ${folderName}`);
       continue;
     }
     
     // Check for terminal.exe in this data folder
     const found = await findExecutableInDir(guidFolder);
     if (found) {
-      console.log(`[Terminal Detector] Found terminal in GUID folder: ${found.exe}`);
+      debugLog(`[Terminal Detector] Found terminal in GUID folder: ${found.exe}`);
       const broker = extractBrokerName(guidFolder);
       terminals.push({
         id: generateId(found.exe),
@@ -364,7 +404,7 @@ async function scanMetaQuotesTerminalFolder(): Promise<DetectedTerminal[]> {
     
     // Also check origin.txt for the actual install location
     const originFile = path.join(guidFolder, 'origin.txt');
-    console.log(`[Terminal Detector] Checking origin.txt: ${originFile}`);
+    debugLog(`[Terminal Detector] Checking origin.txt: ${originFile}`);
     try {
       // origin.txt is often UTF-16 LE encoded, try multiple encodings
       let originPath = '';
@@ -386,16 +426,16 @@ async function scanMetaQuotesTerminalFolder(): Promise<DetectedTerminal[]> {
       }
       // Remove any null characters or BOM remnants
       originPath = originPath.replace(/\x00/g, '').replace(/^\uFEFF/, '').trim();
-      console.log(`[Terminal Detector] origin.txt points to: ${originPath}`);
-      console.log(`[Terminal Detector] origin.txt path length: ${originPath.length}, chars: ${[...originPath].map(c => c.charCodeAt(0)).slice(0, 10).join(',')}`);
+      debugLog(`[Terminal Detector] origin.txt points to: ${originPath}`);
+      debugLog(`[Terminal Detector] origin.txt path length: ${originPath.length}, chars: ${[...originPath].map(c => c.charCodeAt(0)).slice(0, 10).join(',')}`);
       
       const originDirExists = await dirExists(originPath);
-      console.log(`[Terminal Detector] Directory exists check for "${originPath}": ${originDirExists}`);
+      debugLog(`[Terminal Detector] Directory exists check for "${originPath}": ${originDirExists}`);
       
       if (originPath && originDirExists) {
         const originFound = await findExecutableInDir(originPath);
         if (originFound) {
-          console.log(`[Terminal Detector] Found terminal at origin path: ${originFound.exe}`);
+          debugLog(`[Terminal Detector] Found terminal at origin path: ${originFound.exe}`);
           const broker = extractBrokerName(originPath);
           terminals.push({
             id: generateId(originFound.exe),
@@ -410,11 +450,11 @@ async function scanMetaQuotesTerminalFolder(): Promise<DetectedTerminal[]> {
         }
       }
     } catch (err) {
-      console.log(`[Terminal Detector] Could not read origin.txt: ${err}`);
+      debugLog(`[Terminal Detector] Could not read origin.txt: ${err}`);
     }
   }
   
-  console.log(`[Terminal Detector] MetaQuotes scan found ${terminals.length} terminals`);
+  debugLog(`[Terminal Detector] MetaQuotes scan found ${terminals.length} terminals`);
   return terminals;
 }
 
@@ -424,15 +464,15 @@ async function scanMetaQuotesTerminalFolder(): Promise<DetectedTerminal[]> {
 async function scanDirectory(dirPath: string, patterns: string[]): Promise<DetectedTerminal[]> {
   const terminals: DetectedTerminal[] = [];
   
-  console.log(`[Terminal Detector] Scanning directory: ${dirPath}`);
+  debugLog(`[Terminal Detector] Scanning directory: ${dirPath}`);
   
   if (!await dirExists(dirPath)) {
-    console.log(`[Terminal Detector] Directory does not exist: ${dirPath}`);
+    debugLog(`[Terminal Detector] Directory does not exist: ${dirPath}`);
     return terminals;
   }
   
   const subDirs = await listDirectories(dirPath);
-  console.log(`[Terminal Detector] Found ${subDirs.length} subdirectories in ${dirPath}`);
+  debugLog(`[Terminal Detector] Found ${subDirs.length} subdirectories in ${dirPath}`);
   
   for (const subDir of subDirs) {
     const folderName = path.basename(subDir).toLowerCase();
@@ -445,19 +485,14 @@ async function scanDirectory(dirPath: string, patterns: string[]): Promise<Detec
     });
     
     if (matchesPattern) {
-      console.log(`[Terminal Detector] Matched pattern in: ${subDir}`);
-    } else {
-      // Also log first few non-matches for debugging
-      if (subDirs.indexOf(subDir) < 5) {
-        console.log(`[Terminal Detector] No match for: ${folderName}`);
-      }
+      debugLog(`[Terminal Detector] Matched pattern in: ${subDir}`);
     }
     
     if (!matchesPattern) continue;
     
     const found = await findExecutableInDir(subDir);
     if (found) {
-      console.log(`[Terminal Detector] Found executable: ${found.exe} (${found.type})`);
+      debugLog(`[Terminal Detector] Found executable: ${found.exe} (${found.type})`);
       const broker = extractBrokerName(subDir);
       terminals.push({
         id: generateId(found.exe),
@@ -467,8 +502,6 @@ async function scanDirectory(dirPath: string, patterns: string[]): Promise<Detec
         installPath: subDir,
         broker,
       });
-    } else {
-      console.log(`[Terminal Detector] No executable found in: ${subDir}`);
     }
   }
   
@@ -483,18 +516,18 @@ async function scanDriveRoots(): Promise<DetectedTerminal[]> {
   const drives = ['C:', 'D:', 'E:', 'F:'];
   const patterns = ['metatrader', 'mt4', 'mt5'];
   
-  console.log('[Terminal Detector] Starting drive root scan...');
+  debugLog('[Terminal Detector] Starting drive root scan...');
   
   for (const drive of drives) {
     const drivePath = `${drive}\\`;
-    console.log(`[Terminal Detector] Checking drive: ${drivePath}`);
     if (!await dirExists(drivePath)) {
-      console.log(`[Terminal Detector] Drive not accessible: ${drivePath}`);
       continue;
     }
     
     const found = await scanDirectory(drivePath, patterns);
-    console.log(`[Terminal Detector] Found ${found.length} terminals on ${drive}`);
+    if (found.length > 0) {
+      debugLog(`[Terminal Detector] Found ${found.length} terminals on ${drive}`);
+    }
     terminals.push(...found);
   }
   
@@ -600,7 +633,7 @@ async function deepScanWithPowerShell(): Promise<DetectedTerminal[]> {
     return terminals;
   }
   
-  console.log('[Terminal Detector] Starting deep scan with PowerShell...');
+  debugLog('[Terminal Detector] Starting deep scan with PowerShell...');
   
   const searchPatterns = [
     { pattern: 'terminal64.exe', type: 'mt5' as TerminalType },
@@ -693,7 +726,7 @@ async function updateRunningStatus(terminals: DetectedTerminal[]): Promise<void>
     'cTrader.exe'
   ]);
   
-  console.log('[Terminal Detector] Running terminal paths:', runningPaths);
+  debugLog('[Terminal Detector] Running terminal paths:', runningPaths);
   
   for (const terminal of terminals) {
     // Check if this specific terminal's executable path is in the running processes
@@ -711,6 +744,7 @@ async function updateRunningStatus(terminals: DetectedTerminal[]): Promise<void>
 
 /**
  * Detect all installed trading terminals using fast scan
+ * Results are cached for 30 seconds to reduce repeated scans
  */
 export async function detectTerminals(): Promise<DetectionResult> {
   if (process.platform !== 'win32') {
@@ -721,8 +755,18 @@ export async function detectTerminals(): Promise<DetectionResult> {
     };
   }
   
+  // Check cache first
+  const now = Date.now();
+  if (cachedTerminals && (now - cacheTimestamp) < CACHE_TTL_MS) {
+    // Return cached results silently
+    return {
+      success: true,
+      terminals: cachedTerminals,
+      deepScan: false,
+    };
+  }
+  
   try {
-    console.log('[Terminal Detector] Starting fast scan...');
     const startTime = Date.now();
     
     // Run all fast scans in parallel
@@ -755,8 +799,12 @@ export async function detectTerminals(): Promise<DetectionResult> {
     // Update running status
     await updateRunningStatus(allTerminals);
     
+    // Update cache
+    cachedTerminals = allTerminals;
+    cacheTimestamp = now;
+    
     const elapsed = Date.now() - startTime;
-    console.log(`[Terminal Detector] Fast scan complete in ${elapsed}ms, found ${allTerminals.length} terminals`);
+    console.log(`[Terminal Detector] Scan complete: ${allTerminals.length} terminals found in ${elapsed}ms`);
     
     return {
       success: true,

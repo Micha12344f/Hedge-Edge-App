@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { supabase } from '@/integrations/supabase/client';
+import { supabase, isSupabaseEnabled } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
 import { useToast } from '@/hooks/use-toast';
 
@@ -69,8 +69,8 @@ export const useTradingAccounts = () => {
   const fetchAccounts = async () => {
     setLoading(true);
     
-    // If user is authenticated, try Supabase first
-    if (user) {
+    // If user is authenticated and Supabase is enabled, try Supabase first
+    if (user && isSupabaseEnabled && supabase) {
       const { data, error } = await supabase
         .from('trading_accounts')
         .select('*')
@@ -90,8 +90,8 @@ export const useTradingAccounts = () => {
   };
 
   const createAccount = async (data: CreateAccountData) => {
-    // If user is authenticated, use Supabase
-    if (user) {
+    // If user is authenticated and Supabase is enabled, use Supabase
+    if (user && isSupabaseEnabled && supabase) {
       // Strip login field - not in Supabase schema, only for demo mode
       const { login, ...supabaseData } = data;
       const { error } = await supabase
@@ -152,7 +152,7 @@ export const useTradingAccounts = () => {
   };
 
   const updateAccount = async (id: string, data: Partial<CreateAccountData>) => {
-    if (user) {
+    if (user && isSupabaseEnabled && supabase) {
       const { error } = await supabase
         .from('trading_accounts')
         .update(data)
@@ -200,7 +200,7 @@ export const useTradingAccounts = () => {
     const pnl = newBalance - accountSize;
     const pnlPercent = accountSize > 0 ? (pnl / accountSize) * 100 : 0;
 
-    if (user) {
+    if (user && isSupabaseEnabled && supabase) {
       await supabase
         .from('trading_accounts')
         .update({
@@ -231,7 +231,7 @@ export const useTradingAccounts = () => {
   };
 
   const deleteAccount = async (id: string) => {
-    if (user) {
+    if (user && isSupabaseEnabled && supabase) {
       const { error } = await supabase
         .from('trading_accounts')
         .delete()

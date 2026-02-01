@@ -1,5 +1,6 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useTradingAccounts, TradingAccount } from '@/hooks/useTradingAccounts';
+import { useConnectionsFeed } from '@/hooks/useConnectionsFeed';
 import { AccountCard } from '@/components/dashboard/AccountCard';
 import { AddAccountModal } from '@/components/dashboard/AddAccountModal';
 import { AccountDetailsModal } from '@/components/dashboard/AccountDetailsModal';
@@ -27,10 +28,30 @@ import {
 
 const DashboardOverview = () => {
   const { accounts, loading, createAccount, deleteAccount, syncAccountFromMT5 } = useTradingAccounts();
+  const { snapshots, getSnapshot, refreshFromEA } = useConnectionsFeed({ autoStart: true, debug: true });
   const [addModalOpen, setAddModalOpen] = useState(false);
   const [activeTab, setActiveTab] = useState('all');
   const [selectedAccount, setSelectedAccount] = useState<TradingAccount | null>(null);
   const [detailsModalOpen, setDetailsModalOpen] = useState(false);
+
+  // Auto-refresh from EA files on mount
+  useEffect(() => {
+    // Give the app a moment to initialize, then refresh from EA files
+    const timer = setTimeout(() => {
+      refreshFromEA?.().then((result) => {
+        console.log('[DashboardOverview] EA refresh result:', result);
+      }).catch(console.error);
+    }, 1000);
+    return () => clearTimeout(timer);
+  }, [refreshFromEA]);
+
+  // Helper to get connection snapshot for an account
+  // The connection system uses MT5 login as the key
+  const getAccountSnapshot = (account: TradingAccount) => {
+    if (!account.login) return null;
+    // Try login as key first (MT5 login number)
+    return getSnapshot(account.login) || getSnapshot(account.id) || null;
+  };
 
   const handleAccountClick = (account: TradingAccount) => {
     setSelectedAccount(account);
@@ -309,6 +330,7 @@ const DashboardOverview = () => {
                         account={account}
                         onDelete={deleteAccount}
                         onClick={handleAccountClick}
+                        connectionSnapshot={getAccountSnapshot(account)}
                       />
                     </div>
                   ))}
@@ -330,6 +352,7 @@ const DashboardOverview = () => {
         open={detailsModalOpen}
         onOpenChange={setDetailsModalOpen}
         onSyncAccount={syncAccountFromMT5}
+        connectionSnapshot={selectedAccount ? getAccountSnapshot(selectedAccount) : null}
       />
     </div>
   );

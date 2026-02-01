@@ -185,39 +185,6 @@ export const AccountCard = ({
         {isHedgeAccount ? (
           /* Hedge Account Display */
           <>
-            {/* Connection Status Banner */}
-            <div className={cn(
-              "flex items-center justify-between p-2 rounded-lg mb-3 transition-colors",
-              isConnected ? "bg-primary/10" : 
-              hasConnectionError ? "bg-destructive/10" : 
-              isConnectionActive ? "bg-yellow-500/10" : "bg-muted/30"
-            )}>
-              <div className="flex items-center gap-2">
-                {isConnectionActive || isConnecting ? (
-                  <Loader2 className="h-3.5 w-3.5 animate-spin text-yellow-500" />
-                ) : isConnected ? (
-                  <Wifi className="h-3.5 w-3.5 text-primary" />
-                ) : hasConnectionError ? (
-                  <WifiOff className="h-3.5 w-3.5 text-destructive" />
-                ) : (
-                  <WifiOff className="h-3.5 w-3.5 text-muted-foreground" />
-                )}
-                <span className={cn(
-                  "text-xs font-medium",
-                  isConnected ? "text-primary" :
-                  hasConnectionError ? "text-destructive" :
-                  isConnectionActive ? "text-yellow-500" : "text-muted-foreground"
-                )}>
-                  {isConnecting ? 'Connecting...' : formatConnectionStatus(connectionStatus)}
-                </span>
-              </div>
-              {isConnected && positionCount > 0 && (
-                <Badge variant="outline" className="text-[10px] bg-primary/10 text-primary border-primary/30">
-                  {positionCount} position{positionCount !== 1 ? 's' : ''}
-                </Badge>
-              )}
-            </div>
-
             {/* License Status Banner (show only when there's an issue or not valid) */}
             {isConnected && licenseStatus !== 'not-configured' && !isLicenseValid && (
               <div className={cn(

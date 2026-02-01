@@ -301,23 +301,6 @@ export function AccountDetailsModal({
               )}
               
               {/* Legacy Connection Status (fallback when not using supervisor) */}
-              {!connectionSnapshot && (
-                <Badge
-                  variant="outline"
-                  className={
-                    terminalStatus === 'running' 
-                      ? "bg-primary/10 text-primary border-primary/20"
-                      : terminalStatus === 'not-running'
-                      ? "bg-red-500/10 text-red-500 border-red-500/20"
-                      : "bg-muted text-muted-foreground"
-                  }
-                >
-                  <Server className="h-3 w-3 mr-1" />
-                  {terminalStatus === 'checking' ? 'Connecting...' : terminalStatus === 'running' ? 'Connected' : 'Offline'}
-                </Badge>
-              )}
-              
-              {/* MT5 Connection (legacy) */}
               {!connectionSnapshot && !needsPassword && terminalStatus === 'running' && (
                 (isConnected || snapshot) ? (
                   <Badge
@@ -535,30 +518,6 @@ export function AccountDetailsModal({
                   </Card>
                 </div>
 
-                {/* Positions from Connection Supervisor */}
-                {connectionSnapshot.positions && connectionSnapshot.positions.length > 0 && (
-                  <Card>
-                    <CardHeader className="pb-2">
-                      <CardTitle className="text-sm flex items-center gap-2">
-                        <Activity className="h-4 w-4" />
-                        Open Positions
-                        <Badge variant="secondary" className="ml-auto">
-                          {connectionSnapshot.positions.length}
-                        </Badge>
-                      </CardTitle>
-                    </CardHeader>
-                    <CardContent>
-                      <div className="space-y-2">
-                        {connectionSnapshot.positions.map((position) => (
-                          <ConnectionPositionRow
-                            key={position.ticket}
-                            position={position}
-                          />
-                        ))}
-                      </div>
-                    </CardContent>
-                  </Card>
-                )}
               </>
             )}
 
@@ -791,38 +750,6 @@ export function AccountDetailsModal({
                   </CardContent>
                 </Card>
 
-                {/* Open Positions */}
-                {snapshot && (
-                  <Card>
-                    <CardHeader className="pb-2">
-                      <CardTitle className="text-sm flex items-center gap-2">
-                        <Activity className="h-4 w-4" />
-                        Open Positions
-                        <Badge variant="secondary" className="ml-auto">
-                          {snapshot.positions_count}
-                        </Badge>
-                      </CardTitle>
-                    </CardHeader>
-                    <CardContent>
-                      {positions.length === 0 ? (
-                        <div className="text-center py-6 text-muted-foreground">
-                          <Activity className="h-8 w-8 mx-auto mb-2 opacity-30" />
-                          <p className="text-sm">No open positions</p>
-                        </div>
-                      ) : (
-                        <div className="space-y-2">
-                          {positions.map((position) => (
-                            <PositionRow
-                              key={position.ticket}
-                              position={position}
-                              currency={snapshot.currency}
-                            />
-                          ))}
-                        </div>
-                      )}
-                    </CardContent>
-                  </Card>
-                )}
               </>
             )}
           </div>

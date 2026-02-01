@@ -4,12 +4,9 @@ import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { 
   Zap, 
-  AlertTriangle, 
-  Clock,
   Server,
   User,
-  Settings2,
-  RefreshCw
+  Settings2
 } from 'lucide-react';
 
 interface HedgeAccountCardProps {
@@ -20,8 +17,6 @@ interface HedgeAccountCardProps {
   isSelected?: boolean;
 }
 
-type ConnectionStatus = 'connected' | 'lagging' | 'disconnected';
-
 export const HedgeAccountCard = ({ 
   account, 
   linkedCount, 
@@ -29,57 +24,6 @@ export const HedgeAccountCard = ({
   onSelect,
   isSelected 
 }: HedgeAccountCardProps) => {
-  // Determine connection status
-  const getConnectionStatus = (): ConnectionStatus => {
-    if (account.last_sync_at) {
-      const lastSync = new Date(account.last_sync_at);
-      const now = new Date();
-      const diffMinutes = (now.getTime() - lastSync.getTime()) / (1000 * 60);
-      if (diffMinutes > 10) return 'disconnected';
-      if (diffMinutes > 5) return 'lagging';
-    }
-    return 'connected';
-  };
-
-  const connectionStatus = getConnectionStatus();
-
-  const statusConfig = {
-    connected: {
-      badge: 'bg-emerald-500/20 text-emerald-400 border-emerald-500/40',
-      icon: Zap,
-      label: 'Connected',
-      pulse: true,
-    },
-    lagging: {
-      badge: 'bg-yellow-500/20 text-yellow-400 border-yellow-500/40',
-      icon: Clock,
-      label: 'Lagging',
-      pulse: false,
-    },
-    disconnected: {
-      badge: 'bg-red-500/20 text-red-400 border-red-500/40',
-      icon: AlertTriangle,
-      label: 'Disconnected',
-      pulse: false,
-    },
-  };
-
-  const status = statusConfig[connectionStatus];
-  const StatusIcon = status.icon;
-
-  const formatLastSync = () => {
-    if (!account.last_sync_at) return 'Never';
-    const date = new Date(account.last_sync_at);
-    const now = new Date();
-    const diffMs = now.getTime() - date.getTime();
-    const diffMins = Math.floor(diffMs / 60000);
-    if (diffMins < 1) return 'Just now';
-    if (diffMins < 60) return `${diffMins}m ago`;
-    const diffHours = Math.floor(diffMins / 60);
-    if (diffHours < 24) return `${diffHours}h ago`;
-    return date.toLocaleDateString();
-  };
-
   return (
     <div
       onClick={onSelect}
@@ -98,19 +42,14 @@ export const HedgeAccountCard = ({
           </div>
           <div>
             <h3 className="font-semibold text-sm text-foreground">{account.account_name}</h3>
-            <p className="text-xs text-muted-foreground">{account.platform || 'MT5'}</p>
+            <p className="text-xs text-muted-foreground">{account.platform || 'MT5'} - {account.server || 'Unknown'}</p>
           </div>
         </div>
         <Badge 
           variant="outline" 
-          className={cn(
-            'text-[10px] px-2 py-0.5 flex items-center gap-1',
-            status.badge,
-            status.pulse && 'animate-pulse'
-          )}
+          className="text-[10px] px-2 py-0.5 bg-blue-500/20 text-blue-400 border-blue-500/40"
         >
-          <StatusIcon className="w-3 h-3" />
-          {status.label}
+          Hedge
         </Badge>
       </div>
 
@@ -134,15 +73,9 @@ export const HedgeAccountCard = ({
 
       {/* Footer */}
       <div className="flex items-center justify-between pt-2 border-t border-border/30">
-        <div className="flex items-center gap-3 text-xs text-muted-foreground">
-          <span className="flex items-center gap-1">
-            <RefreshCw className="w-3 h-3" />
-            {formatLastSync()}
-          </span>
-          <span className="text-blue-400 font-medium">
-            {linkedCount} linked
-          </span>
-        </div>
+        <span className="text-xs text-blue-400 font-medium">
+          {linkedCount} linked
+        </span>
         <Button
           variant="ghost"
           size="sm"

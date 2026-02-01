@@ -318,6 +318,45 @@ class ConnectionSupervisor {
   }
 
   /**
+   * Reconnect all persisted accounts (called on app startup)
+   */
+  async reconnect(): Promise<{ reconnected: number; failed: number }> {
+    if (!isConnectionsApiAvailable()) {
+      return { reconnected: 0, failed: 0 };
+    }
+
+    const result = await window.electronAPI!.connections.reconnect();
+    
+    // Refresh state after reconnection
+    const snapshots = await window.electronAPI!.connections.list();
+    this.state.snapshots = snapshots;
+    this.state.lastUpdate = new Date();
+    this.notifyListeners();
+
+    return result;
+  }
+
+  /**
+   * Refresh connections from EA files in MT5 terminals
+   * This scans running terminals and reconnects any accounts that have EA data
+   */
+  async refreshFromEA(): Promise<{ found: number; reconnected: number }> {
+    if (!isConnectionsApiAvailable()) {
+      return { found: 0, reconnected: 0 };
+    }
+
+    const result = await window.electronAPI!.connections.refreshFromEA();
+    
+    // Refresh state after EA scan
+    const snapshots = await window.electronAPI!.connections.list();
+    this.state.snapshots = snapshots;
+    this.state.lastUpdate = new Date();
+    this.notifyListeners();
+
+    return result;
+  }
+
+  /**
    * Check if an account is connected
    */
   isConnected(accountId: string): boolean {

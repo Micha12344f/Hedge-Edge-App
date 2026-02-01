@@ -131,6 +131,197 @@ const connectionSessions: Map<string, ConnectionSession> = new Map();
 const connectionMetrics: Map<string, ConnectionMetrics> = new Map();
 const connectionPositions: Map<string, ConnectionPosition[]> = new Map();
 
+// ============================================================================
+// Connection Session Persistence & Auto-Reconnect
+// ============================================================================
+
+/**
+ * Persisted session data (without sensitive credentials)
+ * Stored in electron-store or JSON file for reconnection on restart
+ */
+interface PersistedSession {
+  accountId: string;
+  platform: ConnectionPlatform;
+  role: ConnectionRole;
+  login: string;
+  server: string;
+  lastConnected?: string;
+}
+
+// File path for persisted sessions
+const SESSIONS_FILE = path.join(app.getPath('userData'), 'connection-sessions.json');
+
+/**
+ * Load persisted sessions from disk
+ */
+async function loadPersistedSessions(): Promise<PersistedSession[]> {
+  try {
+    const data = await fsPromises.readFile(SESSIONS_FILE, 'utf-8');
+    return JSON.parse(data);
+  } catch (error) {
+    // File doesn't exist or is invalid - return empty
+    return [];
+  }
+}
+
+/**
+ * Save sessions to disk (without passwords)
+ */
+async function savePersistedSessions(): Promise<void> {
+  const sessions: PersistedSession[] = [];
+  
+  for (const [accountId, session] of connectionSessions) {
+    if (session._credentials) {
+      sessions.push({
+        accountId,
+        platform: session.platform,
+        role: session.role,
+        login: session._credentials.login,
+        server: session._credentials.server,
+        lastConnected: session.lastConnected,
+      });
+    }
+  }
+  
+  try {
+    await fsPromises.writeFile(SESSIONS_FILE, JSON.stringify(sessions, null, 2), 'utf-8');
+    console.log('[Main] Saved', sessions.length, 'connection sessions to disk');
+  } catch (error) {
+    console.error('[Main] Failed to save sessions:', error);
+  }
+}
+
+/**
+ * Auto-reconnect accounts by scanning for running EAs
+ * Called on app startup to restore connections without requiring passwords
+ */
+async function autoReconnectFromEAFiles(): Promise<void> {
+  console.log('[Main] Auto-reconnecting from EA files...');
+  
+  try {
+    // Scan for MT5 terminals and their EA data files
+    const detectionResult = await detectTerminals();
+    if (!detectionResult.success || !detectionResult.terminals) {
+      console.log('[Main] No terminals detected for auto-reconnect');
+      return;
+    }
+    
+    const mt5Terminals = detectionResult.terminals.filter((t: { type: string }) => t.type === 'mt5');
+    console.log('[Main] Found', mt5Terminals.length, 'MT5 terminals to check for EA files');
+    
+    for (const terminal of mt5Terminals) {
+      console.log('[Main] Checking terminal:', terminal.name, 'dataPath:', terminal.dataPath);
+      if (!terminal.dataPath) {
+        console.log('[Main] Skipping terminal - no dataPath');
+        continue;
+      }
+      
+      try {
+        const snapshotResult = await readMT5Snapshot(terminal.dataPath);
+        console.log('[Main] EA file read result:', snapshotResult.success, snapshotResult.error || '');
+        if (!snapshotResult.success || !snapshotResult.data) {
+          console.log('[Main] No EA snapshot data for terminal');
+          continue;
+        }
+        
+        const data = snapshotResult.data;
+        const accountId = String(data.accountId);
+        
+        // Check if session already exists
+        if (connectionSessions.has(accountId)) {
+          console.log('[Main] Session already exists for account:', accountId);
+          continue;
+        }
+        
+        console.log('[Main] Auto-connecting account from EA file:', accountId, data.broker);
+        
+        // Create session from EA data (no password needed for file-based reading)
+        const session: ConnectionSession = {
+          id: accountId,
+          accountId,
+          platform: 'mt5',
+          role: 'local',
+          status: 'connected', // Already connected via EA file
+          lastUpdate: new Date().toISOString(),
+          lastConnected: new Date().toISOString(),
+          autoReconnect: true,
+          // Store credentials for matching (password empty since we use file-based)
+          _credentials: {
+            login: accountId,
+            password: '', // Not needed for file-based
+            server: data.server || data.broker || '',
+          },
+        };
+        connectionSessions.set(accountId, session);
+        
+        // Store metrics from EA snapshot
+        const metrics: ConnectionMetrics = {
+          balance: data.balance ?? 0,
+          equity: data.equity ?? 0,
+          profit: data.floatingPnL ?? 0,
+          positionCount: data.positions?.length ?? 0,
+          margin: data.margin,
+          freeMargin: data.freeMargin,
+          marginLevel: data.marginLevel,
+        };
+        connectionMetrics.set(accountId, metrics);
+        
+        // Store positions
+        if (data.positions) {
+          const positions: ConnectionPosition[] = data.positions.map((p: any) => ({
+            ticket: parseInt(p.id) || 0,
+            symbol: p.symbol,
+            type: p.side === 'BUY' ? 'buy' : 'sell',
+            volume: p.volumeLots,
+            openPrice: p.entryPrice,
+            currentPrice: p.currentPrice,
+            profit: p.profit,
+            stopLoss: p.stopLoss,
+            takeProfit: p.takeProfit,
+            openTime: p.openTime || new Date().toISOString(),
+            magic: 0,
+            comment: p.comment || '',
+          }));
+          connectionPositions.set(accountId, positions);
+        }
+        
+        console.log('[Main] Auto-connected account:', accountId, 'Balance:', metrics.balance);
+      } catch (err) {
+        console.log('[Main] Failed to auto-connect from terminal:', terminal.dataPath, err);
+      }
+    }
+    
+    // Also try to load persisted sessions and mark them for reconnect
+    const persisted = await loadPersistedSessions();
+    for (const ps of persisted) {
+      if (!connectionSessions.has(ps.accountId)) {
+        // Create a disconnected session so UI knows about this account
+        const session: ConnectionSession = {
+          id: ps.accountId,
+          accountId: ps.accountId,
+          platform: ps.platform,
+          role: ps.role,
+          status: 'disconnected',
+          lastUpdate: new Date().toISOString(),
+          lastConnected: ps.lastConnected,
+          autoReconnect: true,
+          _credentials: {
+            login: ps.login,
+            password: '', // Will need password to fully reconnect
+            server: ps.server,
+          },
+        };
+        connectionSessions.set(ps.accountId, session);
+        console.log('[Main] Loaded persisted session (disconnected):', ps.accountId);
+      }
+    }
+    
+    console.log('[Main] Auto-reconnect complete. Total sessions:', connectionSessions.size);
+  } catch (error) {
+    console.error('[Main] Auto-reconnect failed:', error);
+  }
+}
+
 /**
  * Get a sanitized session (without internal credentials)
  */
@@ -272,6 +463,7 @@ async function fetchSessionMetrics(accountId: string): Promise<void> {
 
 /**
  * Connect an account
+ * For MT5: First tries to connect via EA file (no password needed), falls back to agent API
  */
 async function connectAccount(params: {
   accountId: string;
@@ -292,13 +484,89 @@ async function connectAccount(params: {
     endpoint,
     status: 'connecting',
     lastUpdate: new Date().toISOString(),
-    autoReconnect: autoReconnect ?? false,
+    autoReconnect: autoReconnect ?? true, // Default to auto-reconnect
     _credentials: credentials,
   };
   connectionSessions.set(accountId, session);
 
+  // For MT5, try file-based connection first (no password needed)
+  if (platform === 'mt5') {
+    try {
+      const detectionResult = await detectTerminals();
+      if (detectionResult.success && detectionResult.terminals) {
+        const mt5Terminals = detectionResult.terminals.filter((t: { type: string }) => t.type === 'mt5');
+        
+        for (const terminal of mt5Terminals) {
+          if (!terminal.dataPath) continue;
+          
+          const snapshotResult = await readMT5Snapshot(terminal.dataPath);
+          if (snapshotResult.success && snapshotResult.data) {
+            const data = snapshotResult.data;
+            
+            // Check if this matches the account we're trying to connect
+            if (String(data.accountId) === String(credentials.login)) {
+              console.log('[Main] Connected via EA file for account:', credentials.login);
+              
+              // Update session to connected
+              session.status = 'connected';
+              session.lastConnected = new Date().toISOString();
+              session.lastUpdate = session.lastConnected;
+              connectionSessions.set(accountId, session);
+              
+              // Store metrics
+              const metrics: ConnectionMetrics = {
+                balance: data.balance ?? 0,
+                equity: data.equity ?? 0,
+                profit: data.floatingPnL ?? 0,
+                positionCount: data.positions?.length ?? 0,
+                margin: data.margin,
+                freeMargin: data.freeMargin,
+                marginLevel: data.marginLevel,
+              };
+              connectionMetrics.set(accountId, metrics);
+              
+              // Store positions
+              if (data.positions) {
+                const positions: ConnectionPosition[] = data.positions.map((p: any) => ({
+                  ticket: parseInt(p.id) || 0,
+                  symbol: p.symbol,
+                  type: p.side === 'BUY' ? 'buy' : 'sell',
+                  volume: p.volumeLots,
+                  openPrice: p.entryPrice,
+                  currentPrice: p.currentPrice,
+                  profit: p.profit,
+                  stopLoss: p.stopLoss,
+                  takeProfit: p.takeProfit,
+                  openTime: p.openTime || new Date().toISOString(),
+                  magic: 0,
+                  comment: p.comment || '',
+                }));
+                connectionPositions.set(accountId, positions);
+              }
+              
+              // Save session for reconnect on restart
+              savePersistedSessions().catch(err => console.error('[Main] Failed to save sessions:', err));
+              
+              return { success: true };
+            }
+          }
+        }
+      }
+      
+      // EA file not found for this account
+      console.log('[Main] No EA file found for account:', credentials.login);
+      updateSessionStatus(accountId, 'error', 'EA not running for this account. Start the HedgeEdge EA on MT5.');
+      return { success: false, error: 'EA not running for this account. Start the HedgeEdge EA on MT5.' };
+      
+    } catch (error) {
+      console.log('[Main] File-based connection failed:', error);
+      updateSessionStatus(accountId, 'error', error instanceof Error ? error.message : 'Connection failed');
+      return { success: false, error: error instanceof Error ? error.message : 'Connection failed' };
+    }
+  }
+
+  // For cTrader, use agent API
   try {
-    // Validate credentials with the agent
     const result = await agentRequest<{ valid?: boolean }>(
       platform as AgentPlatform, 
       '/api/validate', 
@@ -308,8 +576,11 @@ async function connectAccount(params: {
 
     if (result.success) {
       updateSessionStatus(accountId, 'connected');
-      // Fetch initial metrics
       await fetchSessionMetrics(accountId);
+      
+      // Save session for reconnect on restart
+      savePersistedSessions().catch(err => console.error('[Main] Failed to save sessions:', err));
+      
       return { success: true };
     } else {
       updateSessionStatus(accountId, 'error', result.error || 'Validation failed');
@@ -1624,6 +1895,120 @@ function setupIpcHandlers() {
     }
   });
 
+  // Scan for running EAs and auto-reconnect accounts
+  ipcMain.handle('connections:reconnect', async () => {
+    console.log('[Main] Manual reconnect triggered');
+    try {
+      await autoReconnectFromEAFiles();
+      return { 
+        success: true, 
+        sessionsCount: connectionSessions.size,
+        connectedCount: Array.from(connectionSessions.values()).filter(s => s.status === 'connected').length,
+      };
+    } catch (error) {
+      return { 
+        success: false, 
+        error: error instanceof Error ? error.message : 'Reconnect failed' 
+      };
+    }
+  });
+
+  // Refresh data for a specific account by re-reading EA file
+  ipcMain.handle('connections:refreshFromEA', async (_event, accountId: unknown) => {
+    if (typeof accountId !== 'string' || !accountId) {
+      return { success: false, error: 'Account ID is required' };
+    }
+    
+    const session = connectionSessions.get(accountId);
+    if (!session) {
+      return { success: false, error: 'Session not found' };
+    }
+    
+    // Try to refresh from EA file
+    if (session.platform === 'mt5') {
+      try {
+        const detectionResult = await detectTerminals();
+        if (detectionResult.success && detectionResult.terminals) {
+          const mt5Terminals = detectionResult.terminals.filter((t: { type: string }) => t.type === 'mt5');
+          
+          for (const terminal of mt5Terminals) {
+            if (!terminal.dataPath) continue;
+            
+            const snapshotResult = await readMT5Snapshot(terminal.dataPath);
+            if (snapshotResult.success && snapshotResult.data) {
+              const data = snapshotResult.data;
+              
+              if (String(data.accountId) === String(session._credentials?.login || accountId)) {
+                // Update metrics
+                const metrics: ConnectionMetrics = {
+                  balance: data.balance ?? 0,
+                  equity: data.equity ?? 0,
+                  profit: data.floatingPnL ?? 0,
+                  positionCount: data.positions?.length ?? 0,
+                  margin: data.margin,
+                  freeMargin: data.freeMargin,
+                  marginLevel: data.marginLevel,
+                };
+                connectionMetrics.set(accountId, metrics);
+                
+                // Update session status
+                session.status = 'connected';
+                session.lastUpdate = new Date().toISOString();
+                session.error = undefined;
+                connectionSessions.set(accountId, session);
+                
+                // Update positions
+                if (data.positions) {
+                  const positions: ConnectionPosition[] = data.positions.map((p: any) => ({
+                    ticket: parseInt(p.id) || 0,
+                    symbol: p.symbol,
+                    type: p.side === 'BUY' ? 'buy' : 'sell',
+                    volume: p.volumeLots,
+                    openPrice: p.entryPrice,
+                    currentPrice: p.currentPrice,
+                    profit: p.profit,
+                    stopLoss: p.stopLoss,
+                    takeProfit: p.takeProfit,
+                    openTime: p.openTime || new Date().toISOString(),
+                    magic: 0,
+                    comment: p.comment || '',
+                  }));
+                  connectionPositions.set(accountId, positions);
+                }
+                
+                return { success: true };
+              }
+            }
+          }
+        }
+        
+        // EA file not found
+        session.status = 'error';
+        session.error = 'EA not running or data file not found';
+        session.lastUpdate = new Date().toISOString();
+        connectionSessions.set(accountId, session);
+        
+        return { success: false, error: 'EA not running or data file not found' };
+      } catch (error) {
+        return { 
+          success: false, 
+          error: error instanceof Error ? error.message : 'Failed to refresh from EA' 
+        };
+      }
+    }
+    
+    // For cTrader, use the regular refresh
+    try {
+      await fetchSessionMetrics(accountId);
+      return { success: true };
+    } catch (error) {
+      return { 
+        success: false, 
+        error: error instanceof Error ? error.message : 'Failed to refresh' 
+      };
+    }
+  });
+
   // -------------------------------------------------------------------------
   // License Management Handlers (Enhanced with LicenseManager)
   // -------------------------------------------------------------------------
@@ -2449,6 +2834,14 @@ app.whenReady().then(async () => {
     console.log('[Main] Agent supervisor initialized');
   } catch (error) {
     console.error('[Main] Failed to initialize agent supervisor:', error);
+  }
+  
+  // Auto-reconnect accounts from running EAs (restore connections on restart)
+  try {
+    await autoReconnectFromEAFiles();
+    console.log('[Main] Auto-reconnect from EA files complete');
+  } catch (error) {
+    console.error('[Main] Auto-reconnect failed:', error);
   }
   
   // Create the main window
