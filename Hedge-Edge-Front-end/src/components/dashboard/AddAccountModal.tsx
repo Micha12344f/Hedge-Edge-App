@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -7,27 +7,29 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Switch } from '@/components/ui/switch';
 import { NumberInput } from '@/components/ui/number-input';
 import { Badge } from '@/components/ui/badge';
+import { ScrollArea } from '@/components/ui/scroll-area';
 import { 
   Loader2, 
   TrendingUp, 
   CheckCircle2, 
-  XCircle, 
-  Server, 
   Monitor,
   ChevronRight,
   ChevronLeft,
-  Folder,
   Play,
   RefreshCw,
+  AlertCircle,
+  Building2,
   Search,
-  HardDrive,
-  AlertCircle
+  Radio,
+  Wifi,
+  WifiOff,
+  User,
+  DollarSign,
+  Server
 } from 'lucide-react';
 import { CreateAccountData, TradingAccount } from '@/hooks/useTradingAccounts';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
-import { mt5, ctrader, isBridgeAvailable } from '@/lib/local-trading-bridge';
-import { cachePassword } from '@/lib/mt5-password-cache';
 import { isElectron } from '@/lib/desktop';
 import { PermissionsChecklist, CTraderGuidance } from './PermissionsChecklist';
 
@@ -35,10 +37,21 @@ import { PermissionsChecklist, CTraderGuidance } from './PermissionsChecklist';
 // Types
 // ============================================================================
 
-type WizardStep = 'account-type' | 'platform' | 'terminal' | 'credentials' | 'prop-details';
+type WizardStep = 'account-type' | 'platform' | 'terminal' | 'prop-firm' | 'prop-details' | 'listening';
 type AccountPhase = 'evaluation' | 'funded' | 'live';
 type Platform = 'MT4' | 'MT5' | 'cTrader';
 type TerminalType = 'mt4' | 'mt5' | 'ctrader';
+
+interface DetectedAccount {
+  login: string;
+  server: string;
+  name?: string;
+  broker?: string;
+  balance?: number;
+  equity?: number;
+  currency?: string;
+  leverage?: number;
+}
 
 interface DetectedTerminal {
   id: string;
@@ -196,44 +209,34 @@ export const AddAccountModal = ({
     account_name: '',
     prop_firm: '',
     account_size: 0,
-    server: '',
-    login: '',
-    password: '',
     profit_target: 10,
     max_loss: 10,
     max_daily_loss: 5,
     min_trading_days: 4,
   });
   const [showRules, setShowRules] = useState(false);
+  const [propFirmSearch, setPropFirmSearch] = useState('');
   
   // Terminal detection state
   const [terminals, setTerminals] = useState<DetectedTerminal[]>([]);
   const [detectingTerminals, setDetectingTerminals] = useState(false);
-  const [deepScanning, setDeepScanning] = useState(false);
   const [terminalError, setTerminalError] = useState<string | null>(null);
-  const [lastScanWasDeep, setLastScanWasDeep] = useState(false);
   const [launching, setLaunching] = useState<string | null>(null);
-  
-  // Validation state
-  const [isValidating, setIsValidating] = useState(false);
-  const [validationResult, setValidationResult] = useState<'valid' | 'invalid' | null>(null);
-  const [validatedAccount, setValidatedAccount] = useState<{
-    name: string;
-    broker: string;
-    balance: number;
-    equity: number;
-    currency: string;
-  } | null>(null);
-  const [terminalStatus, setTerminalStatus] = useState<'checking' | 'running' | 'not-running'>('checking');
 
-  // Get the appropriate bridge based on platform
-  const getBridge = (p: string) => {
-    return p.toLowerCase() === 'ctrader' ? ctrader : mt5;
-  };
+  // Listening state for EA/cBot connections
+  const [isListening, setIsListening] = useState(false);
+  const [detectedAccounts, setDetectedAccounts] = useState<DetectedAccount[]>([]);
+  const [selectedDetectedAccount, setSelectedDetectedAccount] = useState<DetectedAccount | null>(null);
+  const listeningIntervalRef = useRef<NodeJS.Timeout | null>(null);
 
   // Reset everything when modal closes
   useEffect(() => {
     if (!open) {
+      // Stop listening when modal closes
+      if (listeningIntervalRef.current) {
+        clearInterval(listeningIntervalRef.current);
+        listeningIntervalRef.current = null;
+      }
       setStep('account-type');
       setAccountPhase('evaluation');
       setPlatform('MT5');
@@ -242,21 +245,18 @@ export const AddAccountModal = ({
         account_name: '',
         prop_firm: '',
         account_size: 0,
-        server: '',
-        login: '',
-        password: '',
         profit_target: 10,
         max_loss: 10,
         max_daily_loss: 5,
         min_trading_days: 4,
       });
       setShowRules(false);
+      setPropFirmSearch('');
       setTerminals([]);
       setTerminalError(null);
-      setValidationResult(null);
-      setValidatedAccount(null);
-      setIsValidating(false);
-      setTerminalStatus('checking');
+      setIsListening(false);
+      setDetectedAccounts([]);
+      setSelectedDetectedAccount(null);
     } else {
       // Handle defaultType when modal opens
       if (defaultType === 'hedge') {
@@ -269,37 +269,81 @@ export const AddAccountModal = ({
     }
   }, [open, defaultType]);
 
+  // Start listening for account connections when entering listening step
+  useEffect(() => {
+    if (step === 'listening' && !isListening) {
+      startListening();
+    }
+    return () => {
+      if (listeningIntervalRef.current) {
+        clearInterval(listeningIntervalRef.current);
+        listeningIntervalRef.current = null;
+      }
+    };
+  }, [step]);
+
+  // Start listening for EA/cBot connections
+  const startListening = useCallback(() => {
+    setIsListening(true);
+    setDetectedAccounts([]);
+    
+    // Poll for new account connections every 2 seconds
+    // In production, this would connect to your ZMQ bridge or WebSocket
+    listeningIntervalRef.current = setInterval(async () => {
+      if (isElectron() && window.electronAPI?.agent?.getConnectedAccounts) {
+        try {
+          const result = await window.electronAPI.agent.getConnectedAccounts();
+          if (result.success && result.data) {
+            setDetectedAccounts(prev => {
+              // Merge new accounts, avoid duplicates by login+server
+              const existing = new Set(prev.map(a => `${a.login}@${a.server}`));
+              const newAccounts = result.data!.filter(
+                (a) => !existing.has(`${a.login}@${a.server}`)
+              );
+              if (newAccounts.length > 0) {
+                toast.success('Account detected!', {
+                  description: `Found ${newAccounts[0].broker || 'trading'} account`,
+                });
+              }
+              return [...prev, ...newAccounts.map(a => ({
+                login: a.login,
+                server: a.server,
+                name: a.name,
+                broker: a.broker,
+                balance: a.balance,
+                equity: a.equity,
+                currency: a.currency,
+                leverage: a.leverage,
+              }))];
+            });
+          }
+        } catch (err) {
+          console.error('Error polling for accounts:', err);
+        }
+      }
+    }, 2000);
+  }, []);
+
   // Detect terminals
-  const detectTerminals = useCallback(async (deep = false) => {
+  const detectTerminals = useCallback(async () => {
     if (!isElectron()) {
       setTerminalError('Terminal detection only available in desktop mode');
       return;
     }
 
-    if (deep) {
-      setDeepScanning(true);
-    } else {
-      setDetectingTerminals(true);
-    }
+    setDetectingTerminals(true);
     setTerminalError(null);
 
     try {
-      const result: DetectionResult = deep
-        ? await window.electronAPI!.terminals.detectDeep()
-        : await window.electronAPI!.terminals.detect();
+      const result: DetectionResult = await window.electronAPI!.terminals.detect();
       
       if (result.success) {
         const filterType = platform.toLowerCase() as TerminalType;
         const filtered = result.terminals.filter(t => t.type === filterType);
         setTerminals(filtered);
-        setLastScanWasDeep(deep || result.deepScan || false);
         
         if (filtered.length === 0) {
           setTerminalError(`No ${platform} installations found`);
-        } else if (deep) {
-          toast.success('Deep scan complete', {
-            description: `Found ${filtered.length} terminal${filtered.length !== 1 ? 's' : ''}`,
-          });
         }
       } else {
         setTerminalError(result.error || 'Detection failed');
@@ -308,7 +352,6 @@ export const AddAccountModal = ({
       setTerminalError(err instanceof Error ? err.message : 'Detection failed');
     } finally {
       setDetectingTerminals(false);
-      setDeepScanning(false);
     }
   }, [platform]);
 
@@ -322,7 +365,7 @@ export const AddAccountModal = ({
       if (result.success) {
         toast.success('Terminal launched', { description: `Starting ${terminal.name}...` });
         // Re-detect after delay to update running status
-        setTimeout(() => detectTerminals(false), 2000);
+        setTimeout(() => detectTerminals(), 2000);
       } else {
         toast.error('Failed to launch', { description: result.error });
       }
@@ -330,81 +373,6 @@ export const AddAccountModal = ({
       toast.error('Launch error', { description: err instanceof Error ? err.message : 'Unknown error' });
     } finally {
       setLaunching(null);
-    }
-  };
-
-  // Check terminal status (for validation)
-  const checkTerminalStatus = useCallback(async () => {
-    if (!isBridgeAvailable()) {
-      setTerminalStatus('not-running');
-      return;
-    }
-    setTerminalStatus('checking');
-    try {
-      const bridge = getBridge(platform);
-      const result = await bridge.getStatus();
-      setTerminalStatus(result.success && result.data?.terminalRunning ? 'running' : 'not-running');
-    } catch {
-      setTerminalStatus('not-running');
-    }
-  }, [platform]);
-
-  // Check status when entering credentials step
-  useEffect(() => {
-    if (step === 'credentials') {
-      checkTerminalStatus();
-    }
-  }, [step, checkTerminalStatus]);
-
-  // Validate credentials
-  const handleValidateCredentials = async () => {
-    if (!formData.login || !formData.password || !formData.server) {
-      toast.error('Please fill in all credential fields');
-      return;
-    }
-
-    if (!isBridgeAvailable()) {
-      toast.error('Trading bridge not available');
-      return;
-    }
-
-    setIsValidating(true);
-    setValidationResult(null);
-    setValidatedAccount(null);
-
-    try {
-      const bridge = getBridge(platform);
-      const result = await bridge.validateCredentials({
-        login: formData.login,
-        password: formData.password,
-        server: formData.server,
-      });
-
-      if (result.success && result.data) {
-        setValidationResult('valid');
-        setValidatedAccount({
-          name: result.data.name,
-          broker: result.data.broker,
-          balance: result.data.balance,
-          equity: result.data.equity,
-          currency: result.data.currency,
-        });
-        toast.success('Credentials validated!', {
-          description: `Connected to ${result.data.broker}`,
-        });
-      } else {
-        setValidationResult('invalid');
-        toast.error('Invalid credentials', {
-          description: result.error || 'Could not connect',
-        });
-      }
-    } catch (error) {
-      setValidationResult('invalid');
-      toast.error('Validation failed', {
-        description: error instanceof Error ? error.message : 'Connection error',
-      });
-    } finally {
-      setIsValidating(false);
     }
   };
 
@@ -417,12 +385,52 @@ export const AddAccountModal = ({
     const data: CreateAccountData = {
       account_name: formData.account_name,
       prop_firm: formData.prop_firm || undefined,
-      account_size: formData.account_size || validatedAccount?.balance || undefined,
-      current_balance: validatedAccount?.balance || undefined,
+      account_size: formData.account_size || undefined,
       phase: accountPhase,
       platform: platform,
-      server: formData.server || undefined,
-      login: formData.login || undefined,
+      ...(isEvaluationOrFunded && {
+        profit_target: formData.profit_target,
+        max_loss: formData.max_loss,
+        max_daily_loss: formData.max_daily_loss,
+        min_trading_days: formData.min_trading_days,
+      }),
+      // Add detected account details if available
+      ...(selectedDetectedAccount && {
+        login: selectedDetectedAccount.login,
+        server: selectedDetectedAccount.server,
+        current_balance: selectedDetectedAccount.balance,
+      }),
+    };
+    
+    const { error } = await onSubmit(data);
+    setLoading(false);
+    
+    if (!error) {
+      toast.success('Account added!', {
+        description: selectedDetectedAccount 
+          ? `Connected to ${selectedDetectedAccount.broker || 'broker'} • Balance: ${selectedDetectedAccount.currency || '$'} ${selectedDetectedAccount.balance?.toLocaleString() || '—'}`
+          : 'Waiting for Expert Advisor connection',
+      });
+      onOpenChange(false);
+    }
+  };
+
+  // Handle finalizing with detected account
+  const handleFinalizeWithAccount = async (account: DetectedAccount) => {
+    setSelectedDetectedAccount(account);
+    setLoading(true);
+    
+    const isEvaluationOrFunded = accountPhase === 'evaluation' || accountPhase === 'funded';
+    
+    const data: CreateAccountData = {
+      account_name: formData.account_name || `${account.broker} ${accountPhase === 'live' ? 'Hedge' : accountPhase}`,
+      prop_firm: formData.prop_firm || undefined,
+      account_size: formData.account_size || account.balance,
+      phase: accountPhase,
+      platform: platform,
+      login: account.login,
+      server: account.server,
+      current_balance: account.balance,
       ...(isEvaluationOrFunded && {
         profit_target: formData.profit_target,
         max_loss: formData.max_loss,
@@ -435,14 +443,8 @@ export const AddAccountModal = ({
     setLoading(false);
     
     if (!error) {
-      if (formData.login && formData.password && formData.server) {
-        cachePassword(formData.login, formData.password, formData.server);
-      }
-      
-      toast.success('Account added!', {
-        description: validatedAccount 
-          ? `Connected to ${validatedAccount.broker} • Balance: ${validatedAccount.currency} ${validatedAccount.balance.toLocaleString()}`
-          : 'Click on the account to view live data',
+      toast.success('Account connected!', {
+        description: `${account.broker || 'Trading Account'} • ${account.currency || '$'} ${account.balance?.toLocaleString() || '—'}`,
       });
       onOpenChange(false);
     }
@@ -454,8 +456,9 @@ export const AddAccountModal = ({
       case 'account-type': return 'Select Account Type';
       case 'platform': return 'Select Platform';
       case 'terminal': return platform === 'cTrader' ? 'cTrader Setup' : `Select ${platform} Installation`;
-      case 'credentials': return 'Enter Credentials';
+      case 'prop-firm': return 'Select Prop Firm';
       case 'prop-details': return 'Account Details';
+      case 'listening': return 'Connect Account';
       default: return 'Add Account';
     }
   };
@@ -465,17 +468,11 @@ export const AddAccountModal = ({
       case 'account-type': return 'Choose the type of trading account you want to add';
       case 'platform': return 'Select the trading platform for this account';
       case 'terminal': return platform === 'cTrader' ? 'Configure the cBot in your cTrader application' : 'Choose which terminal installation to use';
-      case 'credentials': return 'Enter your trading account login details';
+      case 'prop-firm': return 'Select the prop firm for this account';
       case 'prop-details': return 'Provide additional account information';
+      case 'listening': return 'Waiting for your trading platform to connect';
       default: return '';
     }
-  };
-
-  const canProceedFromCredentials = () => {
-    if (!formData.login || !formData.password || !formData.server) return false;
-    // ALWAYS require validation to pass - we must verify credentials work by actually logging into MT5
-    // This ensures the account is only added if we can successfully connect and pull data
-    return validationResult === 'valid';
   };
 
   // ============================================================================
@@ -548,31 +545,6 @@ export const AddAccountModal = ({
           </button>
         ))}
       </div>
-      
-      <div className="flex gap-3 pt-4">
-        <Button
-          variant="outline"
-          onClick={() => setStep('account-type')}
-          className="flex-1"
-        >
-          <ChevronLeft className="w-4 h-4 mr-2" />
-          Back
-        </Button>
-        <Button
-          onClick={() => {
-            // For cTrader, go to terminal step but don't detect (it shows setup instructions)
-            // For MT4/MT5, detect terminals then go to terminal step
-            if (platform !== 'cTrader') {
-              detectTerminals(false);
-            }
-            setStep('terminal');
-          }}
-          className="flex-1"
-        >
-          Continue
-          <ChevronRight className="w-4 h-4 ml-2" />
-        </Button>
-      </div>
     </div>
   );
 
@@ -582,20 +554,6 @@ export const AddAccountModal = ({
       return (
         <div className="space-y-4 py-2">
           <CTraderGuidance />
-
-          <div className="flex gap-3 pt-4">
-            <Button variant="outline" onClick={() => setStep('platform')} className="flex-1">
-              <ChevronLeft className="w-4 h-4 mr-2" />
-              Back
-            </Button>
-            <Button
-              onClick={() => setStep('credentials')}
-              className="flex-1"
-            >
-              Continue
-              <ChevronRight className="w-4 h-4 ml-2" />
-            </Button>
-          </div>
         </div>
       );
     }
@@ -613,17 +571,8 @@ export const AddAccountModal = ({
           </div>
         )}
 
-        {/* Deep scanning state */}
-        {deepScanning && (
-          <div className="flex flex-col items-center justify-center py-12 text-muted-foreground">
-            <HardDrive className="h-10 w-10 animate-pulse mb-4 text-blue-400" />
-            <p className="text-sm font-medium">Deep scanning all drives...</p>
-            <p className="text-xs text-muted-foreground mt-1">This may take a minute</p>
-          </div>
-        )}
-
         {/* Error state */}
-        {!detectingTerminals && !deepScanning && terminalError && filteredTerminals.length === 0 && (
+        {!detectingTerminals && terminalError && filteredTerminals.length === 0 && (
           <div className="p-6 rounded-xl bg-yellow-500/10 border border-yellow-500/20 text-center">
             <AlertCircle className="h-10 w-10 text-yellow-500 mx-auto mb-3" />
             <p className="text-sm text-yellow-400 font-medium mb-2">{terminalError}</p>
@@ -631,57 +580,37 @@ export const AddAccountModal = ({
               Make sure {platform} is installed on this computer.
             </p>
             <div className="flex justify-center gap-2">
-              <Button variant="outline" size="sm" onClick={() => detectTerminals(false)}>
+              <Button variant="outline" size="sm" onClick={() => detectTerminals()}>
                 <RefreshCw className="h-4 w-4 mr-2" />
                 Retry
               </Button>
-              {!lastScanWasDeep && (
-                <Button variant="outline" size="sm" onClick={() => detectTerminals(true)}>
-                  <Search className="h-4 w-4 mr-2" />
-                  Deep Scan
-                </Button>
-              )}
             </div>
           </div>
         )}
 
         {/* Terminal list */}
-        {!detectingTerminals && !deepScanning && filteredTerminals.length > 0 && (
+        {!detectingTerminals && filteredTerminals.length > 0 && (
           <>
             <div className="flex items-center justify-between mb-2">
               <p className="text-xs text-muted-foreground">
                 {filteredTerminals.length} terminal{filteredTerminals.length !== 1 ? 's' : ''} found
-                {lastScanWasDeep && <span className="ml-1 text-blue-400">(deep scan)</span>}
               </p>
-              <div className="flex gap-1">
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => detectTerminals(false)}
-                  className="h-7 px-2 text-xs"
-                >
-                  <RefreshCw className="h-3 w-3 mr-1" />
-                  Refresh
-                </Button>
-                {!lastScanWasDeep && (
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => detectTerminals(true)}
-                    className="h-7 px-2 text-xs text-blue-400"
-                  >
-                    <Search className="h-3 w-3 mr-1" />
-                    Deep Scan
-                  </Button>
-                )}
-              </div>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => detectTerminals()}
+                className="h-7 px-2 text-xs"
+              >
+                <RefreshCw className="h-3 w-3 mr-1" />
+                Refresh
+              </Button>
             </div>
 
             {/* Notice when no terminals running */}
             {!hasRunningTerminal && (
               <div className="flex items-center gap-2 p-3 rounded-lg bg-blue-500/10 border border-blue-500/20 text-blue-400">
                 <Play className="h-4 w-4 shrink-0" />
-                <span className="text-xs">Launch a terminal to enable credential validation</span>
+                <span className="text-xs">Launch a terminal to let the Expert Advisor connect</span>
               </div>
             )}
 
@@ -733,9 +662,16 @@ export const AddAccountModal = ({
 
                       <div className="shrink-0">
                         {terminal.isRunning ? (
-                          <Badge variant="outline" className="bg-emerald-500/10 text-emerald-400 border-emerald-500/20 text-xs">
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            disabled
+                            className="h-7 px-3 text-xs bg-muted/50 border-muted-foreground/20 text-muted-foreground cursor-default"
+                          >
+                            <CheckCircle2 className="h-3 w-3 mr-1.5 text-emerald-400" />
                             Running
-                          </Badge>
+                          </Button>
                         ) : (
                           <Button
                             type="button"
@@ -746,13 +682,16 @@ export const AddAccountModal = ({
                               handleLaunchTerminal(terminal);
                             }}
                             disabled={isLaunching}
-                            className="h-7 px-2 text-xs"
+                            className="h-7 px-3 text-xs border-primary/30 text-primary hover:bg-primary/10"
                           >
                             {isLaunching ? (
-                              <Loader2 className="h-3 w-3 animate-spin" />
+                              <>
+                                <Loader2 className="h-3 w-3 mr-1.5 animate-spin" />
+                                Opening...
+                              </>
                             ) : (
                               <>
-                                <Play className="h-3 w-3 mr-1" />
+                                <Play className="h-3 w-3 mr-1.5" />
                                 Launch
                               </>
                             )}
@@ -771,286 +710,133 @@ export const AddAccountModal = ({
             )}
           </>
         )}
-
-        <div className="flex gap-3 pt-4">
-          <Button variant="outline" onClick={() => setStep('platform')} className="flex-1">
-            <ChevronLeft className="w-4 h-4 mr-2" />
-            Back
-          </Button>
-          <Button
-            onClick={() => setStep('credentials')}
-            disabled={!selectedTerminal && filteredTerminals.length > 0}
-            className="flex-1"
-          >
-            {filteredTerminals.length === 0 ? 'Skip' : 'Continue'}
-            <ChevronRight className="w-4 h-4 ml-2" />
-          </Button>
-        </div>
       </div>
     );
   };
 
-  const renderCredentialsStep = () => (
-    <div className="space-y-4 py-2">
-      {/* Show selected terminal */}
-      {selectedTerminal && (
-        <div className="flex items-center gap-3 p-3 rounded-lg bg-muted/30 border border-border/30">
-          <div className="w-8 h-8 rounded-lg bg-muted/50 flex items-center justify-center overflow-hidden">
+  const renderPropFirmStep = () => {
+    const filteredFirms = PROP_FIRMS.filter(firm =>
+      firm.name.toLowerCase().includes(propFirmSearch.toLowerCase())
+    );
+
+    return (
+      <div className="space-y-4 py-2 pb-4">
+        {/* Info banner */}
+        <div className="flex items-start gap-3 p-3 rounded-lg bg-blue-500/10 border border-blue-500/20 text-blue-400">
+          <Building2 className="h-5 w-5 shrink-0 mt-0.5" />
+          <div className="text-sm">
+            <p className="font-medium mb-1">Account details auto-detected</p>
+            <p className="text-xs text-muted-foreground">
+              The Expert Advisor on {platform} will automatically detect your login, server, and balance when you connect.
+            </p>
+          </div>
+        </div>
+
+        {/* Search */}
+        <div className="relative">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+          <Input
+            placeholder="Search prop firms..."
+            value={propFirmSearch}
+            onChange={(e) => setPropFirmSearch(e.target.value)}
+            className="pl-9 bg-muted/30 border-border/50"
+          />
+        </div>
+
+        {/* Prop firm grid */}
+        <div className="grid grid-cols-2 gap-2 max-h-[300px] overflow-y-auto pr-1">
+            {filteredFirms.map((firm) => {
+              const isSelected = formData.prop_firm === firm.name;
+              return (
+                <button
+                  key={firm.name}
+                  type="button"
+                  onClick={() => setFormData({ ...formData, prop_firm: firm.name })}
+                  className={cn(
+                    "p-3 rounded-xl border transition-all text-left",
+                    "hover:bg-muted/30 hover:scale-[1.02] active:scale-[0.98]",
+                    isSelected
+                      ? "border-primary bg-primary/10"
+                      : "border-border/30"
+                  )}
+                >
+                  <div className="flex items-center gap-2">
+                    <div className="w-8 h-8 rounded-lg bg-muted/50 flex items-center justify-center shrink-0 overflow-hidden">
+                      <img 
+                        src={firm.logo}
+                        alt={firm.name}
+                        className="w-5 h-5 object-contain"
+                        referrerPolicy="no-referrer"
+                        onError={(e) => { 
+                          e.currentTarget.style.display = 'none';
+                        }}
+                      />
+                      <Building2 className="h-4 w-4 text-muted-foreground hidden" />
+                    </div>
+                    <span className="text-sm font-medium truncate flex-1">
+                      {firm.name}
+                    </span>
+                    {isSelected && (
+                      <CheckCircle2 className="h-4 w-4 text-primary shrink-0" />
+                    )}
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+
+        {filteredFirms.length === 0 && (
+          <div className="text-center py-8 text-muted-foreground">
+            <p className="text-sm">No prop firms found</p>
+            <p className="text-xs mt-1">Try a different search term</p>
+          </div>
+        )}
+
+        {/* Selected firm display */}
+        {formData.prop_firm && (
+          <div className="flex items-center gap-3 p-3 rounded-lg bg-primary/5 border border-primary/20">
+            <div className="w-10 h-10 rounded-lg bg-muted/50 flex items-center justify-center overflow-hidden">
+              <img 
+                src={PROP_FIRMS.find(f => f.name === formData.prop_firm)?.logo || ''}
+                alt={formData.prop_firm}
+                className="w-6 h-6 object-contain"
+                referrerPolicy="no-referrer"
+                onError={(e) => { e.currentTarget.style.display = 'none'; }}
+              />
+            </div>
+            <div className="flex-1">
+              <p className="text-sm font-medium">{formData.prop_firm}</p>
+              <p className="text-xs text-muted-foreground">Selected prop firm</p>
+            </div>
+            <CheckCircle2 className="h-5 w-5 text-primary" />
+          </div>
+        )}
+      </div>
+    );
+  };
+
+  const renderPropDetailsStep = () => (
+    <div className="space-y-4 py-2 pb-4">
+      {/* Show selected prop firm */}
+      {formData.prop_firm && (
+        <div className="flex items-center gap-3 p-3 rounded-lg bg-primary/5 border border-primary/20">
+          <div className="w-10 h-10 rounded-lg bg-muted/50 flex items-center justify-center overflow-hidden">
             <img 
-              src={PLATFORMS.find(p => p.id.toLowerCase() === selectedTerminal.type)?.logo || ''}
-              alt={selectedTerminal.type}
-              className="w-5 h-5 object-contain"
+              src={PROP_FIRMS.find(f => f.name === formData.prop_firm)?.logo || ''}
+              alt={formData.prop_firm}
+              className="w-6 h-6 object-contain"
+              referrerPolicy="no-referrer"
               onError={(e) => { e.currentTarget.style.display = 'none'; }}
             />
           </div>
-          <div className="flex-1 min-w-0">
-            <p className="text-sm font-medium truncate max-w-[250px]">
-              {selectedTerminal.broker || selectedTerminal.name}
-            </p>
-            <p className="text-xs text-muted-foreground">{selectedTerminal.type.toUpperCase()}</p>
+          <div className="flex-1">
+            <p className="text-sm font-medium">{formData.prop_firm}</p>
+            <p className="text-xs text-muted-foreground">Selected prop firm</p>
           </div>
-          {selectedTerminal.isRunning && (
-            <Badge variant="outline" className="bg-emerald-500/10 text-emerald-400 border-emerald-500/20 text-xs shrink-0">
-              Running
-            </Badge>
-          )}
+          <CheckCircle2 className="h-5 w-5 text-primary" />
         </div>
       )}
 
-      <div className="space-y-3">
-        <div className="space-y-2">
-          <Label htmlFor="login">Login ID</Label>
-          <Input
-            id="login"
-            placeholder="12345678"
-            value={formData.login}
-            onChange={(e) => {
-              setFormData({ ...formData, login: e.target.value });
-              setValidationResult(null);
-              setValidatedAccount(null);
-            }}
-            className="bg-muted/30 border-border/50"
-          />
-        </div>
-
-        <div className="space-y-2">
-          <Label htmlFor="password">Password</Label>
-          <Input
-            id="password"
-            type="password"
-            placeholder="••••••••"
-            value={formData.password}
-            onChange={(e) => {
-              setFormData({ ...formData, password: e.target.value });
-              setValidationResult(null);
-              setValidatedAccount(null);
-            }}
-            className="bg-muted/30 border-border/50"
-          />
-        </div>
-
-        <div className="space-y-2">
-          <Label htmlFor="server">Server</Label>
-          <Input
-            id="server"
-            placeholder="Broker-Live"
-            value={formData.server}
-            onChange={(e) => {
-              setFormData({ ...formData, server: e.target.value });
-              setValidationResult(null);
-              setValidatedAccount(null);
-            }}
-            className="bg-muted/30 border-border/50"
-          />
-        </div>
-      </div>
-
-      {/* Terminal connection status */}
-      <div className={cn(
-        "flex items-center gap-2 p-3 rounded-lg border",
-        terminalStatus === 'running' 
-          ? "bg-emerald-500/10 border-emerald-500/20 text-emerald-400" 
-          : terminalStatus === 'not-running'
-          ? "bg-red-500/10 border-red-500/20 text-red-400"
-          : "bg-muted/30 border-border/30 text-muted-foreground"
-      )}>
-        <Server className="h-4 w-4 shrink-0" />
-        <span className="text-sm flex-1">
-          {terminalStatus === 'checking' && 'Checking terminal connection...'}
-          {terminalStatus === 'running' && `${platform} Agent Connected - Ready to validate`}
-          {terminalStatus === 'not-running' && 'Agent not running - Start the terminal and agent to validate credentials'}
-        </span>
-        {terminalStatus === 'checking' && <Loader2 className="h-4 w-4 animate-spin" />}
-      </div>
-
-      {/* Launch Terminal button - always show if terminal is selected */}
-      {selectedTerminal && (
-        <Button
-          type="button"
-          variant="outline"
-          onClick={async () => {
-            if (!isElectron() || !selectedTerminal) return;
-            setLaunching(selectedTerminal.id);
-            try {
-              // Build credentials only if all fields are filled
-              const hasAllCredentials = formData.login && formData.password && formData.server;
-              const credentials = hasAllCredentials ? {
-                login: formData.login,
-                password: formData.password,
-                server: formData.server,
-              } : undefined;
-              
-              console.log('[AddAccountModal] Launching terminal:', selectedTerminal.executablePath);
-              console.log('[AddAccountModal] With credentials:', hasAllCredentials ? 'Yes' : 'No');
-              
-              const result = await window.electronAPI!.terminals.launch(
-                selectedTerminal.executablePath,
-                credentials
-              );
-              
-              if (result.success) {
-                toast.success('Terminal launched', {
-                  description: hasAllCredentials 
-                    ? `Logging into ${formData.server}...` 
-                    : `Starting ${selectedTerminal.name}...`,
-                });
-                // Check terminal status after a delay
-                setTimeout(() => checkTerminalStatus(), 5000);
-              } else {
-                console.error('[AddAccountModal] Launch failed:', result.error);
-                toast.error('Failed to launch terminal', { description: result.error });
-              }
-            } catch (err) {
-              console.error('[AddAccountModal] Launch error:', err);
-              toast.error('Launch error', { description: err instanceof Error ? err.message : 'Unknown error' });
-            } finally {
-              setLaunching(null);
-            }
-          }}
-          disabled={launching === selectedTerminal.id}
-          className="w-full gap-2 bg-blue-600/10 border-blue-500/30 hover:bg-blue-600/20 text-blue-400"
-        >
-          {launching === selectedTerminal.id ? (
-            <>
-              <Loader2 className="h-4 w-4 animate-spin" />
-              Launching {platform} Terminal...
-            </>
-          ) : (
-            <>
-              <Play className="h-4 w-4" />
-              {formData.login && formData.password && formData.server 
-                ? `Launch & Login to ${selectedTerminal.broker || selectedTerminal.type.toUpperCase()}`
-                : `Launch ${selectedTerminal.broker || selectedTerminal.type.toUpperCase()}`
-              }
-            </>
-          )}
-        </Button>
-      )}
-
-      {/* No terminal selected - show message to go back and select one */}
-      {!selectedTerminal && (
-        <div className="p-3 rounded-lg bg-yellow-500/10 border border-yellow-500/20 text-yellow-400 text-sm">
-          <p className="font-medium mb-1">No terminal selected</p>
-          <p className="text-xs text-muted-foreground">
-            Go back to the terminal step and select a {platform} terminal to launch it with your credentials.
-          </p>
-        </div>
-      )}
-
-      {/* Validate button - always show but disable if agent not running */}
-      <Button
-        type="button"
-        variant={validationResult === 'valid' ? 'default' : 'outline'}
-        onClick={handleValidateCredentials}
-        disabled={isValidating || !formData.login || !formData.password || !formData.server || terminalStatus !== 'running'}
-        className={cn(
-          "w-full",
-          validationResult === 'valid' && "bg-emerald-600 hover:bg-emerald-700"
-        )}
-      >
-        {isValidating ? (
-          <>
-            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-            Logging into {platform} terminal...
-          </>
-        ) : validationResult === 'valid' ? (
-          <>
-            <CheckCircle2 className="mr-2 h-4 w-4" />
-            Credentials Verified ✓
-          </>
-        ) : validationResult === 'invalid' ? (
-          <>
-            <XCircle className="mr-2 h-4 w-4 text-red-400" />
-            Login Failed - Try Again
-          </>
-        ) : terminalStatus !== 'running' ? (
-          <>
-            <Server className="mr-2 h-4 w-4" />
-            Start Agent to Validate
-          </>
-        ) : (
-          <>
-            <CheckCircle2 className="mr-2 h-4 w-4" />
-            Validate & Login to Terminal
-          </>
-        )}
-      </Button>
-
-      {/* Validation result */}
-      {validatedAccount && (
-        <div className="p-3 rounded-lg bg-emerald-500/10 border border-emerald-500/20">
-          <p className="text-sm font-medium text-emerald-400 mb-2">✓ Account Verified</p>
-          <div className="grid grid-cols-2 gap-2 text-xs text-muted-foreground">
-            <div>Name: <span className="text-foreground">{validatedAccount.name}</span></div>
-            <div>Broker: <span className="text-foreground">{validatedAccount.broker}</span></div>
-            <div>Balance: <span className="text-foreground">{validatedAccount.currency} {validatedAccount.balance.toLocaleString()}</span></div>
-            <div>Equity: <span className="text-foreground">{validatedAccount.currency} {validatedAccount.equity.toLocaleString()}</span></div>
-          </div>
-        </div>
-      )}
-
-      <div className="flex gap-3 pt-4">
-        <Button variant="outline" onClick={() => setStep('terminal')} className="flex-1">
-          <ChevronLeft className="w-4 h-4 mr-2" />
-          Back
-        </Button>
-        <Button
-          onClick={() => {
-            if (accountPhase === 'live') {
-              // For hedge accounts, we need the account name
-              if (!formData.account_name) {
-                setFormData({ ...formData, account_name: `${platform} Hedge Account` });
-              }
-              handleSubmit();
-            } else {
-              setStep('prop-details');
-            }
-          }}
-          disabled={!canProceedFromCredentials()}
-          className="flex-1"
-        >
-          {accountPhase === 'live' ? (
-            loading ? (
-              <>
-                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                Adding...
-              </>
-            ) : (
-              'Add Account'
-            )
-          ) : (
-            <>
-              Continue
-              <ChevronRight className="w-4 h-4 ml-2" />
-            </>
-          )}
-        </Button>
-      </div>
-    </div>
-  );
-
-  const renderPropDetailsStep = () => (
-    <div className="space-y-4 py-2">
       <div className="space-y-3">
         <div className="space-y-2">
           <Label htmlFor="account_name">Account Name</Label>
@@ -1061,51 +847,6 @@ export const AddAccountModal = ({
             onChange={(e) => setFormData({ ...formData, account_name: e.target.value })}
             className="bg-muted/30 border-border/50"
           />
-        </div>
-
-        <div className="space-y-2">
-          <Label htmlFor="prop_firm">Prop Firm</Label>
-          <Select
-            value={formData.prop_firm}
-            onValueChange={(value) => setFormData({ ...formData, prop_firm: value })}
-          >
-            <SelectTrigger className="bg-muted/30 border-border/50">
-              <SelectValue placeholder="Select prop firm">
-                {formData.prop_firm && (
-                  <div className="flex items-center gap-2">
-                    {PROP_FIRMS.find(f => f.name === formData.prop_firm)?.logo && (
-                      <img 
-                        src={PROP_FIRMS.find(f => f.name === formData.prop_firm)?.logo || ''} 
-                        alt="" 
-                        className="w-5 h-5 rounded object-contain"
-                        referrerPolicy="no-referrer"
-                        onError={(e) => { e.currentTarget.style.display = 'none'; }}
-                      />
-                    )}
-                    <span>{formData.prop_firm}</span>
-                  </div>
-                )}
-              </SelectValue>
-            </SelectTrigger>
-            <SelectContent className="bg-card/95 backdrop-blur-xl border-border/30 max-h-[300px]">
-              {PROP_FIRMS.map((firm) => (
-                <SelectItem key={firm.name} value={firm.name}>
-                  <div className="flex items-center gap-2">
-                    {firm.logo && (
-                      <img 
-                        src={firm.logo} 
-                        alt="" 
-                        className="w-5 h-5 rounded object-contain"
-                        referrerPolicy="no-referrer"
-                        onError={(e) => { e.currentTarget.style.display = 'none'; }}
-                      />
-                    )}
-                    <span>{firm.name}</span>
-                  </div>
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
         </div>
 
         <div className="space-y-2">
@@ -1137,7 +878,7 @@ export const AddAccountModal = ({
         </div>
 
         {showRules && (
-          <div className="grid grid-cols-2 gap-3 p-4 rounded-lg bg-muted/30 border border-border/30">
+          <div className="grid grid-cols-2 gap-3 p-4 rounded-lg bg-muted/30 border border-border/30 mb-2">
             <div className="space-y-2">
               <Label htmlFor="profit_target" className="text-xs">Profit Target (%)</Label>
               <NumberInput
@@ -1184,27 +925,168 @@ export const AddAccountModal = ({
           </div>
         )}
       </div>
+    </div>
+  );
 
-      <div className="flex gap-3 pt-4">
-        <Button variant="outline" onClick={() => setStep('credentials')} className="flex-1">
-          <ChevronLeft className="w-4 h-4 mr-2" />
-          Back
-        </Button>
-        <Button
-          onClick={handleSubmit}
-          disabled={loading || !formData.account_name || !formData.account_size}
-          className="flex-1"
-        >
-          {loading ? (
-            <>
-              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-              Adding...
-            </>
+  const renderListeningStep = () => (
+    <div className="space-y-4 py-2 pb-4">
+      {/* Connection status banner */}
+      <div className={cn(
+        "flex items-center gap-3 p-4 rounded-lg border transition-all",
+        detectedAccounts.length > 0
+          ? "bg-emerald-500/10 border-emerald-500/30"
+          : "bg-primary/10 border-primary/30"
+      )}>
+        <div className={cn(
+          "relative w-10 h-10 rounded-full flex items-center justify-center",
+          detectedAccounts.length > 0 ? "bg-emerald-500/20" : "bg-primary/20"
+        )}>
+          {detectedAccounts.length > 0 ? (
+            <Wifi className="h-5 w-5 text-emerald-400" />
           ) : (
-            'Add Account'
+            <>
+              <Radio className="h-5 w-5 text-primary animate-pulse" />
+              {/* Pulse animation rings */}
+              <span className="absolute inset-0 rounded-full border-2 border-primary/50 animate-ping" />
+            </>
           )}
-        </Button>
+        </div>
+        <div className="flex-1">
+          <p className={cn(
+            "text-sm font-medium",
+            detectedAccounts.length > 0 ? "text-emerald-400" : "text-primary"
+          )}>
+            {detectedAccounts.length > 0 
+              ? `${detectedAccounts.length} account${detectedAccounts.length > 1 ? 's' : ''} detected`
+              : "Listening for connections..."
+            }
+          </p>
+          <p className="text-xs text-muted-foreground mt-0.5">
+            {detectedAccounts.length > 0 
+              ? "Select an account below to connect"
+              : `Waiting for ${platform === 'cTrader' ? 'cBot' : 'Expert Advisor'} to connect...`
+            }
+          </p>
+        </div>
       </div>
+
+      {/* Platform instructions */}
+      {detectedAccounts.length === 0 && (
+        <div className="p-3 rounded-lg bg-muted/30 border border-border/30">
+          <p className="text-xs font-medium text-foreground mb-2">How to connect:</p>
+          <ol className="text-xs text-muted-foreground space-y-1.5 list-decimal list-inside">
+            <li>Open <span className="text-foreground font-medium">{platform}</span> and login to your account</li>
+            <li>Attach the <span className="text-foreground font-medium">{platform === 'cTrader' ? 'HedgeEdge cBot' : 'HedgeEdge EA'}</span> to any chart</li>
+            <li>Account details will appear here automatically</li>
+          </ol>
+        </div>
+      )}
+
+      {/* Detected accounts list */}
+      {detectedAccounts.length > 0 && (
+        <div className="space-y-2">
+          <p className="text-xs text-muted-foreground uppercase tracking-wider font-medium">
+            Connected Accounts
+          </p>
+          <div className="space-y-2 max-h-[200px] overflow-y-auto pr-1">
+            {detectedAccounts.map((account, idx) => (
+              <button
+                key={`${account.login}-${account.server}`}
+                type="button"
+                onClick={() => setSelectedDetectedAccount(account)}
+                className={cn(
+                  "w-full p-3 rounded-xl border transition-all text-left",
+                  "hover:bg-muted/30 hover:scale-[1.01]",
+                  selectedDetectedAccount?.login === account.login
+                    ? "border-primary bg-primary/10"
+                    : "border-border/30"
+                )}
+              >
+                <div className="flex items-start gap-3">
+                  <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-primary/20 to-primary/5 flex items-center justify-center shrink-0">
+                    <User className="h-5 w-5 text-primary" />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center justify-between">
+                      <p className="text-sm font-medium truncate">{account.broker || 'Trading Account'}</p>
+                      {selectedDetectedAccount?.login === account.login && (
+                        <CheckCircle2 className="h-4 w-4 text-primary shrink-0" />
+                      )}
+                    </div>
+                    <div className="flex items-center gap-2 text-xs text-muted-foreground mt-1">
+                      <span className="flex items-center gap-1">
+                        <User className="h-3 w-3" />
+                        {account.login}
+                      </span>
+                      <span>•</span>
+                      <span className="flex items-center gap-1">
+                        <Server className="h-3 w-3" />
+                        {account.server}
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-3 mt-1.5">
+                      <span className="text-xs font-medium text-emerald-400 flex items-center gap-1">
+                        <DollarSign className="h-3 w-3" />
+                        {account.currency} {account.balance?.toLocaleString() || '—'}
+                      </span>
+                      {account.leverage && (
+                        <span className="text-xs text-muted-foreground">
+                          1:{account.leverage}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Summary of account being created */}
+      <div className="p-3 rounded-lg bg-muted/20 border border-border/20">
+        <p className="text-xs text-muted-foreground mb-2">Account Summary</p>
+        <div className="space-y-1">
+          <div className="flex items-center justify-between text-xs">
+            <span className="text-muted-foreground">Account Name</span>
+            <span className="font-medium">{formData.account_name || '—'}</span>
+          </div>
+          <div className="flex items-center justify-between text-xs">
+            <span className="text-muted-foreground">Platform</span>
+            <span className="font-medium">{platform}</span>
+          </div>
+          {formData.prop_firm && (
+            <div className="flex items-center justify-between text-xs">
+              <span className="text-muted-foreground">Prop Firm</span>
+              <span className="font-medium">{formData.prop_firm}</span>
+            </div>
+          )}
+          {formData.account_size > 0 && (
+            <div className="flex items-center justify-between text-xs">
+              <span className="text-muted-foreground">Account Size</span>
+              <span className="font-medium">${formData.account_size.toLocaleString()}</span>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Cancel link */}
+      <button
+        type="button"
+        onClick={() => {
+          if (listeningIntervalRef.current) {
+            clearInterval(listeningIntervalRef.current);
+          }
+          setIsListening(false);
+          toast.error('Connection cancelled', {
+            description: 'No account was connected',
+          });
+          onOpenChange(false);
+        }}
+        className="text-xs text-muted-foreground hover:text-destructive transition-colors text-center mt-2"
+      >
+        Cancel and close
+      </button>
     </div>
   );
 
@@ -1214,8 +1096,8 @@ export const AddAccountModal = ({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-[440px] border-border/30 bg-card/95 backdrop-blur-xl">
-        <DialogHeader className="pb-2">
+      <DialogContent className="sm:max-w-[480px] border-border/30 bg-card/95 backdrop-blur-xl flex flex-col">
+        <DialogHeader className="pb-2 flex-shrink-0">
           <DialogTitle className="text-xl font-semibold">
             {getStepTitle()}
           </DialogTitle>
@@ -1224,11 +1106,134 @@ export const AddAccountModal = ({
           </DialogDescription>
         </DialogHeader>
 
-        {step === 'account-type' && renderAccountTypeStep()}
-        {step === 'platform' && renderPlatformStep()}
-        {step === 'terminal' && renderTerminalStep()}
-        {step === 'credentials' && renderCredentialsStep()}
-        {step === 'prop-details' && renderPropDetailsStep()}
+        <div className="flex-1">
+          {step === 'account-type' && renderAccountTypeStep()}
+          {step === 'platform' && renderPlatformStep()}
+          {step === 'terminal' && renderTerminalStep()}
+          {step === 'prop-firm' && renderPropFirmStep()}
+          {step === 'prop-details' && renderPropDetailsStep()}
+          {step === 'listening' && renderListeningStep()}
+        </div>
+
+        {/* Fixed navigation buttons */}
+        <div className="flex gap-3 pt-4 flex-shrink-0 border-t border-border/30 mt-4">
+          {step !== 'account-type' && step !== 'listening' && (
+            <Button 
+              variant="outline" 
+              onClick={() => {
+                if (step === 'platform') setStep('account-type');
+                else if (step === 'terminal') setStep('platform');
+                else if (step === 'prop-firm') setStep('terminal');
+                else if (step === 'prop-details') setStep('prop-firm');
+              }} 
+              className="flex-1"
+            >
+              <ChevronLeft className="w-4 h-4 mr-2" />
+              Back
+            </Button>
+          )}
+          {step === 'account-type' && (
+            <Button
+              onClick={() => setStep('platform')}
+              disabled={!accountPhase}
+              className="flex-1"
+            >
+              Continue
+              <ChevronRight className="w-4 h-4 ml-2" />
+            </Button>
+          )}
+          {step === 'platform' && (
+            <Button
+              onClick={() => {
+                if (platform !== 'cTrader') {
+                  detectTerminals();
+                }
+                setStep('terminal');
+              }}
+              disabled={!platform}
+              className="flex-1"
+            >
+              Continue
+              <ChevronRight className="w-4 h-4 ml-2" />
+            </Button>
+          )}
+          {step === 'terminal' && (
+            <Button
+              onClick={() => {
+                // For hedge accounts (live), skip prop firm selection and go to listening
+                if (accountPhase === 'live') {
+                  if (!formData.account_name) {
+                    setFormData({ ...formData, account_name: `${platform} Hedge Account` });
+                  }
+                  startListening();
+                  setStep('listening');
+                } else {
+                  setStep('prop-firm');
+                }
+              }}
+              disabled={!selectedTerminal && terminals.length > 0 && platform !== 'cTrader'}
+              className="flex-1"
+            >
+              {accountPhase === 'live' ? (
+                <>
+                  Connect Account
+                  <ChevronRight className="w-4 h-4 ml-2" />
+                </>
+              ) : (
+                <>
+                  {terminals.length === 0 ? 'Skip' : 'Continue'}
+                  <ChevronRight className="w-4 h-4 ml-2" />
+                </>
+              )}
+            </Button>
+          )}
+          {step === 'prop-firm' && (
+            <Button
+              onClick={() => setStep('prop-details')}
+              disabled={!formData.prop_firm}
+              className="flex-1"
+            >
+              Continue
+              <ChevronRight className="w-4 h-4 ml-2" />
+            </Button>
+          )}
+          {step === 'prop-details' && (
+            <Button
+              onClick={() => {
+                startListening();
+                setStep('listening');
+              }}
+              disabled={loading || !formData.account_name || !formData.account_size}
+              className="flex-1"
+            >
+              Connect Account
+              <ChevronRight className="w-4 h-4 ml-2" />
+            </Button>
+          )}
+          {step === 'listening' && (
+            <Button
+              onClick={() => {
+                if (selectedDetectedAccount) {
+                  handleFinalizeWithAccount(selectedDetectedAccount);
+                }
+              }}
+              disabled={loading || !selectedDetectedAccount}
+              className="flex-1"
+            >
+              {loading ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Connecting...
+                </>
+              ) : (
+                <>
+                  <CheckCircle2 className="w-4 h-4 mr-2" />
+                  Connect Account
+                </>
+              )}
+            </Button>
+          )}
+        </div>
       </DialogContent>
     </Dialog>
   );

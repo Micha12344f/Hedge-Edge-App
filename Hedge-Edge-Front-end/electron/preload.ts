@@ -250,6 +250,22 @@ const agentAPI = {
   },
 
   /**
+   * Get list of accounts connected via EA/cBot
+   */
+  getConnectedAccounts: (): Promise<{ success: boolean; data?: Array<{
+    login: string;
+    server: string;
+    name?: string;
+    broker?: string;
+    balance?: number;
+    equity?: number;
+    currency?: string;
+    leverage?: number;
+  }>; error?: string }> => {
+    return ipcRenderer.invoke('agent:getConnectedAccounts');
+  },
+
+  /**
    * Subscribe to agent status changes (polling-based for simplicity)
    * Returns an unsubscribe function
    */
@@ -540,12 +556,58 @@ interface LicenseInfo {
   features?: string[];
   email?: string;
   tier?: string;
+  plan?: string;
+  deviceId?: string;
+  devices?: DeviceInfo[];
+  connectedAgents?: number;
+  secureStorage?: boolean;
 }
 
 interface LicenseResult {
   success: boolean;
   license?: LicenseInfo;
   error?: string;
+}
+
+interface LicenseValidationResult {
+  valid: boolean;
+  token?: string;
+  ttlSeconds?: number;
+  message?: string;
+  plan?: string;
+  tier?: string;
+  expiresAt?: string;
+  features?: string[];
+  email?: string;
+  maxDevices?: number;
+  currentDevices?: number;
+}
+
+interface DeviceInfo {
+  deviceId: string;
+  platform: 'desktop' | 'mt5' | 'mt4' | 'ctrader';
+  name?: string;
+  registeredAt: string;
+  lastSeenAt: string;
+  version?: string;
+  isCurrentDevice: boolean;
+}
+
+interface ConnectedAgent {
+  id: string;
+  platform: 'mt5' | 'mt4' | 'ctrader';
+  accountId: string;
+  connectedAt: string;
+  lastHeartbeat: string;
+}
+
+interface ProxyStatus {
+  running: boolean;
+  port: number;
+  requestsServed: number;
+  cacheHits: number;
+  cacheMisses: number;
+  uptime?: number;
 }
 
 // ============================================================================
@@ -578,19 +640,32 @@ interface AssetsAvailability {
 }
 
 // ============================================================================
-// License Management API
+// License Management API (Enhanced)
 // ============================================================================
 
 const licenseAPI = {
   /**
-   * Get current license status
+   * Get current license status with enhanced device and agent info
    */
   getStatus: (): Promise<{ success: boolean; data?: LicenseInfo; error?: string }> => {
     return ipcRenderer.invoke('license:getStatus');
   },
 
   /**
-   * Activate a license key
+   * Validate a license key directly (doesn't necessarily activate)
+   * @param licenseKey - The license key to validate
+   * @param deviceId - Optional device ID (uses current device if not provided)
+   * @param platform - Optional platform identifier
+   */
+  validate: (licenseKey: string, deviceId?: string, platform?: string): Promise<{ success: boolean; data?: LicenseValidationResult; error?: string }> => {
+    if (!licenseKey || typeof licenseKey !== 'string') {
+      return Promise.resolve({ success: false, error: 'License key is required' });
+    }
+    return ipcRenderer.invoke('license:validate', licenseKey, deviceId, platform);
+  },
+
+  /**
+   * Activate a license key (validates and stores it)
    * @param licenseKey - The license key to validate and activate
    */
   activate: (licenseKey: string): Promise<LicenseResult> => {
@@ -619,6 +694,38 @@ const licenseAPI = {
    */
   isSecureStorageAvailable: (): Promise<{ success: boolean; data?: boolean }> => {
     return ipcRenderer.invoke('license:isSecureStorageAvailable');
+  },
+
+  /**
+   * Get registered devices for the current license
+   */
+  getDevices: (): Promise<{ success: boolean; data?: DeviceInfo[]; error?: string }> => {
+    return ipcRenderer.invoke('license:devices');
+  },
+
+  /**
+   * Deactivate a device from the license
+   * @param deviceId - The ID of the device to deactivate
+   */
+  deactivateDevice: (deviceId: string): Promise<{ success: boolean; error?: string }> => {
+    if (!deviceId || typeof deviceId !== 'string') {
+      return Promise.resolve({ success: false, error: 'Device ID is required' });
+    }
+    return ipcRenderer.invoke('license:deactivate', deviceId);
+  },
+
+  /**
+   * Get current device ID
+   */
+  getDeviceId: (): Promise<{ success: boolean; data?: string }> => {
+    return ipcRenderer.invoke('license:getDeviceId');
+  },
+
+  /**
+   * Get list of connected agents/terminals
+   */
+  getConnectedAgents: (): Promise<{ success: boolean; data?: ConnectedAgent[] }> => {
+    return ipcRenderer.invoke('license:getConnectedAgents');
   },
 
   /**
@@ -655,6 +762,33 @@ const licenseAPI = {
     return () => {
       active = false;
     };
+  },
+};
+
+// ============================================================================
+// WebRequest Proxy API
+// ============================================================================
+
+const proxyAPI = {
+  /**
+   * Start the WebRequest proxy server
+   */
+  start: (): Promise<{ success: boolean; data?: ProxyStatus; error?: string }> => {
+    return ipcRenderer.invoke('proxy:start');
+  },
+
+  /**
+   * Stop the WebRequest proxy server
+   */
+  stop: (): Promise<{ success: boolean; error?: string }> => {
+    return ipcRenderer.invoke('proxy:stop');
+  },
+
+  /**
+   * Get proxy server status
+   */
+  getStatus: (): Promise<{ success: boolean; data?: ProxyStatus }> => {
+    return ipcRenderer.invoke('proxy:status');
   },
 };
 
@@ -849,37 +983,6 @@ const agentChannelAPI = {
 };
 
 // ============================================================================
-// Secure Storage API (legacy - kept for compatibility)
-// ============================================================================
-
-const secureStorageAPI = {
-  /**
-   * Check if secure storage (OS keychain encryption) is available
-   */
-  isAvailable: (): Promise<boolean> => {
-    return ipcRenderer.invoke('secureStorage:isAvailable');
-  },
-
-  /**
-   * Encrypt a string using OS keychain (Windows DPAPI, macOS Keychain, Linux Secret Service)
-   * @param plainText - The plain text to encrypt
-   * @returns Encrypted data as base64 string
-   */
-  encrypt: (plainText: string): Promise<SecureStorageResult> => {
-    return ipcRenderer.invoke('secureStorage:encrypt', plainText);
-  },
-
-  /**
-   * Decrypt a string previously encrypted with safeStorage
-   * @param encryptedBase64 - The base64-encoded encrypted data
-   * @returns Decrypted plain text
-   */
-  decrypt: (encryptedBase64: string): Promise<SecureStorageResult> => {
-    return ipcRenderer.invoke('secureStorage:decrypt', encryptedBase64);
-  },
-};
-
-// ============================================================================
 // Core App API
 // ============================================================================
 
@@ -952,9 +1055,14 @@ const electronAPI = {
   connections: connectionsAPI,
 
   /**
-   * License management for subscription validation
+   * License management for subscription validation (enhanced)
    */
   license: licenseAPI,
+
+  /**
+   * WebRequest proxy management for MT5 license validation
+   */
+  proxy: proxyAPI,
 
   /**
    * Installer for deploying EA/DLL/cBot assets to terminals

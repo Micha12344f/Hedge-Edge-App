@@ -2,6 +2,13 @@
 
 A cTrader cBot that validates Hedge Edge monthly subscription licenses and streams live account data to the Hedge Edge desktop application.
 
+**Status:** ✅ Production Ready  
+**Version:** 1.0.0  
+**Last Updated:** 2026-02-01
+
+> 📖 **For detailed step-by-step installation instructions, see [INSTALLATION_GUIDE.md](INSTALLATION_GUIDE.md)**  
+> 📋 **For testing procedures, see [TEST_RESULTS_TEMPLATE.md](TEST_RESULTS_TEMPLATE.md)**
+
 ## Features
 
 - **License Validation**: Validates your Hedge Edge subscription on startup and every 10-15 minutes

@@ -6,8 +6,10 @@ import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Separator } from '@/components/ui/separator';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { cn } from '@/lib/utils';
 import { isElectron } from '@/lib/desktop';
+import { useToast } from '@/hooks/use-toast';
 import {
   Key,
   CheckCircle2,
@@ -25,6 +27,8 @@ import {
   Trash2,
   Lock,
   LockOpen,
+  HelpCircle,
+  Sparkles,
 } from 'lucide-react';
 import type { LicenseInfo, LicenseStatus } from '@/types/connections';
 
@@ -169,6 +173,7 @@ export function LicenseKeySection({
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+  const { toast } = useToast();
 
   const status = licenseInfo?.status || 'not-configured';
   const config = getLicenseStatusConfig(status);
@@ -186,15 +191,30 @@ export function LicenseKeySection({
       const result = await onLicenseUpdate(licenseKey.trim());
       if (result.success) {
         setLicenseKey('');
+        toast({
+          title: "License Activated! 🎉",
+          description: "Your license has been validated successfully. All features are now unlocked.",
+        });
       } else {
         setError(result.error || 'Failed to validate license');
+        toast({
+          variant: "destructive",
+          title: "License Validation Failed",
+          description: result.error || 'Please check your license key and try again.',
+        });
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'An error occurred');
+      const errorMessage = err instanceof Error ? err.message : 'An error occurred';
+      setError(errorMessage);
+      toast({
+        variant: "destructive",
+        title: "Error",
+        description: errorMessage,
+      });
     } finally {
       setIsSubmitting(false);
     }
-  }, [licenseKey, onLicenseUpdate]);
+  }, [licenseKey, onLicenseUpdate, toast]);
 
   // Handle refresh
   const handleRefresh = useCallback(async () => {
@@ -202,10 +222,20 @@ export function LicenseKeySection({
     setIsRefreshing(true);
     try {
       await onRefresh();
+      toast({
+        title: "License Refreshed",
+        description: "Your license status has been updated.",
+      });
+    } catch (err) {
+      toast({
+        variant: "destructive",
+        title: "Refresh Failed",
+        description: "Could not refresh license status. Please try again.",
+      });
     } finally {
       setIsRefreshing(false);
     }
-  }, [onRefresh]);
+  }, [onRefresh, toast]);
 
   // Handle remove
   const handleRemove = useCallback(async () => {
@@ -215,21 +245,41 @@ export function LicenseKeySection({
     setIsSubmitting(true);
     try {
       const result = await onRemove();
-      if (!result.success) {
+      if (result.success) {
+        toast({
+          title: "License Removed",
+          description: "Your license key has been removed from this device.",
+        });
+      } else {
         setError(result.error || 'Failed to remove license');
+        toast({
+          variant: "destructive",
+          title: "Remove Failed",
+          description: result.error || 'Failed to remove license',
+        });
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'An error occurred');
+      const errorMessage = err instanceof Error ? err.message : 'An error occurred';
+      setError(errorMessage);
+      toast({
+        variant: "destructive",
+        title: "Error",
+        description: errorMessage,
+      });
     } finally {
       setIsSubmitting(false);
     }
-  }, [onRemove]);
+  }, [onRemove, toast]);
 
   // Copy masked key
   const copyMaskedKey = async () => {
     if (licenseInfo?.maskedKey) {
       await navigator.clipboard.writeText(licenseInfo.maskedKey);
       setCopied(true);
+      toast({
+        title: "Copied!",
+        description: "License key copied to clipboard.",
+      });
       setTimeout(() => setCopied(false), 2000);
     }
   };

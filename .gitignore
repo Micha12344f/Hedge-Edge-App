@@ -31,6 +31,7 @@ backend/.env.mt5
 # Logs
 *.log
 npm-debug.log*
+session-logs/
 
 # OS files
 .DS_Store

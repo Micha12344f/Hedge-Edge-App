@@ -133,6 +133,47 @@ async function isProcessRunning(processName: string): Promise<boolean> {
 }
 
 /**
+ * Get full paths of all running processes matching the given executable names
+ */
+async function getRunningProcessPaths(processNames: string[]): Promise<string[]> {
+  if (process.platform !== 'win32') {
+    return [];
+  }
+  
+  try {
+    // Use WMIC to get full process paths
+    const filter = processNames.map(name => `Name='${name}'`).join(' OR ');
+    const { stdout } = await execAsync(
+      `wmic process where "${filter}" get ExecutablePath /format:csv`,
+      { windowsHide: true, timeout: 5000 }
+    );
+    
+    // Parse CSV output - format is "Node,ExecutablePath"
+    const paths: string[] = [];
+    const lines = stdout.trim().split('\n');
+    
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (!trimmed || trimmed.startsWith('Node')) continue;
+      
+      // CSV format: COMPUTERNAME,C:\path\to\executable.exe
+      const parts = trimmed.split(',');
+      if (parts.length >= 2) {
+        const exePath = parts.slice(1).join(',').trim(); // Handle paths with commas
+        if (exePath && exePath.length > 0) {
+          paths.push(exePath.toLowerCase());
+        }
+      }
+    }
+    
+    return paths;
+  } catch (error) {
+    console.warn('[Terminal Detector] Failed to get running process paths:', error);
+    return [];
+  }
+}
+
+/**
  * Extract broker name from folder/path
  */
 function extractBrokerName(folderPath: string): string | undefined {
@@ -642,27 +683,25 @@ function deduplicateTerminals(terminals: DetectedTerminal[]): DetectedTerminal[]
 }
 
 /**
- * Update running status for all terminals
+ * Update running status for all terminals by matching actual process paths
  */
 async function updateRunningStatus(terminals: DetectedTerminal[]): Promise<void> {
-  const [terminal64Running, terminalRunning, ctraderRunning] = await Promise.all([
-    isProcessRunning('terminal64.exe'),
-    isProcessRunning('terminal.exe'),
-    isProcessRunning('cTrader.exe'),
+  // Get all running MT4/MT5/cTrader process paths
+  const runningPaths = await getRunningProcessPaths([
+    'terminal64.exe',
+    'terminal.exe', 
+    'cTrader.exe'
   ]);
   
+  console.log('[Terminal Detector] Running terminal paths:', runningPaths);
+  
   for (const terminal of terminals) {
-    switch (terminal.type) {
-      case 'mt5':
-        terminal.isRunning = terminal64Running || terminalRunning;
-        break;
-      case 'mt4':
-        terminal.isRunning = terminalRunning;
-        break;
-      case 'ctrader':
-        terminal.isRunning = ctraderRunning;
-        break;
-    }
+    // Check if this specific terminal's executable path is in the running processes
+    const terminalPathLower = terminal.executablePath.toLowerCase();
+    terminal.isRunning = runningPaths.some(runningPath => 
+      runningPath === terminalPathLower || 
+      normalizePath(runningPath) === normalizePath(terminalPathLower)
+    );
   }
 }
 

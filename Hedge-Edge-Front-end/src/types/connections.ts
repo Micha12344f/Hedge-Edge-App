@@ -401,11 +401,69 @@ export interface LicenseInfo {
   /** License holder email */
   email?: string;
   
-  /** License tier (e.g., 'basic', 'pro', 'enterprise') */
+  /** License tier (e.g., 'demo', 'professional', 'enterprise') */
   tier?: string;
+  
+  /** License plan name */
+  plan?: string;
+  
+  /** Current device ID */
+  deviceId?: string;
+  
+  /** Registered devices */
+  devices?: DeviceInfo[];
+  
+  /** Number of connected agents */
+  connectedAgents?: number;
   
   /** Whether secure storage (OS keychain) is being used */
   secureStorage?: boolean;
+}
+
+/**
+ * Device information for license management
+ */
+export interface DeviceInfo {
+  /** Unique device identifier */
+  deviceId: string;
+  
+  /** Platform type */
+  platform: 'desktop' | 'mt5' | 'mt4' | 'ctrader';
+  
+  /** Device name */
+  name?: string;
+  
+  /** When device was registered */
+  registeredAt: string;
+  
+  /** Last activity timestamp */
+  lastSeenAt: string;
+  
+  /** Software version */
+  version?: string;
+  
+  /** Whether this is the current device */
+  isCurrentDevice: boolean;
+}
+
+/**
+ * Connected agent information
+ */
+export interface ConnectedAgent {
+  /** Agent ID */
+  id: string;
+  
+  /** Platform type */
+  platform: 'mt5' | 'mt4' | 'ctrader';
+  
+  /** Trading account ID */
+  accountId: string;
+  
+  /** When agent connected */
+  connectedAt: string;
+  
+  /** Last heartbeat timestamp */
+  lastHeartbeat: string;
 }
 
 /**

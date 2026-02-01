@@ -1,0 +1,97 @@
+{
+  "task_id": "BE-001",
+  "title": "Deploy Production License Validation API",
+  "assigned_to": "Backend Developer",
+  "priority": "CRITICAL",
+  "phase": 1,
+  "estimated_hours": 4,
+  "status": "READY_FOR_DEPLOYMENT",
+  "completed_at": "2026-02-01",
+  
+  "description": "Deploy the license validation API to production environment at api.hedge-edge.com. The API must handle WebRequest calls from MT4/MT5/cTrader agents.",
+  
+  "requirements": [
+    "Deploy Flask/FastAPI server with proper SSL/TLS configuration",
+    "Connect to Supabase database for license key storage",
+    "Implement rate limiting (100 req/min per IP)",
+    "Set up proper logging and monitoring",
+    "Enable CORS for desktop app communication"
+  ],
+  
+  "endpoints_to_implement": {
+    "POST /v1/license/validate": {
+      "description": "Validate license key and issue session token",
+      "request_body": {
+        "licenseKey": "string (required)",
+        "deviceId": "string (required)",
+        "platform": "string (mt4|mt5|ctrader|desktop)",
+        "accountId": "string (broker account)",
+        "broker": "string (broker name)",
+        "version": "string (agent version)"
+      },
+      "response_success": {
+        "valid": true,
+        "token": "string (session token, 64 chars)",
+        "ttlSeconds": 3600,
+        "plan": "string (demo|professional|enterprise)",
+        "features": ["array of enabled features"],
+        "expiresAt": "ISO datetime"
+      },
+      "response_error": {
+        "valid": false,
+        "message": "string (error description)",
+        "code": "string (ERROR_INVALID_KEY|ERROR_EXPIRED|ERROR_DEVICE_LIMIT)"
+      }
+    },
+    "POST /v1/license/heartbeat": {
+      "description": "Refresh session token and report connection status",
+      "request_body": {
+        "token": "string (current session token)",
+        "deviceId": "string",
+        "status": "object (balance, equity, positions count)"
+      },
+      "response": {
+        "valid": true,
+        "newToken": "string (refreshed token if near expiry)",
+        "ttlSeconds": 3600
+      }
+    },
+    "POST /v1/license/deactivate": {
+      "description": "Deactivate device to free up slot",
+      "request_body": {
+        "licenseKey": "string",
+        "deviceId": "string"
+      },
+      "response": {
+        "success": true,
+        "devicesRemaining": 2
+      }
+    }
+  },
+  
+  "reference_files": [
+    "bin/license_api_server.py - Mock server to base implementation on",
+    "backend/mt5_api_server.py - Existing backend patterns"
+  ],
+  
+  "deployment_target": {
+    "provider": "Railway / Render / AWS Lambda",
+    "domain": "api.hedge-edge.com",
+    "ssl": "Required (TLS 1.2+)",
+    "database": "Supabase (PostgreSQL)"
+  },
+  
+  "acceptance_criteria": [
+    "All endpoints return proper JSON responses",
+    "SSL certificate is valid and enforced",
+    "Rate limiting prevents abuse",
+    "Device limit enforcement works correctly",
+    "Logs capture all validation attempts"
+  ],
+  
+  "deliverables": [
+    "Deployed API at api.hedge-edge.com",
+    "API documentation with examples",
+    "Environment configuration guide"
+  ]
+}

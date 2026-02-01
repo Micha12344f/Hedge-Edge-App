@@ -1,5 +1,6 @@
 ﻿import { useState } from 'react';
 import { useTradingAccounts } from '@/hooks/useTradingAccounts';
+import { PROP_FIRMS } from '@/components/dashboard/AddAccountModal';
 import { Card, CardContent } from '@/components/ui/card';
 import { PageBackground } from '@/components/ui/page-background';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -66,12 +67,14 @@ const DashboardAnalytics = () => {
     .reduce((acc, account) => {
       const firmName = account.prop_firm || 'Unknown';
       if (!acc[firmName]) {
-        acc[firmName] = { name: firmName, balance: 0, count: 0 };
+        // Find logo from PROP_FIRMS array
+        const firm = PROP_FIRMS.find(f => f.name === firmName);
+        acc[firmName] = { name: firmName, balance: 0, count: 0, logo: firm?.logo || null };
       }
       acc[firmName].balance += Number(account.current_balance) || Number(account.account_size) || 0;
       acc[firmName].count += 1;
       return acc;
-    }, {} as Record<string, { name: string; balance: number; count: number }>);
+    }, {} as Record<string, { name: string; balance: number; count: number; logo: string | null }>);
 
   const barChartData = Object.values(propFirmData);
 
@@ -309,7 +312,7 @@ const DashboardAnalytics = () => {
                     {selectedAccountId === 'all' ? (
                       // Bar chart for all accounts - grouped by prop firm
                       <BarChart 
-                        data={barChartData.length > 0 ? barChartData : [{ name: 'No accounts', balance: 0, count: 0 }]} 
+                        data={barChartData.length > 0 ? barChartData : [{ name: 'No accounts', balance: 0, count: 0, logo: null }]} 
                         margin={{ top: 10, right: 10, bottom: 50, left: 10 }}
                       >
                         <defs>
@@ -327,12 +330,39 @@ const DashboardAnalytics = () => {
                         <XAxis 
                           dataKey="name" 
                           axisLine={{ stroke: 'hsl(var(--border))' }}
-                          tickLine={{ stroke: 'hsl(var(--border))' }}
-                          tick={{ fill: 'hsl(var(--muted-foreground))', fontSize: 11 }}
-                          angle={-45}
-                          textAnchor="end"
-                          height={60}
+                          tickLine={false}
+                          height={50}
                           interval={0}
+                          tick={(props) => {
+                            const { x, y, payload } = props;
+                            const firmData = barChartData.find(d => d.name === payload.value);
+                            const logo = firmData?.logo;
+                            return (
+                              <g transform={`translate(${x},${y})`}>
+                                {logo ? (
+                                  <image
+                                    href={logo}
+                                    x={-12}
+                                    y={6}
+                                    width={24}
+                                    height={24}
+                                    style={{ borderRadius: '4px' }}
+                                    preserveAspectRatio="xMidYMid slice"
+                                  />
+                                ) : (
+                                  <text
+                                    x={0}
+                                    y={16}
+                                    textAnchor="middle"
+                                    fill="hsl(var(--muted-foreground))"
+                                    fontSize={10}
+                                  >
+                                    {payload.value?.substring(0, 3) || '?'}
+                                  </text>
+                                )}
+                              </g>
+                            );
+                          }}
                         />
                         <YAxis 
                           tickFormatter={formatYAxis}

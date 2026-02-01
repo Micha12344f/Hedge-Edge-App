@@ -199,13 +199,46 @@ The EA displays status on the chart:
 
 ## Building the DLL from Source
 
+### Quick Build (Recommended)
+
+Use the automated build script:
+
+```powershell
+# Navigate to MT5 agent folder
+cd agents/mt5
+
+# Build the DLL (Release x64)
+.\build_dll.ps1
+
+# Clean and rebuild
+.\build_dll.ps1 -Clean
+
+# Build Debug version
+.\build_dll.ps1 -Debug
+
+# Build and deploy to all MT5 terminals
+.\build_dll.ps1 -Deploy
+```
+
 ### Requirements
 
-- Visual Studio 2019 or later
-- Windows SDK
-- C++17 support
+- **Visual Studio 2019 or later** with C++ Desktop Development workload
+- **CMake 3.15+** (included with Visual Studio)
+- **Windows SDK** (included with Visual Studio)
 
-### Build Steps
+### Manual Build with CMake
+
+```powershell
+cd agents/mt5
+mkdir build
+cd build
+cmake -G "Visual Studio 17 2022" -A x64 ..
+cmake --build . --config Release
+```
+
+Output: `build/bin/Release/HedgeEdgeLicense.dll` (also copied to source folder)
+
+### Manual Build with Visual Studio
 
 1. **Create Visual Studio Project**:
    - New Project → Dynamic-Link Library (DLL)
@@ -228,31 +261,35 @@ The EA displays status on the chart:
    - Build → Build Solution
    - Output: `x64/Release/HedgeEdgeLicense.dll`
 
-### Alternative: CMake Build
+## Deployment
 
-```cmake
-cmake_minimum_required(VERSION 3.15)
-project(HedgeEdgeLicense)
+### Automated Deployment
 
-set(CMAKE_CXX_STANDARD 17)
-set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded")
+Use the deployment script to automatically find and deploy to all MT5 terminals:
 
-add_library(HedgeEdgeLicense SHARED
-    HedgeEdgeLicense.cpp
-    HedgeEdgeLicense.h
-    HedgeEdgeLicense.def
-)
-
-target_compile_definitions(HedgeEdgeLicense PRIVATE HEDGEEDGE_EXPORTS)
-target_link_libraries(HedgeEdgeLicense winhttp)
-```
-
-Build with:
 ```powershell
-mkdir build && cd build
-cmake -G "Visual Studio 17 2022" -A x64 ..
-cmake --build . --config Release
+cd agents/mt5
+
+# List detected MT5 terminals
+.\deploy_to_mt5.ps1 -List
+
+# Deploy to all terminals
+.\deploy_to_mt5.ps1
+
+# Deploy to specific terminal
+.\deploy_to_mt5.ps1 -Terminal A1B2C3D4
+
+# Verify deployment status
+.\deploy_to_mt5.ps1 -Verify
 ```
+
+### Manual Deployment
+
+1. Copy `HedgeEdgeLicense.dll` to `MQL5\Libraries\`
+2. Copy `HedgeEdgeLicense.mq5` to `MQL5\Experts\`
+3. Compile in MetaEditor (F7)
+
+For detailed instructions, see [INSTALLATION_GUIDE.md](INSTALLATION_GUIDE.md)
 
 ## Troubleshooting
 

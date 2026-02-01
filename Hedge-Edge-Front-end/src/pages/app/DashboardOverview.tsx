@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Skeleton } from '@/components/ui/skeleton';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { 
   Plus, 
   TrendingUp, 
@@ -17,6 +18,11 @@ import {
   PlayCircle,
   RefreshCw,
   Sparkles,
+  HelpCircle,
+  ArrowRight,
+  Settings,
+  Zap,
+  Shield,
 } from 'lucide-react';
 
 const DashboardOverview = () => {
@@ -65,6 +71,7 @@ const DashboardOverview = () => {
       value: formatCurrency(propBalance),
       className: 'text-foreground',
       iconClassName: 'text-muted-foreground',
+      tooltip: 'Total balance across all prop firm accounts (Evaluation + Funded)',
     },
     {
       title: 'Total P&L',
@@ -72,6 +79,7 @@ const DashboardOverview = () => {
       value: formatCurrency(totalPnL),
       className: totalPnL >= 0 ? 'text-primary' : 'text-destructive',
       iconClassName: totalPnL >= 0 ? 'text-primary' : 'text-destructive',
+      tooltip: 'Combined profit/loss across all accounts',
     },
     {
       title: 'Avg. Return',
@@ -79,6 +87,7 @@ const DashboardOverview = () => {
       value: `${avgPnLPercent.toFixed(2)}%`,
       className: avgPnLPercent >= 0 ? 'text-primary' : 'text-destructive',
       iconClassName: 'text-muted-foreground',
+      tooltip: 'Average percentage return across all accounts',
     },
     {
       title: 'Active Accounts',
@@ -87,6 +96,7 @@ const DashboardOverview = () => {
       subtitle: `(${evaluationCount} eval, ${fundedCount} funded, ${hedgeCount} hedge)`,
       className: 'text-foreground',
       iconClassName: 'text-muted-foreground',
+      tooltip: 'Total number of connected trading accounts',
     },
   ];
 
@@ -102,10 +112,19 @@ const DashboardOverview = () => {
           <p className="text-muted-foreground">Manage all your trading accounts in one place</p>
         </div>
         <div className="flex gap-3">
-          <Button variant="outline" size="sm" className="group">
-            <PlayCircle className="mr-2 h-4 w-4 transition-transform group-hover:scale-110" />
-            Tutorials
-          </Button>
+          <TooltipProvider>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button variant="outline" size="sm" className="group">
+                  <PlayCircle className="mr-2 h-4 w-4 transition-transform group-hover:scale-110" />
+                  Tutorials
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>
+                <p>Watch video guides to get started</p>
+              </TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
           <Button onClick={() => setAddModalOpen(true)} className="group">
             <Plus className="mr-2 h-4 w-4 transition-transform group-hover:rotate-90" />
             Add Account
@@ -114,33 +133,42 @@ const DashboardOverview = () => {
       </div>
 
       {/* Stats Cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 stagger-children">
-        {statsCards.map((stat, index) => (
-          <Card 
-            key={stat.title}
-            className="border-border/30 bg-gradient-to-br from-card/80 to-card/40 backdrop-blur-sm hover:border-primary/30 group cursor-default"
-          >
-            <CardHeader className="flex flex-row items-center justify-between pb-2">
-              <CardTitle className="text-sm font-medium text-muted-foreground">{stat.title}</CardTitle>
-              <stat.icon className={`h-4 w-4 transition-all duration-300 group-hover:scale-110 ${stat.iconClassName}`} />
-            </CardHeader>
-            <CardContent>
-              {loading ? (
-                <Skeleton className="h-8 w-24 animate-shimmer" />
-              ) : (
-                <div className="flex items-baseline gap-2">
-                  <p className={`text-2xl font-bold transition-colors ${stat.className}`}>{stat.value}</p>
-                  {stat.subtitle && (
-                    <p className="text-sm text-muted-foreground">
-                      {stat.subtitle}
-                    </p>
-                  )}
-                </div>
-              )}
-            </CardContent>
-          </Card>
-        ))}
-      </div>
+      <TooltipProvider>
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 stagger-children">
+          {statsCards.map((stat, index) => (
+            <Card 
+              key={stat.title}
+              className="border-border/30 bg-gradient-to-br from-card/80 to-card/40 backdrop-blur-sm hover:border-primary/30 group cursor-default"
+            >
+              <CardHeader className="flex flex-row items-center justify-between pb-2">
+                <CardTitle className="text-sm font-medium text-muted-foreground">{stat.title}</CardTitle>
+                <Tooltip>
+                  <TooltipTrigger>
+                    <stat.icon className={`h-4 w-4 transition-all duration-300 group-hover:scale-110 ${stat.iconClassName}`} />
+                  </TooltipTrigger>
+                  <TooltipContent>
+                    <p>{stat.tooltip}</p>
+                  </TooltipContent>
+                </Tooltip>
+              </CardHeader>
+              <CardContent>
+                {loading ? (
+                  <Skeleton className="h-8 w-24 animate-shimmer" />
+                ) : (
+                  <div className="flex items-baseline gap-2">
+                    <p className={`text-2xl font-bold transition-colors ${stat.className}`}>{stat.value}</p>
+                    {stat.subtitle && (
+                      <p className="text-sm text-muted-foreground">
+                        {stat.subtitle}
+                      </p>
+                    )}
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          ))}
+        </div>
+      </TooltipProvider>
 
       {/* Tabs & Accounts */}
       <div className="space-y-4 animate-fade-in-up" style={{ animationDelay: '200ms' }}>
@@ -188,19 +216,85 @@ const DashboardOverview = () => {
                   ))}
                 </div>
               ) : filteredAccounts.length === 0 ? (
-                <Card className="border-border/30 bg-gradient-to-br from-card/80 to-card/40 border-dashed hover:border-primary/50 transition-colors cursor-pointer group" onClick={() => setAddModalOpen(true)}>
-                  <CardContent className="flex flex-col items-center justify-center py-12">
-                    <div className="w-12 h-12 rounded-full bg-gradient-to-br from-primary/20 to-muted flex items-center justify-center mb-4 transition-transform group-hover:scale-110 group-hover:shadow-lg group-hover:shadow-primary/20">
-                      <Plus className="w-6 h-6 text-primary transition-transform group-hover:rotate-90" />
+                <Card className="border-border/30 bg-gradient-to-br from-card/80 to-card/40 overflow-hidden">
+                  <CardContent className="p-0">
+                    {/* Welcome Banner */}
+                    <div className="bg-gradient-to-r from-primary/10 via-secondary/10 to-primary/10 p-6 border-b border-border/30">
+                      <div className="flex items-center gap-4">
+                        <div className="w-16 h-16 rounded-full bg-gradient-to-br from-primary/20 to-secondary/20 flex items-center justify-center">
+                          <Sparkles className="w-8 h-8 text-primary" />
+                        </div>
+                        <div>
+                          <h3 className="text-xl font-bold text-foreground">Welcome to Hedge Edge!</h3>
+                          <p className="text-muted-foreground">Let's set up your first trading account in a few easy steps</p>
+                        </div>
+                      </div>
                     </div>
-                    <h3 className="text-lg font-medium text-foreground mb-2">No accounts yet</h3>
-                    <p className="text-muted-foreground text-center mb-4">
-                      Add your first trading account to start tracking your performance
-                    </p>
-                    <Button className="group/btn">
-                      <Plus className="mr-2 h-4 w-4 transition-transform group-hover/btn:rotate-90" />
-                      Add Account
-                    </Button>
+                    
+                    {/* Quick Start Steps */}
+                    <div className="p-6 space-y-4">
+                      <h4 className="text-sm font-medium text-muted-foreground uppercase tracking-wider">Quick Start</h4>
+                      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                        <div className="flex items-start gap-3 p-4 rounded-lg bg-muted/30 hover:bg-muted/50 transition-colors group cursor-pointer" onClick={() => setAddModalOpen(true)}>
+                          <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center flex-shrink-0 group-hover:bg-primary/20 transition-colors">
+                            <span className="text-lg font-bold text-primary">1</span>
+                          </div>
+                          <div>
+                            <h5 className="font-medium text-foreground flex items-center gap-2">
+                              Add Account
+                              <ArrowRight className="w-4 h-4 text-muted-foreground group-hover:text-primary group-hover:translate-x-1 transition-all" />
+                            </h5>
+                            <p className="text-sm text-muted-foreground">Connect your MT5, cTrader, or add a manual account</p>
+                          </div>
+                        </div>
+                        
+                        <div className="flex items-start gap-3 p-4 rounded-lg bg-muted/30 hover:bg-muted/50 transition-colors">
+                          <div className="w-10 h-10 rounded-full bg-secondary/10 flex items-center justify-center flex-shrink-0">
+                            <span className="text-lg font-bold text-secondary">2</span>
+                          </div>
+                          <div>
+                            <h5 className="font-medium text-foreground">Install EA/cBot</h5>
+                            <p className="text-sm text-muted-foreground">Enable real-time sync from your trading terminal</p>
+                          </div>
+                        </div>
+                        
+                        <div className="flex items-start gap-3 p-4 rounded-lg bg-muted/30 hover:bg-muted/50 transition-colors">
+                          <div className="w-10 h-10 rounded-full bg-accent/20 flex items-center justify-center flex-shrink-0">
+                            <span className="text-lg font-bold text-foreground">3</span>
+                          </div>
+                          <div>
+                            <h5 className="font-medium text-foreground">Start Trading</h5>
+                            <p className="text-sm text-muted-foreground">Track performance and use the trade copier</p>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                    
+                    {/* Features Preview */}
+                    <div className="p-6 pt-0">
+                      <div className="flex flex-wrap gap-3 text-sm">
+                        <div className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-primary/10 text-primary">
+                          <Zap className="w-3.5 h-3.5" />
+                          <span>Real-time Sync</span>
+                        </div>
+                        <div className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-secondary/10 text-secondary">
+                          <Shield className="w-3.5 h-3.5" />
+                          <span>Secure Local Connection</span>
+                        </div>
+                        <div className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-accent/20 text-foreground">
+                          <TrendingUp className="w-3.5 h-3.5" />
+                          <span>Performance Analytics</span>
+                        </div>
+                      </div>
+                    </div>
+                    
+                    {/* CTA */}
+                    <div className="p-6 pt-0 flex justify-center">
+                      <Button size="lg" onClick={() => setAddModalOpen(true)} className="group">
+                        <Plus className="mr-2 h-5 w-5 transition-transform group-hover:rotate-90" />
+                        Add Your First Account
+                      </Button>
+                    </div>
                   </CardContent>
                 </Card>
               ) : (

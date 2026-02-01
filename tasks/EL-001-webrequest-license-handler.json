@@ -1,0 +1,145 @@
+{
+  "task_id": "EL-001",
+  "title": "Implement WebRequest License Handler in Desktop App",
+  "assigned_to": "Electron Developer",
+  "priority": "CRITICAL",
+  "phase": 1,
+  "estimated_hours": 4,
+  "status": "NOT_STARTED",
+  
+  "description": "Enhance the Electron desktop app to handle WebRequest-based license validation, bridging the gap between trading terminals and the license API. The app should intercept local requests and manage license state.",
+  
+  "current_implementation": {
+    "files": [
+      "electron/license-store.ts - Local license storage",
+      "electron/agent-channel-reader.ts - IPC channel reading",
+      "electron/zmq-bridge.ts - ZeroMQ communication",
+      "electron/mt5-webrequest-helper.ts - MT5 WebRequest utilities"
+    ],
+    "status": "ZMQ bridge implemented, WebRequest handler needs enhancement"
+  },
+  
+  "requirements": [
+    "Create local HTTP proxy server to intercept WebRequest calls (optional fallback)",
+    "Implement license validation caching to reduce API calls",
+    "Handle multiple terminals connecting simultaneously",
+    "Sync license state across all connected agents",
+    "Provide UI feedback for license status"
+  ],
+  
+  "implementation_tasks": {
+    "task_1_license_manager": {
+      "description": "Create centralized LicenseManager class",
+      "file": "electron/license-manager.ts",
+      "responsibilities": [
+        "Cache validated licenses with TTL",
+        "Handle token refresh before expiry",
+        "Track connected devices/terminals",
+        "Emit events for license state changes"
+      ],
+      "interface": {
+        "validateLicense": "(key: string, deviceId: string, platform: string) => Promise<LicenseResult>",
+        "refreshToken": "(token: string) => Promise<RefreshResult>",
+        "deactivateDevice": "(key: string, deviceId: string) => Promise<boolean>",
+        "getLicenseStatus": "(key: string) => LicenseStatus",
+        "onLicenseChange": "(callback: (status: LicenseStatus) => void) => void"
+      }
+    },
+    "task_2_webrequest_proxy": {
+      "description": "Local HTTP proxy for WebRequest interception (optional)",
+      "file": "electron/webrequest-proxy.ts",
+      "port": 8089,
+      "purpose": "Handle MT5 WebRequest calls locally before forwarding to API",
+      "features": [
+        "Intercept /v1/license/validate requests",
+        "Add authentication headers",
+        "Cache responses to reduce latency",
+        "Handle offline mode with cached tokens"
+      ]
+    },
+    "task_3_ipc_handlers": {
+      "description": "Add IPC handlers for renderer process",
+      "file": "electron/main.ts",
+      "handlers_to_add": [
+        "license:validate - Validate license from UI",
+        "license:status - Get current license status",
+        "license:devices - List registered devices",
+        "license:deactivate - Deactivate a device",
+        "license:refresh - Force token refresh"
+      ]
+    },
+    "task_4_ui_integration": {
+      "description": "Update React components for license display",
+      "files": [
+        "src/components/Settings/LicensePanel.tsx",
+        "src/components/Sidebar/LicenseStatus.tsx"
+      ],
+      "features": [
+        "Display current license tier (Demo/Pro/Enterprise)",
+        "Show connected devices count",
+        "Show time until license expiry",
+        "Deactivate device button"
+      ]
+    }
+  },
+  
+  "data_flow": {
+    "scenario_1_mt5_startup": {
+      "description": "MT5 EA validates license on startup",
+      "flow": [
+        "1. EA sends WebRequest to api.hedge-edge.com/v1/license/validate",
+        "2. API validates and returns token",
+        "3. EA stores token and starts operation",
+        "4. EA connects to desktop app via ZMQ",
+        "5. Desktop app receives account data stream"
+      ]
+    },
+    "scenario_2_desktop_initiated": {
+      "description": "User activates license from desktop app",
+      "flow": [
+        "1. User enters license key in Settings",
+        "2. App calls LicenseManager.validateLicense()",
+        "3. LicenseManager calls API",
+        "4. Token stored in license-store.ts",
+        "5. Connected agents receive license state via command channel"
+      ]
+    }
+  },
+  
+  "license_state_sync": {
+    "description": "Keep license state synchronized across all components",
+    "storage": {
+      "electron_main": "license-store.ts (encrypted storage)",
+      "renderer": "LicenseContext (React context)",
+      "agents": "Each agent caches token with TTL"
+    },
+    "sync_triggers": [
+      "License validation success/failure",
+      "Token refresh",
+      "Device deactivation",
+      "Expiration warning (24h before)"
+    ]
+  },
+  
+  "reference_files": [
+    "electron/license-store.ts - Existing license storage",
+    "electron/zmq-bridge.ts - ZMQ communication patterns",
+    "bin/license_api_server.py - API response format reference"
+  ],
+  
+  "acceptance_criteria": [
+    "License validation works from desktop app UI",
+    "Connected MT5/cTrader agents report valid license status",
+    "Token refresh happens automatically before expiry",
+    "Multiple devices can connect within license limit",
+    "License expiration shows warning 24h in advance",
+    "Deactivating a device frees up license slot"
+  ],
+  
+  "deliverables": [
+    "electron/license-manager.ts - New module",
+    "Updated electron/main.ts with IPC handlers",
+    "Updated React components for license UI",
+    "Integration test suite"
+  ]
+}

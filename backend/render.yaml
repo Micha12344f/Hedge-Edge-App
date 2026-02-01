@@ -1,0 +1,41 @@
+# Render Configuration for Hedge Edge License API
+# https://render.com
+# This file should be named render.yaml in the repository root
+
+services:
+  - type: web
+    name: hedge-edge-license-api
+    env: python
+    region: oregon  # or: ohio, frankfurt, singapore
+    plan: starter  # or: standard, pro
+    buildCommand: pip install -r backend/requirements.production.txt
+    startCommand: cd backend && gunicorn license_api_production:app --bind 0.0.0.0:$PORT --workers 4 --worker-class uvicorn.workers.UvicornWorker --access-logfile - --error-logfile - --timeout 120
+    healthCheckPath: /health
+    
+    # Auto-deploy on push to main branch
+    autoDeploy: true
+    
+    # Environment variables (set in Render dashboard for secrets)
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.11.7"
+      - key: LOG_LEVEL
+        value: INFO
+      - key: RATE_LIMIT
+        value: "100/minute"
+      - key: TOKEN_TTL_SECONDS
+        value: "3600"
+      - key: TOKEN_REFRESH_THRESHOLD
+        value: "300"
+      # Secrets - set these in Render dashboard, not here
+      - key: SUPABASE_URL
+        sync: false  # Must be set in dashboard
+      - key: SUPABASE_SERVICE_KEY
+        sync: false  # Must be set in dashboard
+    
+    # Scaling (for standard/pro plans)
+    # scaling:
+    #   minInstances: 1
+    #   maxInstances: 3
+    #   targetMemoryPercent: 80
+    #   targetCPUPercent: 80

@@ -1,0 +1,309 @@
+{
+  "task_id": "QA-001",
+  "title": "End-to-End Integration Testing",
+  "assigned_to": "QA Engineer",
+  "priority": "HIGH",
+  "phase": 5,
+  "estimated_hours": 6,
+  "status": "NOT_STARTED",
+  "depends_on": ["MT5-001", "CT-001", "EL-001"],
+  
+  "description": "Comprehensive end-to-end testing of the license validation and agent connection system across all supported platforms.",
+  
+  "test_environment": {
+    "platforms_to_test": [
+      "MetaTrader 5 (demo account)",
+      "cTrader (demo account)",
+      "Hedge Edge Desktop App (Windows)"
+    ],
+    "license_keys": {
+      "demo": "TEST-1234-5678-DEMO",
+      "professional": "PROD-ABCD-EFGH-FULL",
+      "enterprise": "ENTE-RPRS-TEAM-PLAN"
+    },
+    "api_environments": [
+      "Local mock server (http://localhost:8080)",
+      "Production API (https://api.hedge-edge.com)"
+    ]
+  },
+  
+  "test_suites": {
+    "suite_1_license_validation": {
+      "description": "Test license validation flow",
+      "test_cases": [
+        {
+          "id": "LV-001",
+          "name": "Valid License - MT5",
+          "steps": [
+            "Attach EA to MT5 chart with valid license key",
+            "Wait for initialization"
+          ],
+          "expected": "Green 'Licensed - Active' status on chart",
+          "priority": "Critical"
+        },
+        {
+          "id": "LV-002",
+          "name": "Valid License - cTrader",
+          "steps": [
+            "Attach cBot to cTrader chart with valid license key",
+            "Wait for initialization"
+          ],
+          "expected": "Green status text showing active license",
+          "priority": "Critical"
+        },
+        {
+          "id": "LV-003",
+          "name": "Invalid License Key",
+          "steps": [
+            "Attach agent with invalid license key",
+            "Wait for validation response"
+          ],
+          "expected": "Red error status, agent does not start trading",
+          "priority": "Critical"
+        },
+        {
+          "id": "LV-004",
+          "name": "Expired License",
+          "steps": [
+            "Use a license key with past expiration date",
+            "Attempt to attach agent"
+          ],
+          "expected": "Error message about expired license",
+          "priority": "High"
+        },
+        {
+          "id": "LV-005",
+          "name": "Device Limit Exceeded",
+          "steps": [
+            "Activate license on max allowed devices",
+            "Try to activate on additional device"
+          ],
+          "expected": "Error message about device limit",
+          "priority": "High"
+        },
+        {
+          "id": "LV-006",
+          "name": "Network Failure Recovery",
+          "steps": [
+            "Disconnect network during license check",
+            "Reconnect network"
+          ],
+          "expected": "Agent retries and recovers when network returns",
+          "priority": "Medium"
+        }
+      ]
+    },
+    "suite_2_data_streaming": {
+      "description": "Test real-time data streaming to desktop app",
+      "test_cases": [
+        {
+          "id": "DS-001",
+          "name": "MT5 ZMQ Connection",
+          "steps": [
+            "Start desktop app",
+            "Start MT5 EA with ZMQ enabled",
+            "Open a position in MT5"
+          ],
+          "expected": "Position appears in desktop app within 1 second",
+          "priority": "Critical"
+        },
+        {
+          "id": "DS-002",
+          "name": "cTrader Named Pipe Connection",
+          "steps": [
+            "Start desktop app",
+            "Start cTrader cBot",
+            "Open a position in cTrader"
+          ],
+          "expected": "Position appears in desktop app within 1 second",
+          "priority": "Critical"
+        },
+        {
+          "id": "DS-003",
+          "name": "Account Balance Updates",
+          "steps": [
+            "Connect agent to desktop app",
+            "Close a profitable position"
+          ],
+          "expected": "Balance updates immediately in desktop app",
+          "priority": "High"
+        },
+        {
+          "id": "DS-004",
+          "name": "Multiple Terminals",
+          "steps": [
+            "Connect MT5 with account A",
+            "Connect cTrader with account B",
+            "Verify both appear in desktop app"
+          ],
+          "expected": "Both accounts visible with separate data",
+          "priority": "High"
+        }
+      ]
+    },
+    "suite_3_remote_commands": {
+      "description": "Test remote commands from desktop app to agents",
+      "test_cases": [
+        {
+          "id": "RC-001",
+          "name": "PAUSE Command",
+          "steps": [
+            "Connect agent to desktop app",
+            "Send PAUSE command from app"
+          ],
+          "expected": "Agent shows 'Paused' status, stops trading",
+          "priority": "High"
+        },
+        {
+          "id": "RC-002",
+          "name": "RESUME Command",
+          "steps": [
+            "Have agent in paused state",
+            "Send RESUME command from app"
+          ],
+          "expected": "Agent resumes 'Active' status",
+          "priority": "High"
+        },
+        {
+          "id": "RC-003",
+          "name": "CLOSE_ALL Command",
+          "steps": [
+            "Open 3 positions in terminal",
+            "Send CLOSE_ALL command from app"
+          ],
+          "expected": "All positions closed, confirmation in app",
+          "priority": "High"
+        },
+        {
+          "id": "RC-004",
+          "name": "CLOSE_POSITION Command",
+          "steps": [
+            "Open 2 positions",
+            "Send CLOSE_POSITION for first position"
+          ],
+          "expected": "Only specified position closed",
+          "priority": "Medium"
+        },
+        {
+          "id": "RC-005",
+          "name": "STATUS Request",
+          "steps": [
+            "Send STATUS command to agent"
+          ],
+          "expected": "Full status report returned to app",
+          "priority": "Medium"
+        }
+      ]
+    },
+    "suite_4_error_handling": {
+      "description": "Test error scenarios and recovery",
+      "test_cases": [
+        {
+          "id": "EH-001",
+          "name": "API Server Down",
+          "steps": [
+            "Stop license API server",
+            "Attempt to validate license"
+          ],
+          "expected": "Appropriate timeout error, retry logic activates",
+          "priority": "High"
+        },
+        {
+          "id": "EH-002",
+          "name": "Desktop App Crash Recovery",
+          "steps": [
+            "Connect agent to desktop app",
+            "Force close desktop app",
+            "Restart desktop app"
+          ],
+          "expected": "Connection re-establishes automatically",
+          "priority": "High"
+        },
+        {
+          "id": "EH-003",
+          "name": "Terminal Restart",
+          "steps": [
+            "Have agent connected",
+            "Close and reopen MT5/cTrader",
+            "EA should auto-start with chart"
+          ],
+          "expected": "Agent reconnects to desktop app",
+          "priority": "Medium"
+        },
+        {
+          "id": "EH-004",
+          "name": "Token Expiry During Session",
+          "steps": [
+            "Start agent with short TTL token",
+            "Wait for token to approach expiry"
+          ],
+          "expected": "Token auto-refreshes without disconnection",
+          "priority": "High"
+        }
+      ]
+    },
+    "suite_5_performance": {
+      "description": "Performance and latency testing",
+      "test_cases": [
+        {
+          "id": "PF-001",
+          "name": "Data Latency - ZMQ",
+          "steps": [
+            "Connect MT5 via ZMQ",
+            "Measure time from position open to app display"
+          ],
+          "expected": "< 100ms latency",
+          "priority": "Medium"
+        },
+        {
+          "id": "PF-002",
+          "name": "Command Latency",
+          "steps": [
+            "Send PING command",
+            "Measure round-trip time"
+          ],
+          "expected": "< 50ms round-trip",
+          "priority": "Medium"
+        },
+        {
+          "id": "PF-003",
+          "name": "Memory Usage",
+          "steps": [
+            "Run agent for 1 hour",
+            "Monitor memory consumption"
+          ],
+          "expected": "No memory leaks, stable usage",
+          "priority": "Medium"
+        }
+      ]
+    }
+  },
+  
+  "test_execution_checklist": [
+    "[ ] Set up test accounts on MT5 and cTrader",
+    "[ ] Start local license API server",
+    "[ ] Run Suite 1: License Validation",
+    "[ ] Run Suite 2: Data Streaming",
+    "[ ] Run Suite 3: Remote Commands",
+    "[ ] Run Suite 4: Error Handling",
+    "[ ] Run Suite 5: Performance",
+    "[ ] Document all failures with screenshots",
+    "[ ] Create bug reports for failures",
+    "[ ] Retest fixed issues"
+  ],
+  
+  "acceptance_criteria": [
+    "All Critical test cases pass",
+    "90%+ of High priority test cases pass",
+    "No memory leaks detected",
+    "Latency within acceptable thresholds",
+    "Error messages are user-friendly"
+  ],
+  
+  "deliverables": [
+    "Test execution report (tasks/test-results/QA-001-report.json)",
+    "Bug reports for any failures",
+    "Performance benchmark results",
+    "Screenshots of test scenarios"
+  ]
+}

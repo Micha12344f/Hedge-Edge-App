@@ -160,24 +160,24 @@ export function useLicenseStatus(options?: UseLicenseStatusOptions): UseLicenseS
 
     try {
       const result = await window.electronAPI.license.activate(licenseKey);
-      if (result.success && result.data) {
+      if (result.success && result.license) {
         // Convert API response to LicenseInfo format
         const licenseInfo: LicenseInfo = {
-          status: result.data.status || (result.data.valid ? 'valid' : 'invalid'),
-          maskedKey: result.data.maskedKey,
-          lastChecked: result.data.lastChecked,
-          nextCheckAt: result.data.nextCheckAt,
-          expiresAt: result.data.expiresAt,
-          daysRemaining: result.data.daysRemaining,
-          errorMessage: result.data.errorMessage,
-          features: result.data.features,
-          email: result.data.email,
-          tier: result.data.tier,
-          secureStorage: result.data.secureStorage,
+          status: result.license.status || 'valid',
+          maskedKey: result.license.maskedKey,
+          lastChecked: result.license.lastChecked,
+          nextCheckAt: result.license.nextCheckAt,
+          expiresAt: result.license.expiresAt,
+          daysRemaining: result.license.daysRemaining,
+          errorMessage: result.license.errorMessage,
+          features: result.license.features,
+          email: result.license.email,
+          tier: result.license.tier,
+          secureStorage: result.license.secureStorage,
         };
         setLicense(licenseInfo);
-        if (result.data.secureStorage !== undefined) {
-          setSecureStorageAvailable(result.data.secureStorage);
+        if (result.license.secureStorage !== undefined) {
+          setSecureStorageAvailable(result.license.secureStorage);
         }
         return { success: true };
       } else {
@@ -203,25 +203,25 @@ export function useLicenseStatus(options?: UseLicenseStatusOptions): UseLicenseS
 
     try {
       const result = await window.electronAPI.license.refresh();
-      if (result.success && result.data) {
+      if (result.success && result.license) {
         // Convert API response to LicenseInfo format
         const licenseInfo: LicenseInfo = {
-          status: result.data.status || (result.data.valid ? 'valid' : 'not-configured'),
-          maskedKey: result.data.maskedKey,
-          lastChecked: result.data.lastChecked,
-          nextCheckAt: result.data.nextCheckAt,
-          expiresAt: result.data.expiresAt,
-          daysRemaining: result.data.daysRemaining,
-          errorMessage: result.data.errorMessage,
-          features: result.data.features,
-          email: result.data.email,
-          tier: result.data.tier,
-          secureStorage: result.data.secureStorage,
+          status: result.license.status || 'valid',
+          maskedKey: result.license.maskedKey,
+          lastChecked: result.license.lastChecked,
+          nextCheckAt: result.license.nextCheckAt,
+          expiresAt: result.license.expiresAt,
+          daysRemaining: result.license.daysRemaining,
+          errorMessage: result.license.errorMessage,
+          features: result.license.features,
+          email: result.license.email,
+          tier: result.license.tier,
+          secureStorage: result.license.secureStorage,
         };
         setLicense(licenseInfo);
         setError(null);
-        if (result.data.secureStorage !== undefined) {
-          setSecureStorageAvailable(result.data.secureStorage);
+        if (result.license.secureStorage !== undefined) {
+          setSecureStorageAvailable(result.license.secureStorage);
         }
       } else {
         setError(result.error || 'Refresh failed');

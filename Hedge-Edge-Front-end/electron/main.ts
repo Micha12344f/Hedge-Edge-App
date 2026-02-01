@@ -30,6 +30,8 @@ import {
 
 import { detectTerminals, detectTerminalsDeep, launchTerminal } from './terminal-detector.js';
 import { licenseStore } from './license-store.js';
+import { licenseManager } from './license-manager.js';
+import { webRequestProxy } from './webrequest-proxy.js';
 import { 
   checkWebRequestWhitelist, 
   addToWebRequestWhitelist,
@@ -798,6 +800,26 @@ function setupIpcHandlers() {
     return { success: true, data: bundledAgentExists(platform) };
   });
 
+  // Get connected accounts from EAs/cBots
+  // TODO: This needs to be implemented with actual ZMQ bridge or agent communication
+  // For now, returns mock data for development
+  ipcMain.handle('agent:getConnectedAccounts', async () => {
+    try {
+      // In a real implementation, this would query the ZMQ bridge or agents
+      // for accounts that have sent heartbeats/connection messages
+      // For now, return empty array - accounts will be detected when EA connects
+      return { 
+        success: true, 
+        data: [] 
+      };
+    } catch (error) {
+      return { 
+        success: false, 
+        error: error instanceof Error ? error.message : 'Unknown error getting connected accounts' 
+      };
+    }
+  });
+
   // -------------------------------------------------------------------------
   // Trading Bridge Handlers (with validation)
   // -------------------------------------------------------------------------
@@ -1315,53 +1337,204 @@ function setupIpcHandlers() {
   });
 
   // -------------------------------------------------------------------------
-  // License Management Handlers (using OS keychain via license-store)
+  // License Management Handlers (Enhanced with LicenseManager)
   // -------------------------------------------------------------------------
 
-  // Get current license status
-  ipcMain.handle('license:getStatus', () => {
-    const status = licenseStore.getStatus();
-    return {
-      success: true,
-      data: status,
-    };
+  // Get current license status (enhanced with device info)
+  ipcMain.handle('license:getStatus', async () => {
+    try {
+      const status = licenseManager.getLicenseStatus();
+      const devices = await licenseManager.getRegisteredDevices();
+      const connectedAgents = licenseManager.getConnectedAgents();
+      
+      return {
+        success: true,
+        data: {
+          ...status,
+          deviceId: licenseManager.getDeviceId(),
+          devices,
+          connectedAgents: connectedAgents.length,
+          secureStorage: licenseStore.isEncryptionAvailable(),
+        },
+      };
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to get license status',
+      };
+    }
   });
 
-  // Validate and activate license key
+  // Validate license key (uses LicenseManager for caching and token management)
+  ipcMain.handle('license:validate', async (_event, licenseKey: unknown, deviceId?: unknown, platform?: unknown) => {
+    if (typeof licenseKey !== 'string' || !licenseKey.trim()) {
+      return { success: false, error: 'License key is required' };
+    }
+
+    try {
+      const result = await licenseManager.validateLicense(
+        licenseKey.trim(),
+        typeof deviceId === 'string' ? deviceId : undefined,
+        typeof platform === 'string' ? platform : 'desktop'
+      );
+      
+      return {
+        success: result.valid,
+        data: result,
+        error: result.valid ? undefined : result.message,
+      };
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Validation failed',
+      };
+    }
+  });
+
+  // Validate and activate license key (legacy support + enhanced)
   ipcMain.handle('license:activate', async (_event, licenseKey: unknown) => {
     if (typeof licenseKey !== 'string' || !licenseKey.trim()) {
       return { success: false, error: 'License key is required' };
     }
 
-    const result = await licenseStore.activate(licenseKey.trim());
-    
-    if (result.success) {
-      return { success: true, license: result.info };
-    } else {
-      return { success: false, error: result.error };
+    try {
+      const result = await licenseManager.validateLicense(licenseKey.trim());
+      
+      if (result.valid) {
+        return { success: true, license: licenseManager.getLicenseStatus() };
+      } else {
+        return { success: false, error: result.message };
+      }
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Activation failed',
+      };
     }
   });
 
   // Refresh license status
   ipcMain.handle('license:refresh', async () => {
-    const result = await licenseStore.refresh();
-    
-    if (result.success) {
-      return { success: true, license: result.info };
-    } else {
-      return { success: false, error: result.error };
+    try {
+      const result = await licenseManager.refreshLicense();
+      
+      if (result.success) {
+        return { success: true, license: result.info };
+      } else {
+        return { success: false, error: result.error };
+      }
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Refresh failed',
+      };
     }
   });
 
   // Remove license
   ipcMain.handle('license:remove', async () => {
-    await licenseStore.remove();
-    return { success: true };
+    try {
+      await licenseStore.remove();
+      return { success: true };
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to remove license',
+      };
+    }
   });
 
   // Check if secure storage is available
   ipcMain.handle('license:isSecureStorageAvailable', () => {
     return { success: true, data: licenseStore.isEncryptionAvailable() };
+  });
+
+  // Get registered devices for the license
+  ipcMain.handle('license:devices', async () => {
+    try {
+      const devices = await licenseManager.getRegisteredDevices();
+      return { success: true, data: devices };
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to get devices',
+      };
+    }
+  });
+
+  // Deactivate a device from the license
+  ipcMain.handle('license:deactivate', async (_event, deviceId: unknown) => {
+    if (typeof deviceId !== 'string' || !deviceId.trim()) {
+      return { success: false, error: 'Device ID is required' };
+    }
+
+    try {
+      const licenseKey = licenseStore.getLicenseKey();
+      if (!licenseKey) {
+        return { success: false, error: 'No license configured' };
+      }
+
+      const success = await licenseManager.deactivateDevice(licenseKey, deviceId.trim());
+      return { success };
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Deactivation failed',
+      };
+    }
+  });
+
+  // Get current device ID
+  ipcMain.handle('license:getDeviceId', () => {
+    return { success: true, data: licenseManager.getDeviceId() };
+  });
+
+  // Get connected agents
+  ipcMain.handle('license:getConnectedAgents', () => {
+    try {
+      const agents = licenseManager.getConnectedAgents();
+      return { success: true, data: agents };
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to get agents',
+      };
+    }
+  });
+
+  // -------------------------------------------------------------------------
+  // WebRequest Proxy Management
+  // -------------------------------------------------------------------------
+
+  // Start WebRequest proxy server
+  ipcMain.handle('proxy:start', async () => {
+    try {
+      const success = await webRequestProxy.start();
+      return { success, data: webRequestProxy.getStatus() };
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to start proxy',
+      };
+    }
+  });
+
+  // Stop WebRequest proxy server
+  ipcMain.handle('proxy:stop', async () => {
+    try {
+      await webRequestProxy.stop();
+      return { success: true };
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to stop proxy',
+      };
+    }
+  });
+
+  // Get proxy status
+  ipcMain.handle('proxy:status', () => {
+    return { success: true, data: webRequestProxy.getStatus() };
   });
 
   // -------------------------------------------------------------------------
@@ -1945,6 +2118,40 @@ app.whenReady().then(async () => {
     console.error('[Main] Failed to initialize license store:', error);
   }
   
+  // Initialize license manager (enhanced license management)
+  try {
+    await licenseManager.initialize();
+    console.log('[Main] License manager initialized');
+    
+    // Subscribe to license state changes for logging
+    licenseManager.onLicenseChange((event) => {
+      console.log(`[Main] License state changed: ${event.type}`, {
+        status: event.license.status,
+        tier: event.license.tier,
+      });
+    });
+    
+    // Subscribe to expiry warnings
+    licenseManager.onExpiryWarning((hoursRemaining) => {
+      console.warn(`[Main] License expires in ${hoursRemaining} hours!`);
+      // Could show a notification here
+    });
+  } catch (error) {
+    console.error('[Main] Failed to initialize license manager:', error);
+  }
+  
+  // Start WebRequest proxy (optional local license validation)
+  try {
+    const proxyStarted = await webRequestProxy.start();
+    if (proxyStarted) {
+      console.log('[Main] WebRequest proxy started on port 8089');
+    } else {
+      console.warn('[Main] WebRequest proxy failed to start (non-critical)');
+    }
+  } catch (error) {
+    console.warn('[Main] WebRequest proxy error (non-critical):', error);
+  }
+  
   // Initialize agent supervisor (starts bundled agents if available)
   try {
     await initializeSupervisor();
@@ -1984,6 +2191,14 @@ app.on('before-quit', async (event) => {
   event.preventDefault();
   
   try {
+    // Shutdown WebRequest proxy
+    await webRequestProxy.stop();
+    console.log('[Main] WebRequest proxy shutdown complete');
+    
+    // Shutdown license manager
+    await licenseManager.shutdown();
+    console.log('[Main] License manager shutdown complete');
+    
     // Shutdown ZMQ bridges first
     await agentChannelReader.shutdown();
     console.log('[Main] ZMQ bridges shutdown complete');

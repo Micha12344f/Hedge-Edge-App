@@ -3,7 +3,6 @@
  * 
  * Displays detected MT4/MT5/cTrader terminal installations
  * with selection UI and launch functionality.
- * Supports both quick scan and deep scan modes.
  */
 
 import { useState, useEffect, useCallback } from 'react';
@@ -16,9 +15,7 @@ import {
   Play, 
   CheckCircle2, 
   AlertCircle,
-  Folder,
-  Search,
-  HardDrive
+  Folder
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { isElectron } from '@/lib/desktop';
@@ -76,34 +73,25 @@ export function TerminalSelector({
 }: TerminalSelectorProps) {
   const [terminals, setTerminals] = useState<DetectedTerminal[]>([]);
   const [loading, setLoading] = useState(true);
-  const [deepScanning, setDeepScanning] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [launching, setLaunching] = useState<string | null>(null);
-  const [lastScanWasDeep, setLastScanWasDeep] = useState(false);
 
   // Filter type based on platformFilter prop
   const filterType = platformFilter?.toLowerCase() as TerminalType | undefined;
 
-  // Detect terminals (quick scan)
-  const detectTerminals = useCallback(async (deep = false) => {
+  // Detect terminals
+  const detectTerminals = useCallback(async () => {
     if (!isElectron()) {
       setError('Terminal detection is only available in desktop mode');
       setLoading(false);
       return;
     }
 
-    if (deep) {
-      setDeepScanning(true);
-    } else {
-      setLoading(true);
-    }
+    setLoading(true);
     setError(null);
 
     try {
-      // Use deep scan or regular scan
-      const result: DetectionResult = deep
-        ? await window.electronAPI!.terminals.detectDeep()
-        : await window.electronAPI!.terminals.detect();
+      const result: DetectionResult = await window.electronAPI!.terminals.detect();
       
       if (result.success) {
         let detected = result.terminals;
@@ -114,15 +102,10 @@ export function TerminalSelector({
         }
         
         setTerminals(detected);
-        setLastScanWasDeep(deep || result.deepScan || false);
         
         if (detected.length === 0) {
           const platformName = platformFilter || 'trading terminal';
           setError(`No ${platformName} installations found on this computer`);
-        } else if (deep) {
-          toast.success('Deep scan complete', {
-            description: `Found ${detected.length} terminal${detected.length !== 1 ? 's' : ''}`,
-          });
         }
       } else {
         setError(result.error || 'Failed to detect terminals');
@@ -131,18 +114,12 @@ export function TerminalSelector({
       setError(err instanceof Error ? err.message : 'Detection failed');
     } finally {
       setLoading(false);
-      setDeepScanning(false);
     }
   }, [filterType, platformFilter]);
 
-  // Deep scan handler
-  const handleDeepScan = useCallback(() => {
-    detectTerminals(true);
-  }, [detectTerminals]);
-
   // Initial detection on mount
   useEffect(() => {
-    detectTerminals(false);
+    detectTerminals();
   }, [detectTerminals]);
 
   // Launch terminal
@@ -160,7 +137,7 @@ export function TerminalSelector({
         });
         
         // Re-detect after a short delay to update running status
-        setTimeout(() => detectTerminals(false), 2000);
+        setTimeout(() => detectTerminals(), 2000);
       } else {
         toast.error('Failed to launch terminal', {
           description: result.error,
@@ -204,17 +181,6 @@ export function TerminalSelector({
     );
   }
 
-  // Deep scanning state
-  if (deepScanning) {
-    return (
-      <div className={cn("flex flex-col items-center justify-center py-8 text-muted-foreground", className)}>
-        <HardDrive className="h-8 w-8 animate-pulse mb-3 text-blue-400" />
-        <p className="text-sm">Deep scanning all drives...</p>
-        <p className="text-xs text-muted-foreground mt-1">This may take a minute</p>
-      </div>
-    );
-  }
-
   // Error state with no terminals
   if (error && terminals.length === 0) {
     return (
@@ -226,28 +192,15 @@ export function TerminalSelector({
             <p className="text-xs text-muted-foreground mb-3">
               Make sure {platformFilter || 'MT4/MT5/cTrader'} is installed on this computer.
             </p>
-            <div className="flex items-center gap-2">
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => detectTerminals(false)}
-                className="gap-2"
-              >
-                <RefreshCw className="h-3 w-3" />
-                Quick Scan
-              </Button>
-              {!lastScanWasDeep && (
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={handleDeepScan}
-                  className="gap-2"
-                >
-                  <Search className="h-3 w-3" />
-                  Deep Scan
-                </Button>
-              )}
-            </div>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => detectTerminals()}
+              className="gap-2"
+            >
+              <RefreshCw className="h-3 w-3" />
+              Retry
+            </Button>
           </div>
         </div>
       </div>
@@ -263,40 +216,24 @@ export function TerminalSelector({
       <div className="flex items-center justify-between">
         <p className="text-xs text-muted-foreground">
           {terminals.length} terminal{terminals.length !== 1 ? 's' : ''} found
-          {lastScanWasDeep && <span className="ml-1 text-blue-400">(deep scan)</span>}
         </p>
-        <div className="flex items-center gap-1">
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => detectTerminals(false)}
-            disabled={loading || deepScanning}
-            className="h-7 px-2 text-xs gap-1"
-          >
-            <RefreshCw className={cn("h-3 w-3", loading && "animate-spin")} />
-            Refresh
-          </Button>
-          {!lastScanWasDeep && (
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={handleDeepScan}
-              disabled={loading || deepScanning}
-              className="h-7 px-2 text-xs gap-1 text-blue-400 hover:text-blue-300"
-              title="Search all drives for terminals"
-            >
-              <Search className="h-3 w-3" />
-              Deep Scan
-            </Button>
-          )}
-        </div>
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={() => detectTerminals()}
+          disabled={loading}
+          className="h-7 px-2 text-xs gap-1"
+        >
+          <RefreshCw className={cn("h-3 w-3", loading && "animate-spin")} />
+          Refresh
+        </Button>
       </div>
 
       {/* Notice when no terminals are running */}
       {terminals.length > 0 && !hasRunningTerminal && (
         <div className="flex items-center gap-2 p-2 rounded-lg bg-blue-500/10 border border-blue-500/20 text-blue-400">
           <Play className="h-4 w-4 shrink-0" />
-          <span className="text-xs">Launch a terminal below, then validate your credentials</span>
+          <span className="text-xs">Launch a terminal to let the Expert Advisor connect</span>
         </div>
       )}
 
@@ -361,12 +298,16 @@ export function TerminalSelector({
                 {/* Actions */}
                 <div className="shrink-0">
                   {terminal.isRunning ? (
-                    <Badge 
-                      variant="outline" 
-                      className="bg-emerald-500/10 text-emerald-400 border-emerald-500/20 text-xs"
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      disabled
+                      className="h-7 px-3 text-xs bg-muted/50 border-muted-foreground/20 text-muted-foreground cursor-default"
                     >
+                      <CheckCircle2 className="h-3 w-3 mr-1.5 text-emerald-400" />
                       Running
-                    </Badge>
+                    </Button>
                   ) : (
                     <Button
                       type="button"
@@ -377,13 +318,16 @@ export function TerminalSelector({
                         handleLaunch(terminal);
                       }}
                       disabled={isLaunching}
-                      className="h-7 px-2 text-xs gap-1"
+                      className="h-7 px-3 text-xs border-primary/30 text-primary hover:bg-primary/10"
                     >
                       {isLaunching ? (
-                        <Loader2 className="h-3 w-3 animate-spin" />
+                        <>
+                          <Loader2 className="h-3 w-3 mr-1.5 animate-spin" />
+                          Opening...
+                        </>
                       ) : (
                         <>
-                          <Play className="h-3 w-3" />
+                          <Play className="h-3 w-3 mr-1.5" />
                           Launch
                         </>
                       )}

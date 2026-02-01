@@ -101,11 +101,8 @@ namespace HedgeEdge
             }
 
             // Initialize HTTP client with timeout
-            var handler = new HttpClientHandler
-            {
-                ServerCertificateCustomValidationCallback = (message, cert, chain, errors) => true // For testing; remove in production
-            };
-            _httpClient = new HttpClient(handler)
+            // Note: No custom SSL handler - uses default certificate validation for security
+            _httpClient = new HttpClient()
             {
                 Timeout = TimeSpan.FromSeconds(30)
             };

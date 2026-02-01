@@ -14,12 +14,17 @@
     "declaration": false,
     "declarationMap": false,
     "sourceMap": true,
-    "types": ["node"]
+    "types": ["node"],
+    "typeRoots": ["./types", "../node_modules/@types"]
   },
   "include": [
     "main.ts",
     "agent-config.ts",
-    "agent-supervisor.ts"
+    "agent-supervisor.ts",
+    "zmq-bridge.ts",
+    "agent-channel-reader.ts",
+    "named-pipe-client.ts",
+    "types/**/*.d.ts"
   ],
-  "exclude": ["node_modules", "preload.ts"]
+  "exclude": ["node_modules", "preload.ts", "__tests__"]
 }

@@ -145,6 +145,16 @@ interface AgentAPI {
   restart: (platform: TradingPlatform) => Promise<{ success: boolean; error?: string }>;
   getLogPath: (platform: TradingPlatform) => Promise<{ success: boolean; data?: string; error?: string }>;
   hasBundled: (platform: TradingPlatform) => Promise<{ success: boolean; data?: boolean; error?: string }>;
+  getConnectedAccounts: () => Promise<{ success: boolean; data?: Array<{
+    login: string;
+    server: string;
+    name?: string;
+    broker?: string;
+    balance?: number;
+    equity?: number;
+    currency?: string;
+    leverage?: number;
+  }>; error?: string }>;
   onStatusChange: (
     callback: (status: { mt5: AgentHealthStatus; ctrader: AgentHealthStatus }) => void,
     intervalMs?: number
@@ -260,6 +270,7 @@ interface LicenseStatusData {
   maskedKey?: string;
   expiresAt?: string;
   tier?: string;
+  plan?: string;
   lastChecked?: string;
   nextCheckAt?: string;
   daysRemaining?: number;
@@ -267,13 +278,71 @@ interface LicenseStatusData {
   email?: string;
   errorMessage?: string;
   secureStorage?: boolean;
+  deviceId?: string;
+  devices?: LicenseDeviceInfo[];
+  connectedAgents?: number;
+}
+
+interface LicenseDeviceInfo {
+  deviceId: string;
+  platform: 'desktop' | 'mt5' | 'mt4' | 'ctrader';
+  name?: string;
+  registeredAt: string;
+  lastSeenAt: string;
+  version?: string;
+  isCurrentDevice: boolean;
+}
+
+interface LicenseConnectedAgent {
+  id: string;
+  platform: 'mt5' | 'mt4' | 'ctrader';
+  accountId: string;
+  connectedAt: string;
+  lastHeartbeat: string;
+}
+
+interface LicenseValidationResult {
+  valid: boolean;
+  token?: string;
+  ttlSeconds?: number;
+  message?: string;
+  plan?: string;
+  tier?: string;
+  expiresAt?: string;
+  features?: string[];
+  email?: string;
+  maxDevices?: number;
+  currentDevices?: number;
 }
 
 interface LicenseAPI {
-  activate: (licenseKey: string) => Promise<{ success: boolean; data?: LicenseStatusData; error?: string }>;
-  refresh: () => Promise<{ success: boolean; data?: LicenseStatusData; error?: string }>;
   getStatus: () => Promise<{ success: boolean; data?: LicenseStatusData; error?: string }>;
+  validate: (licenseKey: string, deviceId?: string, platform?: string) => Promise<{ success: boolean; data?: LicenseValidationResult; error?: string }>;
+  activate: (licenseKey: string) => Promise<{ success: boolean; license?: LicenseStatusData; error?: string }>;
+  refresh: () => Promise<{ success: boolean; license?: LicenseStatusData; error?: string }>;
   remove: () => Promise<{ success: boolean; error?: string }>;
+  isSecureStorageAvailable: () => Promise<{ success: boolean; data?: boolean }>;
+  getDevices: () => Promise<{ success: boolean; data?: LicenseDeviceInfo[]; error?: string }>;
+  deactivateDevice: (deviceId: string) => Promise<{ success: boolean; error?: string }>;
+  getDeviceId: () => Promise<{ success: boolean; data?: string }>;
+  getConnectedAgents: () => Promise<{ success: boolean; data?: LicenseConnectedAgent[] }>;
+  onStatusChange: (callback: (status: LicenseStatusData) => void, intervalMs?: number) => () => void;
+}
+
+// WebRequest Proxy API
+interface ProxyStatus {
+  running: boolean;
+  port: number;
+  requestsServed: number;
+  cacheHits: number;
+  cacheMisses: number;
+  uptime?: number;
+}
+
+interface ProxyAPI {
+  start: () => Promise<{ success: boolean; data?: ProxyStatus; error?: string }>;
+  stop: () => Promise<{ success: boolean; error?: string }>;
+  getStatus: () => Promise<{ success: boolean; data?: ProxyStatus }>;
 }
 
 // Installer API for EA/DLL installation
@@ -378,6 +447,7 @@ interface ElectronAPI {
   secureStorage: SecureStorageAPI;
   connections: ConnectionsAPI;
   license: LicenseAPI;
+  proxy: ProxyAPI;
   installer: InstallerAPI;
   mt5Whitelist: MT5WhitelistAPI;
   agentChannel: AgentChannelAPI;
