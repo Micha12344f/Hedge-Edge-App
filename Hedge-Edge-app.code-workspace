@@ -1,20 +1,32 @@
 {
 	"folders": [
 		{
-			"name": "Hedge Edge",
+			"name": "🏠 Hedge Edge (Root)",
 			"path": "."
 		},
 		{
-			"name": "📱 App (Electron + React)",
+			"name": "📱 Desktop App (Electron + React)",
 			"path": "Hedge-Edge-Front-end"
 		},
 		{
-			"name": "🤖 Agents (EA/cBot)",
+			"name": "🤖 Trading Agents (MT4/MT5/cTrader)",
 			"path": "agents"
 		},
 		{
-			"name": "⚙️ Backend (Python)",
+			"name": "⚙️ Backend API (Python/FastAPI)",
 			"path": "backend"
+		},
+		{
+			"name": "🧪 Testing Suite",
+			"path": "testing"
+		},
+		{
+			"name": "📋 Task Management",
+			"path": "tasks"
+		},
+		{
+			"name": "🔧 Build Scripts",
+			"path": "bin"
 		}
 	],
 	"settings": {
@@ -25,7 +37,113 @@
 			"**/dist-electron": true,
 			"**/.git": true,
 			"**/venv": true,
-			"**/__pycache__": true
-		}
+			"**/__pycache__": true,
+			"**/*.pyc": true
+		},
+		"editor.formatOnSave": true,
+		"typescript.preferences.importModuleSpecifier": "relative",
+		"python.defaultInterpreterPath": "${workspaceFolder}/.venv/Scripts/python.exe"
+	},
+	"extensions": {
+		"recommendations": [
+			"dbaeumer.vscode-eslint",
+			"esbenp.prettier-vscode",
+			"ms-python.python",
+			"ms-python.vscode-pylance",
+			"bradlc.vscode-tailwindcss",
+			"dsznajder.es7-react-js-snippets"
+		]
+	},
+	"launch": {
+		"version": "0.2.0",
+		"configurations": [
+			{
+				"name": "Electron: Main",
+				"type": "node",
+				"request": "launch",
+				"cwd": "${workspaceFolder}/Hedge-Edge-Front-end",
+				"runtimeExecutable": "${workspaceFolder}/Hedge-Edge-Front-end/node_modules/.bin/electron",
+				"args": [".", "--remote-debugging-port=9222"],
+				"env": {
+					"NODE_ENV": "development"
+				}
+			},
+			{
+				"name": "Python: License API Server",
+				"type": "python",
+				"request": "launch",
+				"program": "${workspaceFolder}/backend/license_api_server.py",
+				"cwd": "${workspaceFolder}/backend",
+				"console": "integratedTerminal"
+			},
+			{
+				"name": "Python: QA Integration Tests",
+				"type": "python",
+				"request": "launch",
+				"program": "${workspaceFolder}/testing/integration/qa001_integration_suite.py",
+				"args": ["--verbose", "--mock"],
+				"cwd": "${workspaceFolder}/testing/integration",
+				"console": "integratedTerminal"
+			}
+		],
+		"compounds": [
+			{
+				"name": "Full Stack (API + Electron)",
+				"configurations": ["Python: License API Server", "Electron: Main"]
+			}
+		]
+	},
+	"tasks": {
+		"version": "2.0.0",
+		"tasks": [
+			{
+				"label": "Start License API Server",
+				"type": "shell",
+				"command": "python license_api_server.py",
+				"options": {
+					"cwd": "${workspaceFolder}/backend"
+				},
+				"group": "build",
+				"isBackground": true
+			},
+			{
+				"label": "Start Electron Dev",
+				"type": "shell",
+				"command": "npm run electron:dev",
+				"options": {
+					"cwd": "${workspaceFolder}/Hedge-Edge-Front-end"
+				},
+				"group": "build"
+			},
+			{
+				"label": "Start Vite Dev",
+				"type": "shell",
+				"command": "npm run vite:dev",
+				"options": {
+					"cwd": "${workspaceFolder}/Hedge-Edge-Front-end"
+				},
+				"group": "build",
+				"isBackground": true
+			},
+			{
+				"label": "Run Integration Tests",
+				"type": "shell",
+				"command": "python qa001_integration_suite.py --verbose",
+				"options": {
+					"cwd": "${workspaceFolder}/testing/integration"
+				},
+				"group": "test"
+			},
+			{
+				"label": "TypeScript Check",
+				"type": "shell",
+				"command": "npx tsc --noEmit",
+				"options": {
+					"cwd": "${workspaceFolder}/Hedge-Edge-Front-end"
+				},
+				"group": "build",
+				"problemMatcher": "$tsc"
+			}
+		]
 	}
 }
