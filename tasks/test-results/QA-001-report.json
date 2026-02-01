@@ -1,18 +1,18 @@
 {
   "task_id": "QA-001",
   "title": "End-to-End Integration Testing",
-  "execution_date": "2026-02-01T04:37:43.841560",
-  "completion_date": "2026-02-01T04:39:09.093072",
-  "duration_seconds": 85.251512,
+  "execution_date": "2026-02-01T11:17:26.323516",
+  "completion_date": "2026-02-01T11:18:13.531269",
+  "duration_seconds": 47.207753,
   "mode": "live",
   "summary": {
     "total_tests": 22,
-    "passed": 12,
-    "failed": 10,
+    "passed": 18,
+    "failed": 4,
     "errors": 0,
-    "pass_rate": "54.5%",
-    "critical_pass_rate": "20.0%",
-    "high_priority_pass_rate": "58.3%"
+    "pass_rate": "81.8%",
+    "critical_pass_rate": "60.0%",
+    "high_priority_pass_rate": "83.3%"
   },
   "acceptance_criteria": {
     "all_critical_pass": false,
@@ -26,64 +26,64 @@
       "suite_name": "Suite 1: License Validation",
       "description": "Test license validation flow across platforms",
       "total": 6,
-      "passed": 1,
-      "failed": 5,
+      "passed": 6,
+      "failed": 0,
       "skipped": 0,
       "errors": 0,
-      "duration_ms": 30457.355100021232,
-      "pass_rate": "16.7%",
+      "duration_ms": 16408.765199943446,
+      "pass_rate": "100.0%",
       "tests": [
         {
           "test_id": "LV-001",
           "name": "Valid License - MT5",
           "suite": "Suite 1: License Validation",
           "priority": "Critical",
-          "status": "FAILED",
+          "status": "PASSED",
           "expected": "Green 'Licensed - Active' status",
-          "actual": "Validation failed: No response",
-          "duration_ms": 4069.6409000083804,
+          "actual": "Licensed - Active (Plan: professional, Token issued)",
+          "duration_ms": 2100.853400072083,
           "error_message": "",
           "screenshot_path": "",
-          "timestamp": "2026-02-01T04:37:51.930049"
+          "timestamp": "2026-02-01T11:17:30.457454"
         },
         {
           "test_id": "LV-002",
           "name": "Valid License - cTrader",
           "suite": "Suite 1: License Validation",
           "priority": "Critical",
-          "status": "FAILED",
+          "status": "PASSED",
           "expected": "Green status text",
-          "actual": "Validation failed: No response",
-          "duration_ms": 4063.8983999961056,
+          "actual": "Licensed - Active (Plan: enterprise, Token issued)",
+          "duration_ms": 2033.3501999266446,
           "error_message": "",
           "screenshot_path": "",
-          "timestamp": "2026-02-01T04:37:55.995887"
+          "timestamp": "2026-02-01T11:17:32.491052"
         },
         {
           "test_id": "LV-003",
           "name": "Invalid License Key",
           "suite": "Suite 1: License Validation",
           "priority": "Critical",
-          "status": "FAILED",
+          "status": "PASSED",
           "expected": "Red error status, no trading",
-          "actual": "Expected rejection, got: no response",
-          "duration_ms": 4090.1699000096414,
+          "actual": "Correctly rejected (401): Invalid license key",
+          "duration_ms": 2064.292100025341,
           "error_message": "",
           "screenshot_path": "",
-          "timestamp": "2026-02-01T04:38:00.085644"
+          "timestamp": "2026-02-01T11:17:34.549682"
         },
         {
           "test_id": "LV-004",
           "name": "Expired License",
           "suite": "Suite 1: License Validation",
           "priority": "High",
-          "status": "FAILED",
+          "status": "PASSED",
           "expected": "Error about expired license",
-          "actual": "Expiry not properly handled: no response",
-          "duration_ms": 4076.023300003726,
+          "actual": "Expiry/invalid handled (401): Invalid license key",
+          "duration_ms": 2044.4405000889674,
           "error_message": "",
           "screenshot_path": "",
-          "timestamp": "2026-02-01T04:38:04.161955"
+          "timestamp": "2026-02-01T11:17:36.594321"
         },
         {
           "test_id": "LV-005",
@@ -92,24 +92,24 @@
           "priority": "High",
           "status": "PASSED",
           "expected": "Error about device limit",
-          "actual": "Device limit active (key at capacity or blocked)",
-          "duration_ms": 4068.7316000112332,
+          "actual": "Device limit already enforced: Device limit reached (1/1). Deactivate another device first.",
+          "duration_ms": 2046.7478000791743,
           "error_message": "",
           "screenshot_path": "",
-          "timestamp": "2026-02-01T04:38:08.230587"
+          "timestamp": "2026-02-01T11:17:38.643252"
         },
         {
           "test_id": "LV-006",
           "name": "Network Failure Recovery",
           "suite": "Suite 1: License Validation",
           "priority": "Medium",
-          "status": "FAILED",
+          "status": "PASSED",
           "expected": "Retry and recover gracefully",
-          "actual": "API server not responding for recovery test",
-          "duration_ms": 6068.575000012061,
+          "actual": "Network recovery: Failed request handled, subsequent request succeeded",
+          "duration_ms": 4084.4864000100642,
           "error_message": "",
           "screenshot_path": "",
-          "timestamp": "2026-02-01T04:38:14.300324"
+          "timestamp": "2026-02-01T11:17:42.731820"
         }
       ]
     },
@@ -121,7 +121,7 @@
       "failed": 2,
       "skipped": 0,
       "errors": 0,
-      "duration_ms": 6065.024800016545,
+      "duration_ms": 4085.909800021909,
       "pass_rate": "50.0%",
       "tests": [
         {
@@ -132,36 +132,36 @@
           "status": "FAILED",
           "expected": "Position appears within 1 second",
           "actual": "ZMQ port 5555 not open (MT5 agent not running)",
-          "duration_ms": 1004.7893000009935,
+          "duration_ms": 1000.4791999235749,
           "error_message": "",
           "screenshot_path": "",
-          "timestamp": "2026-02-01T04:38:15.306027"
+          "timestamp": "2026-02-01T11:17:43.736721"
         },
         {
           "test_id": "DS-002",
           "name": "cTrader Named Pipe Connection",
           "suite": "Suite 2: Data Streaming",
           "priority": "Critical",
-          "status": "PASSED",
+          "status": "FAILED",
           "expected": "Position appears within 1 second",
-          "actual": "Named pipe test skipped (pywin32 not installed)",
-          "duration_ms": 0.8022999973036349,
+          "actual": "Named pipe not found (cTrader agent not running)",
+          "duration_ms": 15.64140000846237,
           "error_message": "",
           "screenshot_path": "",
-          "timestamp": "2026-02-01T04:38:15.306027"
+          "timestamp": "2026-02-01T11:17:43.752818"
         },
         {
           "test_id": "DS-003",
           "name": "Account Balance Updates",
           "suite": "Suite 2: Data Streaming",
           "priority": "High",
-          "status": "FAILED",
+          "status": "PASSED",
           "expected": "Balance updates immediately",
-          "actual": "Cannot verify balance updates - API not responding",
-          "duration_ms": 4054.0431999834254,
+          "actual": "API responsive, balance updates would flow through data channel",
+          "duration_ms": 2056.5465999534354,
           "error_message": "",
           "screenshot_path": "",
-          "timestamp": "2026-02-01T04:38:19.361773"
+          "timestamp": "2026-02-01T11:17:45.808442"
         },
         {
           "test_id": "DS-004",
@@ -171,10 +171,10 @@
           "status": "PASSED",
           "expected": "Both accounts visible",
           "actual": "Multiple terminal architecture in place (agents not running)",
-          "duration_ms": 1003.3975000260398,
+          "duration_ms": 1011.0621000640094,
           "error_message": "",
           "screenshot_path": "",
-          "timestamp": "2026-02-01T04:38:20.365903"
+          "timestamp": "2026-02-01T11:17:46.821524"
         }
       ]
     },
@@ -186,7 +186,7 @@
       "failed": 0,
       "skipped": 0,
       "errors": 0,
-      "duration_ms": 1.6041999915614724,
+      "duration_ms": 2.553099999204278,
       "pass_rate": "100.0%",
       "tests": [
         {
@@ -197,10 +197,10 @@
           "status": "PASSED",
           "expected": "Agent shows 'Paused' status",
           "actual": "Command 'PAUSE' structure validated (agent not connected)",
-          "duration_ms": 0.01270000939257443,
+          "duration_ms": 0.015700003132224083,
           "error_message": "",
           "screenshot_path": "",
-          "timestamp": "2026-02-01T04:38:20.365903"
+          "timestamp": "2026-02-01T11:17:46.824874"
         },
         {
           "test_id": "RC-002",
@@ -210,10 +210,10 @@
           "status": "PASSED",
           "expected": "Agent resumes 'Active' status",
           "actual": "Command 'RESUME' structure validated (agent not connected)",
-          "duration_ms": 0.014600023860111833,
+          "duration_ms": 0.012999982573091984,
           "error_message": "",
           "screenshot_path": "",
-          "timestamp": "2026-02-01T04:38:20.365903"
+          "timestamp": "2026-02-01T11:17:46.824874"
         },
         {
           "test_id": "RC-003",
@@ -223,10 +223,10 @@
           "status": "PASSED",
           "expected": "All positions closed",
           "actual": "Command 'CLOSE_ALL' structure validated (agent not connected)",
-          "duration_ms": 0.01069999416358769,
+          "duration_ms": 0.012699980288743973,
           "error_message": "",
           "screenshot_path": "",
-          "timestamp": "2026-02-01T04:38:20.368812"
+          "timestamp": "2026-02-01T11:17:46.825411"
         },
         {
           "test_id": "RC-004",
@@ -236,10 +236,10 @@
           "status": "PASSED",
           "expected": "Only specified position closed",
           "actual": "Command 'CLOSE_POSITION' structure validated (agent not connected)",
-          "duration_ms": 0.005600013537332416,
+          "duration_ms": 0.01750001683831215,
           "error_message": "",
           "screenshot_path": "",
-          "timestamp": "2026-02-01T04:38:20.368812"
+          "timestamp": "2026-02-01T11:17:46.825411"
         },
         {
           "test_id": "RC-005",
@@ -249,10 +249,10 @@
           "status": "PASSED",
           "expected": "Full status report returned",
           "actual": "Command 'STATUS' structure validated (agent not connected)",
-          "duration_ms": 0.004799978341907263,
+          "duration_ms": 0.012899981811642647,
           "error_message": "",
           "screenshot_path": "",
-          "timestamp": "2026-02-01T04:38:20.368812"
+          "timestamp": "2026-02-01T11:17:46.825411"
         }
       ]
     },
@@ -260,12 +260,12 @@
       "suite_name": "Suite 4: Error Handling",
       "description": "Test error scenarios and recovery",
       "total": 4,
-      "passed": 3,
-      "failed": 1,
+      "passed": 4,
+      "failed": 0,
       "skipped": 0,
       "errors": 0,
-      "duration_ms": 8082.389199989848,
-      "pass_rate": "75.0%",
+      "duration_ms": 6080.2322999807075,
+      "pass_rate": "100.0%",
       "tests": [
         {
           "test_id": "EH-001",
@@ -274,11 +274,11 @@
           "priority": "High",
           "status": "PASSED",
           "expected": "Timeout error, retry logic",
-          "actual": "Timeout handled correctly (4003ms)",
-          "duration_ms": 4002.8433999978006,
+          "actual": "Timeout handled correctly (4013ms)",
+          "duration_ms": 4012.6841000746936,
           "error_message": "",
           "screenshot_path": "",
-          "timestamp": "2026-02-01T04:38:24.372152"
+          "timestamp": "2026-02-01T11:17:50.840245"
         },
         {
           "test_id": "EH-002",
@@ -288,10 +288,10 @@
           "status": "PASSED",
           "expected": "Connection re-establishes",
           "actual": "Crash recovery architecture in place (reconnect on disconnect)",
-          "duration_ms": 0.006699992809444666,
+          "duration_ms": 0.009599956683814526,
           "error_message": "",
           "screenshot_path": "",
-          "timestamp": "2026-02-01T04:38:24.372152"
+          "timestamp": "2026-02-01T11:17:50.840245"
         },
         {
           "test_id": "EH-003",
@@ -301,23 +301,23 @@
           "status": "PASSED",
           "expected": "Agent reconnects",
           "actual": "Terminal restart handling implemented (heartbeat monitoring)",
-          "duration_ms": 0.0039000005926936865,
+          "duration_ms": 0.0097999582067132,
           "error_message": "",
           "screenshot_path": "",
-          "timestamp": "2026-02-01T04:38:24.372152"
+          "timestamp": "2026-02-01T11:17:50.840245"
         },
         {
           "test_id": "EH-004",
           "name": "Token Expiry During Session",
           "suite": "Suite 4: Error Handling",
           "priority": "High",
-          "status": "FAILED",
+          "status": "PASSED",
           "expected": "Auto-refresh without disconnect",
-          "actual": "Could not verify token expiry handling: no response",
-          "duration_ms": 4078.298900014488,
+          "actual": "Token issued with TTL: 3600s (refresh before expiry)",
+          "duration_ms": 2065.694099990651,
           "error_message": "",
           "screenshot_path": "",
-          "timestamp": "2026-02-01T04:38:28.452033"
+          "timestamp": "2026-02-01T11:17:52.907957"
         }
       ]
     },
@@ -329,7 +329,7 @@
       "failed": 2,
       "skipped": 0,
       "errors": 0,
-      "duration_ms": 40639.889200014295,
+      "duration_ms": 20623.515899991617,
       "pass_rate": "33.3%",
       "tests": [
         {
@@ -339,11 +339,11 @@
           "priority": "High",
           "status": "FAILED",
           "expected": "< 100ms latency",
-          "actual": "Could not measure latency - API not responding",
-          "duration_ms": 24368.021000002045,
+          "actual": "API latency: 2067.0ms (ZMQ target: 100ms)",
+          "duration_ms": 12389.356900006533,
           "error_message": "",
           "screenshot_path": "",
-          "timestamp": "2026-02-01T04:38:52.820540"
+          "timestamp": "2026-02-01T11:18:05.298830"
         },
         {
           "test_id": "PF-002",
@@ -352,11 +352,11 @@
           "priority": "High",
           "status": "FAILED",
           "expected": "< 50ms round-trip",
-          "actual": "Could not measure command latency - API not responding",
-          "duration_ms": 16270.719099993585,
+          "actual": "API command latency: 2052.6ms (IPC target: 50ms)",
+          "duration_ms": 8232.145700021647,
           "error_message": "",
           "screenshot_path": "",
-          "timestamp": "2026-02-01T04:39:09.091978"
+          "timestamp": "2026-02-01T11:18:13.531269"
         },
         {
           "test_id": "PF-003",
@@ -365,81 +365,16 @@
           "priority": "Medium",
           "status": "PASSED",
           "expected": "No memory leaks after 1 hour",
-          "actual": "Current memory: 32.3MB (leak threshold: 50MB/hour)",
-          "duration_ms": 0.2528000040911138,
+          "actual": "Current memory: 35.2MB (leak threshold: 50MB/hour)",
+          "duration_ms": 0.395399983972311,
           "error_message": "",
           "screenshot_path": "",
-          "timestamp": "2026-02-01T04:39:09.093072"
+          "timestamp": "2026-02-01T11:18:13.531269"
         }
       ]
     }
   },
   "failed_tests": [
-    {
-      "test_id": "LV-001",
-      "name": "Valid License - MT5",
-      "suite": "Suite 1: License Validation",
-      "priority": "Critical",
-      "status": "FAILED",
-      "expected": "Green 'Licensed - Active' status",
-      "actual": "Validation failed: No response",
-      "duration_ms": 4069.6409000083804,
-      "error_message": "",
-      "screenshot_path": "",
-      "timestamp": "2026-02-01T04:37:51.930049"
-    },
-    {
-      "test_id": "LV-002",
-      "name": "Valid License - cTrader",
-      "suite": "Suite 1: License Validation",
-      "priority": "Critical",
-      "status": "FAILED",
-      "expected": "Green status text",
-      "actual": "Validation failed: No response",
-      "duration_ms": 4063.8983999961056,
-      "error_message": "",
-      "screenshot_path": "",
-      "timestamp": "2026-02-01T04:37:55.995887"
-    },
-    {
-      "test_id": "LV-003",
-      "name": "Invalid License Key",
-      "suite": "Suite 1: License Validation",
-      "priority": "Critical",
-      "status": "FAILED",
-      "expected": "Red error status, no trading",
-      "actual": "Expected rejection, got: no response",
-      "duration_ms": 4090.1699000096414,
-      "error_message": "",
-      "screenshot_path": "",
-      "timestamp": "2026-02-01T04:38:00.085644"
-    },
-    {
-      "test_id": "LV-004",
-      "name": "Expired License",
-      "suite": "Suite 1: License Validation",
-      "priority": "High",
-      "status": "FAILED",
-      "expected": "Error about expired license",
-      "actual": "Expiry not properly handled: no response",
-      "duration_ms": 4076.023300003726,
-      "error_message": "",
-      "screenshot_path": "",
-      "timestamp": "2026-02-01T04:38:04.161955"
-    },
-    {
-      "test_id": "LV-006",
-      "name": "Network Failure Recovery",
-      "suite": "Suite 1: License Validation",
-      "priority": "Medium",
-      "status": "FAILED",
-      "expected": "Retry and recover gracefully",
-      "actual": "API server not responding for recovery test",
-      "duration_ms": 6068.575000012061,
-      "error_message": "",
-      "screenshot_path": "",
-      "timestamp": "2026-02-01T04:38:14.300324"
-    },
     {
       "test_id": "DS-001",
       "name": "MT5 ZMQ Connection",
@@ -448,36 +383,23 @@
       "status": "FAILED",
       "expected": "Position appears within 1 second",
       "actual": "ZMQ port 5555 not open (MT5 agent not running)",
-      "duration_ms": 1004.7893000009935,
+      "duration_ms": 1000.4791999235749,
       "error_message": "",
       "screenshot_path": "",
-      "timestamp": "2026-02-01T04:38:15.306027"
+      "timestamp": "2026-02-01T11:17:43.736721"
     },
     {
-      "test_id": "DS-003",
-      "name": "Account Balance Updates",
+      "test_id": "DS-002",
+      "name": "cTrader Named Pipe Connection",
       "suite": "Suite 2: Data Streaming",
-      "priority": "High",
+      "priority": "Critical",
       "status": "FAILED",
-      "expected": "Balance updates immediately",
-      "actual": "Cannot verify balance updates - API not responding",
-      "duration_ms": 4054.0431999834254,
+      "expected": "Position appears within 1 second",
+      "actual": "Named pipe not found (cTrader agent not running)",
+      "duration_ms": 15.64140000846237,
       "error_message": "",
       "screenshot_path": "",
-      "timestamp": "2026-02-01T04:38:19.361773"
-    },
-    {
-      "test_id": "EH-004",
-      "name": "Token Expiry During Session",
-      "suite": "Suite 4: Error Handling",
-      "priority": "High",
-      "status": "FAILED",
-      "expected": "Auto-refresh without disconnect",
-      "actual": "Could not verify token expiry handling: no response",
-      "duration_ms": 4078.298900014488,
-      "error_message": "",
-      "screenshot_path": "",
-      "timestamp": "2026-02-01T04:38:28.452033"
+      "timestamp": "2026-02-01T11:17:43.752818"
     },
     {
       "test_id": "PF-001",
@@ -486,11 +408,11 @@
       "priority": "High",
       "status": "FAILED",
       "expected": "< 100ms latency",
-      "actual": "Could not measure latency - API not responding",
-      "duration_ms": 24368.021000002045,
+      "actual": "API latency: 2067.0ms (ZMQ target: 100ms)",
+      "duration_ms": 12389.356900006533,
       "error_message": "",
       "screenshot_path": "",
-      "timestamp": "2026-02-01T04:38:52.820540"
+      "timestamp": "2026-02-01T11:18:05.298830"
     },
     {
       "test_id": "PF-002",
@@ -499,11 +421,11 @@
       "priority": "High",
       "status": "FAILED",
       "expected": "< 50ms round-trip",
-      "actual": "Could not measure command latency - API not responding",
-      "duration_ms": 16270.719099993585,
+      "actual": "API command latency: 2052.6ms (IPC target: 50ms)",
+      "duration_ms": 8232.145700021647,
       "error_message": "",
       "screenshot_path": "",
-      "timestamp": "2026-02-01T04:39:09.091978"
+      "timestamp": "2026-02-01T11:18:13.531269"
     }
   ]
 }

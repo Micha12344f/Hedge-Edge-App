@@ -135,6 +135,19 @@ export function useTradingFeed(options?: UseTradingFeedOptions): UseTradingFeedR
   const [bridgeAvailable] = useState(() => isBridgeAvailable());
   const [isWaitingForAgent, setIsWaitingForAgent] = useState(false);
   
+  // Track current credentials to detect account changes
+  const credentialsKey = config.credentials?.login || '';
+  
+  // Reset state when account changes (credentials.login changes)
+  useEffect(() => {
+    // Clear previous account's data immediately when switching accounts
+    setSnapshot(null);
+    setIsLoading(true);
+    setError(null);
+    setIsConnected(false);
+    setLastUpdate(null);
+  }, [credentialsKey]);
+  
   // Toast throttling refs
   const errorCountRef = useRef(0);
   const lastErrorRef = useRef<string | null>(null);
@@ -274,7 +287,7 @@ export function useTradingFeed(options?: UseTradingFeedOptions): UseTradingFeedR
       return;
     }
 
-    // Fetch immediately on mount
+    // Fetch immediately on mount or when credentials change
     fetchLatestSnapshot();
 
     // Use longer retry interval when waiting for agent
@@ -283,11 +296,11 @@ export function useTradingFeed(options?: UseTradingFeedOptions): UseTradingFeedR
       isWaitingForAgent ? config.retryInterval : config.pollingInterval
     );
 
-    // Cleanup on unmount
+    // Cleanup on unmount or when credentials change
     return () => {
       clearInterval(interval);
     };
-  }, [bridgeAvailable, config.autoStart, config.pollingInterval, config.retryInterval, isWaitingForAgent, fetchLatestSnapshot]);
+  }, [bridgeAvailable, config.autoStart, config.pollingInterval, config.retryInterval, isWaitingForAgent, fetchLatestSnapshot, credentialsKey]);
 
   return {
     snapshot,

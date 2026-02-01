@@ -35,6 +35,14 @@ TEST_LICENSES = {
         "max_devices": 1,
         "features": ["trade-copying", "hedge-detection"]
     },
+    "73E0A88D-DAF0-4EC5-979B-236C3BF0C925": {
+        "plan": "professional",
+        "email": "user@hedge-edge.com",
+        "created": "2026-01-01",
+        "expires": "2027-12-31",
+        "max_devices": 10,
+        "features": ["trade-copying", "hedge-detection", "multi-account", "analytics", "api-access"]
+    },
     "PROD-ABCD-EFGH-FULL": {
         "plan": "professional",
         "email": "pro@hedge-edge.com",

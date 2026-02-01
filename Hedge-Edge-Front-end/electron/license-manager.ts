@@ -12,6 +12,8 @@
 import { EventEmitter } from 'events';
 import { app } from 'electron';
 import { licenseStore, type LicenseInfo, type LicenseStatus } from './license-store.js';
+import * as os from 'os';
+import * as crypto from 'crypto';
 
 // ============================================================================
 // Types
@@ -162,9 +164,6 @@ export class LicenseManager extends EventEmitter {
    * Generate a unique device ID based on hardware characteristics
    */
   private generateDeviceId(): string {
-    const os = require('os');
-    const crypto = require('crypto');
-
     const factors = [
       os.hostname(),
       os.platform(),

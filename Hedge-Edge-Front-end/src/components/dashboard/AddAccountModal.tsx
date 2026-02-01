@@ -271,10 +271,63 @@ export const AddAccountModal = ({
 
   // Start listening for account connections when entering listening step
   useEffect(() => {
-    if (step === 'listening' && !isListening) {
-      startListening();
+    console.log('[AddAccountModal] useEffect triggered, step:', step, 'isListening:', isListening);
+    
+    if (step === 'listening') {
+      console.log('[AddAccountModal] Setting up polling interval...');
+      
+      // Clear any existing interval first
+      if (listeningIntervalRef.current) {
+        clearInterval(listeningIntervalRef.current);
+      }
+      
+      // Set up new polling interval
+      listeningIntervalRef.current = setInterval(async () => {
+        console.log('[AddAccountModal] Polling tick - checking for accounts...');
+        
+        if (typeof window !== 'undefined' && window.electronAPI?.agent?.getConnectedAccounts) {
+          try {
+            const result = await window.electronAPI.agent.getConnectedAccounts();
+            console.log('[AddAccountModal] Got result:', result);
+            
+            if (result.success && result.data && result.data.length > 0) {
+              console.log('[AddAccountModal] Found accounts:', result.data);
+              setDetectedAccounts(prev => {
+                const existing = new Set(prev.map(a => `${a.login}@${a.server}`));
+                const newAccounts = result.data!.filter(
+                  (a) => !existing.has(`${a.login}@${a.server}`)
+                );
+                if (newAccounts.length > 0) {
+                  toast.success('Account detected!', {
+                    description: `Found ${newAccounts[0].broker || 'trading'} account`,
+                  });
+                }
+                return [...prev, ...newAccounts.map(a => ({
+                  login: a.login,
+                  server: a.server,
+                  name: a.name,
+                  broker: a.broker,
+                  balance: a.balance,
+                  equity: a.equity,
+                  currency: a.currency,
+                  leverage: a.leverage,
+                }))];
+              });
+            }
+          } catch (err) {
+            console.error('[AddAccountModal] Error polling:', err);
+          }
+        } else {
+          console.log('[AddAccountModal] electronAPI not available');
+        }
+      }, 2000);
+      
+      console.log('[AddAccountModal] Interval started:', listeningIntervalRef.current);
+      setIsListening(true);
     }
+    
     return () => {
+      console.log('[AddAccountModal] Cleanup running, clearing interval');
       if (listeningIntervalRef.current) {
         clearInterval(listeningIntervalRef.current);
         listeningIntervalRef.current = null;
@@ -282,46 +335,10 @@ export const AddAccountModal = ({
     };
   }, [step]);
 
-  // Start listening for EA/cBot connections
+  // Start listening for EA/cBot connections - DISABLED, moved to useEffect above
   const startListening = useCallback(() => {
-    setIsListening(true);
-    setDetectedAccounts([]);
-    
-    // Poll for new account connections every 2 seconds
-    // In production, this would connect to your ZMQ bridge or WebSocket
-    listeningIntervalRef.current = setInterval(async () => {
-      if (isElectron() && window.electronAPI?.agent?.getConnectedAccounts) {
-        try {
-          const result = await window.electronAPI.agent.getConnectedAccounts();
-          if (result.success && result.data) {
-            setDetectedAccounts(prev => {
-              // Merge new accounts, avoid duplicates by login+server
-              const existing = new Set(prev.map(a => `${a.login}@${a.server}`));
-              const newAccounts = result.data!.filter(
-                (a) => !existing.has(`${a.login}@${a.server}`)
-              );
-              if (newAccounts.length > 0) {
-                toast.success('Account detected!', {
-                  description: `Found ${newAccounts[0].broker || 'trading'} account`,
-                });
-              }
-              return [...prev, ...newAccounts.map(a => ({
-                login: a.login,
-                server: a.server,
-                name: a.name,
-                broker: a.broker,
-                balance: a.balance,
-                equity: a.equity,
-                currency: a.currency,
-                leverage: a.leverage,
-              }))];
-            });
-          }
-        } catch (err) {
-          console.error('Error polling for accounts:', err);
-        }
-      }
-    }, 2000);
+    console.log('[AddAccountModal] startListening called (legacy)');
+    // Now handled by useEffect
   }, []);
 
   // Detect terminals

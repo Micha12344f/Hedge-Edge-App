@@ -3,6 +3,20 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import net from 'net';
 import crypto from 'crypto';
+import { promises as fsPromises } from 'fs';
+
+// Debug log helper - writes to file for debugging
+const debugLogPath = path.join(process.env.USERPROFILE || '', 'Desktop', 'hedge-edge-debug.log');
+async function debugLog(message: string) {
+  const timestamp = new Date().toISOString();
+  const line = `[${timestamp}] ${message}\n`;
+  try {
+    await fsPromises.appendFile(debugLogPath, line);
+  } catch (e) {
+    console.error('Failed to write debug log:', e);
+  }
+  console.log(message);
+}
 
 // Agent configuration and supervision modules
 import { 
@@ -343,6 +357,23 @@ let mainWindow: BrowserWindow | null = null;
 // ============================================================================
 // IPC Payload Validation
 // ============================================================================
+
+/**
+ * Safely serialize a response for IPC to avoid DataCloneError
+ * This ensures all values are JSON-serializable primitives
+ */
+function safeSerializeForIPC<T>(data: T): T {
+  try {
+    // First try to stringify - this will throw if there are circular refs or non-serializable values
+    const serialized = JSON.stringify(data);
+    return JSON.parse(serialized);
+  } catch (err) {
+    console.error('[Main] safeSerializeForIPC failed:', err);
+    console.error('[Main] Data that failed to serialize:', typeof data, data);
+    // If serialization fails, return a safe error
+    return { success: false, error: 'Failed to serialize response' } as T;
+  }
+}
 
 /**
  * Validate that a value is a valid trading platform
@@ -801,18 +832,60 @@ function setupIpcHandlers() {
   });
 
   // Get connected accounts from EAs/cBots
-  // TODO: This needs to be implemented with actual ZMQ bridge or agent communication
-  // For now, returns mock data for development
   ipcMain.handle('agent:getConnectedAccounts', async () => {
     try {
-      // In a real implementation, this would query the ZMQ bridge or agents
-      // for accounts that have sent heartbeats/connection messages
-      // For now, return empty array - accounts will be detected when EA connects
+      // Scan all detected MT5 terminals for account data files
+      await debugLog('[getConnectedAccounts] Starting terminal detection...');
+      const detectionResult = await detectTerminals();
+      await debugLog(`[getConnectedAccounts] Found ${detectionResult.terminals.length} terminals`);
+      
+      const connectedAccounts: Array<{
+        login: string;
+        server: string;
+        name?: string;
+        broker?: string;
+        balance?: number;
+        equity?: number;
+        currency?: string;
+        leverage?: number;
+      }> = [];
+      
+      for (const terminal of detectionResult.terminals) {
+        await debugLog(`[getConnectedAccounts] Checking terminal: ${terminal.id}, type: ${terminal.type}, dataPath: ${terminal.dataPath}, installPath: ${terminal.installPath}`);
+        if (terminal.type === 'mt5' || terminal.type === 'mt4') {
+          const dataPath = terminal.dataPath || terminal.installPath;
+          await debugLog(`[getConnectedAccounts] Reading from: ${dataPath}`);
+          try {
+            const snapshot = await readMT5Snapshot(dataPath);
+            await debugLog(`[getConnectedAccounts] Snapshot result: success=${snapshot.success}, error=${snapshot.error}`);
+            if (snapshot.success && snapshot.data) {
+              await debugLog(`[getConnectedAccounts] Found account: ${snapshot.data.accountId} @ ${snapshot.data.broker}`);
+              // Found a connected account!
+              connectedAccounts.push({
+                login: snapshot.data.accountId,
+                server: snapshot.data.server || snapshot.data.broker || 'Unknown',
+                name: snapshot.data.accountId,
+                broker: snapshot.data.broker,
+                balance: snapshot.data.balance,
+                equity: snapshot.data.equity,
+                currency: snapshot.data.currency,
+                leverage: snapshot.data.leverage,
+              });
+            }
+          } catch (err) {
+            await debugLog(`[getConnectedAccounts] Error reading terminal: ${err}`);
+            // No data file for this terminal, skip
+          }
+        }
+      }
+      
+      await debugLog(`[getConnectedAccounts] Returning ${connectedAccounts.length} accounts`);
       return { 
         success: true, 
-        data: [] 
+        data: connectedAccounts 
       };
     } catch (error) {
+      await debugLog(`[getConnectedAccounts] Error: ${error}`);
       return { 
         success: false, 
         error: error instanceof Error ? error.message : 'Unknown error getting connected accounts' 
@@ -826,64 +899,103 @@ function setupIpcHandlers() {
 
   // Get terminal status
   ipcMain.handle('trading:getStatus', async (_event, platform: unknown) => {
-    if (!isValidPlatform(platform)) {
-      return { success: false, error: 'Invalid platform' };
-    }
-    
-    try {
-      const config = getAgentConfig();
-      const platformConfig = config[platform];
-      const isLocalAgent = platformConfig.endpoint.host === '127.0.0.1' || platformConfig.endpoint.host === 'localhost';
+    // Wrap in safe serialization to prevent IPC DataCloneError
+    const getStatusInternal = async () => {
+      if (!isValidPlatform(platform)) {
+        return { success: false, error: 'Invalid platform' };
+      }
       
-      // Only do local port check for bundled/local agents
-      // For external agents on remote hosts, skip directly to health check
-      if (isLocalAgent) {
-        const port = getAgentPort(platform);
-        const portAvailable = await isPortAvailable(port);
+      try {
+        // First, check for file-based EA connection (works for MT5 EA without separate agent)
+        if (platform === 'mt5') {
+          const detectionResult = await detectTerminals();
+          if (detectionResult.success && detectionResult.terminals) {
+            const mt5Terminals = detectionResult.terminals.filter((t: { type: string }) => t.type === 'mt5');
+            
+            for (const terminal of mt5Terminals) {
+              if (terminal.dataPath) {
+                const snapshot = await readMT5Snapshot(terminal.dataPath);
+                if (snapshot.success && snapshot.data) {
+                  // EA is writing data - terminal is running and connected
+                  return {
+                    success: true,
+                    data: {
+                      connected: true,
+                      platform,
+                      terminalRunning: true,
+                      lastHeartbeat: snapshot.data.timestamp || new Date().toISOString(),
+                    },
+                  };
+                }
+              }
+            }
+          }
+        }
         
-        if (portAvailable) {
-          // Port is available = agent not running
+        const config = getAgentConfig();
+        const platformConfig = config[platform];
+        const isLocalAgent = platformConfig.endpoint.host === '127.0.0.1' || platformConfig.endpoint.host === 'localhost';
+        
+        // Only do local port check for bundled/local agents
+        // For external agents on remote hosts, skip directly to health check
+        if (isLocalAgent) {
+          const port = getAgentPort(platform);
+          const portAvailable = await isPortAvailable(port);
+          
+          if (portAvailable) {
+            // Port is available = agent not running, but check if we found EA above
+            // If we get here for MT5, it means no EA data was found
+            return {
+              success: true,
+              data: {
+                connected: false,
+                platform,
+                terminalRunning: false,
+                error: platform === 'mt5' ? 'MT5 EA not running or not writing data' : 'Trading agent not running',
+              },
+            };
+          }
+        }
+        
+        // Try to get health from agent (uses configured host via agentRequest)
+        const result = await agentRequest<any>(platform, '/health');
+        
+        if (result.success) {
           return {
             success: true,
             data: {
-              connected: false,
+              connected: result.data?.mt5_connected || result.data?.ctrader_connected || false,
               platform,
-              terminalRunning: false,
-              error: 'Trading agent not running',
+              terminalRunning: true,
+              lastHeartbeat: new Date().toISOString(),
             },
           };
         }
-      }
-      
-      // Try to get health from agent (uses configured host via agentRequest)
-      const result = await agentRequest<any>(platform, '/health');
-      
-      if (result.success) {
+        
         return {
           success: true,
           data: {
-            connected: result.data?.mt5_connected || result.data?.ctrader_connected || false,
+            connected: false,
             platform,
             terminalRunning: true,
-            lastHeartbeat: new Date().toISOString(),
+            error: result.error,
           },
         };
+      } catch (error) {
+        return {
+          success: false,
+          error: error instanceof Error ? error.message : 'Failed to get status',
+        };
       }
-      
-      return {
-        success: true,
-        data: {
-          connected: false,
-          platform,
-          terminalRunning: true,
-          error: result.error,
-        },
-      };
-    } catch (error) {
-      return {
-        success: false,
-        error: error instanceof Error ? error.message : 'Failed to get status',
-      };
+    };
+    
+    // Execute and safely serialize to prevent IPC DataCloneError
+    try {
+      const result = await getStatusInternal();
+      return safeSerializeForIPC(result);
+    } catch (err) {
+      console.error('[Main] getStatus unexpected error:', err);
+      return { success: false, error: err instanceof Error ? err.message : 'Unexpected error' };
     }
   });
 
@@ -899,6 +1011,32 @@ function setupIpcHandlers() {
     if (!isValidCredentials(credentials)) {
       return { success: false, error: 'Invalid credentials format' };
     }
+    
+    // For MT5, first try to validate via file-based EA (if no HTTP agent running)
+    if (platform === 'mt5') {
+      try {
+        const detectionResult = await detectTerminals();
+        if (detectionResult.success && detectionResult.terminals) {
+          const mt5Terminals = detectionResult.terminals.filter((t: { type: string }) => t.type === 'mt5');
+          
+          for (const terminal of mt5Terminals) {
+            if (terminal.dataPath) {
+              const snapshot = await readMT5Snapshot(terminal.dataPath);
+              if (snapshot.success && snapshot.data) {
+                // Check if the account ID matches the credentials
+                if (snapshot.data.accountId === credentials.login) {
+                  console.log('[Main] Validated MT5 credentials via EA file for account:', credentials.login);
+                  return { success: true, data: { valid: true } };
+                }
+              }
+            }
+          }
+        }
+      } catch (err) {
+        console.log('[Main] File-based validation failed, trying agent:', err);
+      }
+    }
+    
     // NOTE: Password is never stored at rest - only passed through to agent
     return agentRequest(platform, '/api/validate', 'POST', credentials);
   });
@@ -909,16 +1047,166 @@ function setupIpcHandlers() {
     platform: unknown,
     credentials?: unknown
   ) => {
-    if (!isValidPlatform(platform)) {
-      return { success: false, error: 'Invalid platform' };
+    console.log('[Main] trading:getSnapshot ENTRY - platform:', platform, 'credentials:', credentials ? { login: (credentials as any).login, server: (credentials as any).server } : 'none');
+    
+    // Wrap entire handler in safe serialization to prevent DataCloneError
+    const getSnapshotInternal = async () => {
+      if (!isValidPlatform(platform)) {
+        return { success: false, error: 'Invalid platform' };
+      }
+      if (credentials !== undefined && !isValidCredentials(credentials)) {
+        return { success: false, error: 'Invalid credentials format' };
+      }
+    
+    // For MT5, first try to get snapshot from file-based EA
+    if (platform === 'mt5') {
+      try {
+        const detectionResult = await detectTerminals();
+        if (detectionResult.success && detectionResult.terminals) {
+          const mt5Terminals = detectionResult.terminals.filter((t: { type: string }) => t.type === 'mt5');
+          
+          // Collect all available snapshots first
+          const availableSnapshots: Array<{ terminal: typeof mt5Terminals[0], data: any }> = [];
+          
+          for (const terminal of mt5Terminals) {
+            if (terminal.dataPath) {
+              const snapshotResult = await readMT5Snapshot(terminal.dataPath);
+              if (snapshotResult.success && snapshotResult.data) {
+                availableSnapshots.push({ terminal, data: snapshotResult.data });
+              }
+            }
+          }
+          
+          // If credentials provided, find the matching account
+          if (credentials) {
+            // Convert both sides to strings for comparison (JSON may parse accountId as number)
+            const matchingSnapshot = availableSnapshots.find(
+              s => String(s.data.accountId) === String(credentials.login)
+            );
+            
+            if (matchingSnapshot) {
+              console.log('[Main] Got MT5 snapshot via EA file for account:', matchingSnapshot.data.accountId);
+              const data = matchingSnapshot.data;
+              return {
+                success: true,
+                data: {
+                  balance: data.balance,
+                  equity: data.equity,
+                  margin: data.margin,
+                  freeMargin: data.freeMargin,
+                  marginLevel: data.marginLevel,
+                  profit: data.floatingPnL,
+                  currency: data.currency,
+                  leverage: data.leverage,
+                  accountId: data.accountId,
+                  broker: data.broker,
+                  server: data.server || '',
+                  positions: (data.positions || []).map((p: any) => ({
+                    ticket: parseInt(p.id) || 0,
+                    symbol: p.symbol,
+                    type: p.side === 'BUY' ? 0 : 1,
+                    volume: p.volumeLots,
+                    openPrice: p.entryPrice,
+                    currentPrice: p.currentPrice,
+                    stopLoss: p.stopLoss || 0,
+                    takeProfit: p.takeProfit || 0,
+                    profit: p.profit,
+                    swap: p.swap,
+                    commission: p.commission,
+                    openTime: p.openTime,
+                    comment: p.comment || '',
+                  })),
+                  timestamp: data.timestamp,
+                },
+              };
+            }
+            // If credentials provided but no match found, return error
+            console.log('[Main] No MT5 file found for account:', credentials.login);
+            return { 
+              success: false, 
+              error: `No data found for account ${credentials.login}. Make sure the EA is running on that terminal.` 
+            };
+          } else if (availableSnapshots.length === 1) {
+            // No credentials but only one account available - return it
+            const data = availableSnapshots[0].data;
+            console.log('[Main] Got MT5 snapshot (single account):', data.accountId);
+            return {
+              success: true,
+              data: {
+                balance: data.balance,
+                equity: data.equity,
+                margin: data.margin,
+                freeMargin: data.freeMargin,
+                marginLevel: data.marginLevel,
+                profit: data.floatingPnL,
+                currency: data.currency,
+                leverage: data.leverage,
+                accountId: data.accountId,
+                broker: data.broker,
+                server: data.server || '',
+                positions: (data.positions || []).map((p: any) => ({
+                  ticket: parseInt(p.id) || 0,
+                  symbol: p.symbol,
+                  type: p.side === 'BUY' ? 0 : 1,
+                  volume: p.volumeLots,
+                  openPrice: p.entryPrice,
+                  currentPrice: p.currentPrice,
+                  stopLoss: p.stopLoss || 0,
+                  takeProfit: p.takeProfit || 0,
+                  profit: p.profit,
+                  swap: p.swap,
+                  commission: p.commission,
+                  openTime: p.openTime,
+                  comment: p.comment || '',
+                })),
+                timestamp: data.timestamp,
+              },
+            };
+          }
+          // Multiple accounts but no credentials - return error
+          if (availableSnapshots.length > 1 && !credentials) {
+            return {
+              success: false,
+              error: 'Multiple accounts detected. Please specify which account to connect to.',
+            };
+          }
+        }
+      } catch (err) {
+        console.log('[Main] File-based snapshot failed:', err);
+        // Return a proper error instead of falling through to agentRequest
+        return {
+          success: false,
+          error: err instanceof Error ? err.message : 'Failed to read MT5 data',
+        };
+      }
     }
-    if (credentials !== undefined && !isValidCredentials(credentials)) {
-      return { success: false, error: 'Invalid credentials format' };
+    
+    // Only try agentRequest for cTrader or if explicitly configured
+    if (platform === 'ctrader') {
+      if (credentials) {
+        return agentRequest(platform, '/api/account/snapshot', 'POST', credentials);
+      }
+      return agentRequest(platform, '/api/snapshot');
     }
-    if (credentials) {
-      return agentRequest(platform, '/api/account/snapshot', 'POST', credentials);
+    
+    // For MT5 without file-based data, return error (no HTTP agent available)
+    return {
+      success: false,
+      error: 'MT5 data not available. Make sure the HedgeEdge EA is running.',
+    };
+    };
+    
+    // Execute and safely serialize to prevent IPC DataCloneError
+    try {
+      const result = await getSnapshotInternal();
+      console.log('[Main] trading:getSnapshot EXIT - result.success:', result.success, 'hasData:', !!result.data);
+      const serialized = safeSerializeForIPC(result);
+      console.log('[Main] trading:getSnapshot serialized successfully');
+      return serialized;
+    } catch (err) {
+      console.error('[Main] getSnapshot unexpected error:', err);
+      return { success: false, error: err instanceof Error ? err.message : 'Unexpected error' };
     }
-    return agentRequest(platform, '/api/snapshot');
   });
 
   // Get balance (with payload validation)
@@ -1243,7 +1531,7 @@ function setupIpcHandlers() {
 
   // List all connection snapshots
   ipcMain.handle('connections:list', () => {
-    return buildAllSnapshots();
+    return safeSerializeForIPC(buildAllSnapshots());
   });
 
   // Connect an account
@@ -1307,7 +1595,7 @@ function setupIpcHandlers() {
     if (typeof accountId !== 'string' || !accountId) {
       return null;
     }
-    return buildSnapshot(accountId);
+    return safeSerializeForIPC(buildSnapshot(accountId));
   });
 
   // Refresh connection data for an account
@@ -2100,6 +2388,9 @@ function setupIpcHandlers() {
 // ============================================================================
 
 app.whenReady().then(async () => {
+  // Test debug logging
+  await debugLog('[Main] App starting - debug log initialized');
+  
   // Setup IPC handlers first
   setupIpcHandlers();
   

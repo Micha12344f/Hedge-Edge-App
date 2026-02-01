@@ -59,9 +59,11 @@ export function useVPSMT5Feed({
   pollInterval = 5000,
   fullSnapshot = true,
 }: UseVPSMT5FeedOptions): UseVPSMT5FeedResult {
+  // Always pass credentials if login is provided, even without password
+  // This allows the backend to match the correct account by login ID
   const credentials: TradingCredentials | undefined = 
-    login && password && server 
-      ? { login, password, server } 
+    login && server 
+      ? { login, password: password || '', server } 
       : undefined;
 
   const feed = useTradingFeed({

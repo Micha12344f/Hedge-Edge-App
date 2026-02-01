@@ -1,0 +1,114 @@
+{
+  "session": {
+    "date": "2026-02-01",
+    "focus": "IPC DataCloneError Fix & Account Data Integrity",
+    "status": "RESOLVED"
+  },
+  "issues_resolved": [
+    {
+      "id": 1,
+      "title": "Account Data Mixing Bug",
+      "description": "Clicking on one MT5 account showed data from another account (FTMO showing Vantage data)",
+      "root_cause": "Type mismatch in account ID comparison - JSON parses accountId as number, but credentials.login is string",
+      "file_modified": "electron/main.ts",
+      "fix_applied": {
+        "location": "trading:getSnapshot handler, line ~830",
+        "before": "const matchingSnapshot = availableSnapshots.find(s => s.data.accountId === credentials.login);",
+        "after": "const matchingSnapshot = availableSnapshots.find(s => String(s.data.accountId) === String(credentials.login));"
+      }
+    },
+    {
+      "id": 2,
+      "title": "IPC DataCloneError - 'An object could not be cloned'",
+      "description": "Error appeared when clicking accounts, preventing modal from loading account data",
+      "root_cause": "Objects passed through Electron IPC contextBridge may have non-serializable properties attached by React/renderer",
+      "files_modified": [
+        "electron/preload.ts",
+        "electron/main.ts",
+        "src/components/dashboard/AccountDetailsModal.tsx"
+      ],
+      "fixes_applied": [
+        {
+          "file": "electron/preload.ts",
+          "description": "Added sanitization helper functions before IPC calls",
+          "code_added": [
+            "function sanitizeForIPC<T>(obj: T): T - Uses JSON.parse(JSON.stringify()) to create plain objects",
+            "function sanitizeCredentials(credentials) - Ensures login/password/server are clean strings"
+          ],
+          "methods_updated": [
+            "getStatus - wrapped platform with String()",
+            "validateCredentials - uses sanitizeCredentials()",
+            "getSnapshot - uses sanitizeCredentials()",
+            "getBalance - uses sanitizeCredentials()",
+            "getPositions - uses sanitizeCredentials()",
+            "getTick - wrapped symbol with String()",
+            "getSymbols - wrapped platform with String()",
+            "placeOrder - uses sanitizeForIPC() and sanitizeCredentials()",
+            "closeOrder - uses sanitizeForIPC() and sanitizeCredentials()"
+          ]
+        },
+        {
+          "file": "electron/main.ts",
+          "description": "Added safe serialization wrapper for IPC responses",
+          "code_added": [
+            "function safeSerializeForIPC<T>(data: T): T - Ensures return values are JSON-serializable"
+          ],
+          "handlers_wrapped": [
+            "trading:getStatus - wrapped with getStatusInternal() + safeSerializeForIPC()",
+            "trading:getSnapshot - wrapped with getSnapshotInternal() + safeSerializeForIPC()",
+            "connections:list - wrapped with safeSerializeForIPC()",
+            "connections:status - wrapped with safeSerializeForIPC()"
+          ]
+        },
+        {
+          "file": "src/components/dashboard/AccountDetailsModal.tsx",
+          "description": "Ensured credentials are properly converted to strings before IPC",
+          "change": {
+            "before": "{ login: account.login, password: '', server: account.server }",
+            "after": "{ login: String(account.login || ''), password: '', server: String(account.server || '') }"
+          }
+        }
+      ]
+    }
+  ],
+  "mt5_accounts_tested": [
+    {
+      "name": "FTMO Evaluation",
+      "login": "1512375122",
+      "server": "FTMO-Demo2",
+      "terminal_id": "743AF7A780FCFABDC308A046F92D6008",
+      "balance": "~$99,000"
+    },
+    {
+      "name": "Vantage Hedge",
+      "login": "11780679",
+      "server": "VantageInternational-Demo",
+      "terminal_id": "D0E8209F77C8CF37AD8BF550E51FF075",
+      "balance": "~$1,000"
+    }
+  ],
+  "file_based_ea": {
+    "name": "HedgeEdgeLicense.mq5",
+    "mode": "DEV MODE (no license validation)",
+    "output_file": "MQL5/Files/HedgeEdgeMT5.json",
+    "data_includes": ["balance", "equity", "positions", "accountId", "broker", "server"]
+  },
+  "key_learnings": [
+    "Electron IPC uses structured clone algorithm which cannot serialize certain object types",
+    "Objects passed through contextBridge from React may have hidden non-serializable properties",
+    "Always use JSON.parse(JSON.stringify()) to sanitize data before IPC transfer",
+    "Type coercion matters: JSON numbers vs JavaScript strings need explicit conversion",
+    "Both IPC arguments (renderer→main) AND return values (main→renderer) need sanitization"
+  ],
+  "terminal_logs_confirming_fix": [
+    "[Main] trading:getSnapshot ENTRY - platform: mt5 credentials: { login: '11780679', server: 'VantageInternational-Demo' }",
+    "[Main] Got MT5 snapshot via EA file for account: 11780679",
+    "[Main] trading:getSnapshot EXIT - result.success: true hasData: true",
+    "[Main] trading:getSnapshot serialized successfully"
+  ],
+  "build_commands": {
+    "compile_electron": "npm run electron:compile",
+    "run_dev": "npm run electron:dev",
+    "note": "Both main.ts and preload.ts must be recompiled for changes to take effect"
+  }
+}

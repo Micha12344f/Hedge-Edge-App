@@ -54,6 +54,7 @@ export interface AgentSnapshot {
   platform: 'MT5' | 'cTrader';
   accountId: string;
   broker: string;
+  server?: string;
   balance: number;
   equity: number;
   margin: number;
@@ -163,8 +164,37 @@ export async function readMT5Snapshot(terminalDataPath: string): Promise<Channel
     // Check if file exists
     const stats = await fs.stat(filePath);
     
-    // Read and parse the file
-    const content = await fs.readFile(filePath, 'utf-8');
+    // Read the file as buffer first to handle BOM and encoding issues
+    // MQL5 may write files with UTF-16 LE BOM or Windows-1252 encoding
+    const buffer = await fs.readFile(filePath);
+    let content: string;
+    
+    // Check for UTF-16 LE BOM (0xFF 0xFE) - MQL5 default for FileOpen
+    if (buffer.length >= 2 && buffer[0] === 0xFF && buffer[1] === 0xFE) {
+      content = buffer.toString('utf16le').substring(1); // Skip BOM
+    }
+    // Check for UTF-8 BOM (0xEF 0xBB 0xBF)
+    else if (buffer.length >= 3 && buffer[0] === 0xEF && buffer[1] === 0xBB && buffer[2] === 0xBF) {
+      content = buffer.toString('utf-8').substring(1); // Skip BOM
+    }
+    // Check for UTF-16 BE BOM (0xFE 0xFF)
+    else if (buffer.length >= 2 && buffer[0] === 0xFE && buffer[1] === 0xFF) {
+      // Convert from UTF-16 BE to string
+      const swapped = Buffer.alloc(buffer.length);
+      for (let i = 0; i < buffer.length - 1; i += 2) {
+        swapped[i] = buffer[i + 1];
+        swapped[i + 1] = buffer[i];
+      }
+      content = swapped.toString('utf16le').substring(1); // Skip BOM
+    }
+    // Assume UTF-8 without BOM (FILE_ANSI in MQL5)
+    else {
+      content = buffer.toString('utf-8');
+    }
+    
+    // Trim any leading/trailing whitespace and null characters
+    content = content.replace(/^\s*/, '').replace(/\s*$/, '').replace(/\0/g, '');
+    
     const data = JSON.parse(content) as AgentSnapshot;
     
     // Validate basic structure

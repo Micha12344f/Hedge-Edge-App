@@ -94,6 +94,9 @@ export function AccountDetailsModal({
   
   // Terminal status
   const [terminalStatus, setTerminalStatus] = useState<'checking' | 'running' | 'not-running'>('checking');
+  
+  // File-based EA status - when true, we can connect without password
+  const [hasFileBasedEA, setHasFileBasedEA] = useState(false);
 
   // Get the appropriate bridge based on platform
   const getBridge = (platform: string | null | undefined) => {
@@ -105,7 +108,7 @@ export function AccountDetailsModal({
   const isSupervisedConnected = supervisedStatus === 'connected';
   const hasSupervisedMetrics = connectionSnapshot?.metrics != null;
 
-  // Check for cached password and terminal status when modal opens
+  // Check for cached password, terminal status, and file-based EA when modal opens
   useEffect(() => {
     if (open && account?.login && account?.server) {
       const cached = getCachedPassword(account.login, account.server);
@@ -120,9 +123,34 @@ export function AccountDetailsModal({
       // Check terminal status via IPC
       if (isBridgeAvailable()) {
         setTerminalStatus('checking');
+        setHasFileBasedEA(false);
         const bridge = getBridge(account.platform);
+        
+        // Check terminal status
         bridge.getStatus()
-          .then(result => setTerminalStatus(result.success && result.data?.terminalRunning ? 'running' : 'not-running'))
+          .then(async (result) => {
+            setTerminalStatus(result.success && result.data?.terminalRunning ? 'running' : 'not-running');
+            
+            // If terminal is running, check if we can get a snapshot for this specific account
+            // This means file-based EA is available for this account (no password needed)
+            if (result.success && result.data?.terminalRunning && account.platform?.toLowerCase() === 'mt5') {
+              try {
+                // Ensure we pass proper strings to IPC
+                const snapshotResult = await bridge.getSnapshot({ 
+                  login: String(account.login || ''), 
+                  password: '', 
+                  server: String(account.server || '') 
+                });
+                if (snapshotResult.success && snapshotResult.data) {
+                  // File-based EA has data for this account - no password needed
+                  setHasFileBasedEA(true);
+                  setNeedsPassword(false);
+                }
+              } catch {
+                // Snapshot failed - may need password for direct connection
+              }
+            }
+          })
           .catch(() => setTerminalStatus('not-running'));
       } else {
         setTerminalStatus('not-running');
@@ -135,10 +163,13 @@ export function AccountDetailsModal({
     if (!open) {
       setPassword("");
       setIsSubmittingPassword(false);
+      setHasFileBasedEA(false);
     }
   }, [open]);
 
-  // Use VPS MT5 feed hook - only when we have all credentials
+  // Use VPS MT5 feed hook - enabled when:
+  // 1. Modal is open AND terminal is running AND
+  // 2. Either file-based EA is available (no password needed) OR we have cached password
   const {
     snapshot,
     positions,
@@ -151,7 +182,7 @@ export function AccountDetailsModal({
     login: account?.login || "",
     password: cachedPassword || "",
     server: account?.server || "",
-    enabled: open && !needsPassword && !!cachedPassword && terminalStatus === 'running',
+    enabled: open && terminalStatus === 'running' && (hasFileBasedEA || (!!cachedPassword && !needsPassword)),
     pollInterval: 3000,
     fullSnapshot: true,
   });
@@ -288,7 +319,7 @@ export function AccountDetailsModal({
               
               {/* MT5 Connection (legacy) */}
               {!connectionSnapshot && !needsPassword && terminalStatus === 'running' && (
-                isConnected ? (
+                (isConnected || snapshot) ? (
                   <Badge
                     variant="outline"
                     className="bg-primary/10 text-primary border-primary/20"
@@ -381,8 +412,8 @@ export function AccountDetailsModal({
         <ScrollArea className="flex-1 mt-4">
           <div className="space-y-4 pr-4">
             
-            {/* Password Required */}
-            {needsPassword && (terminalStatus === 'running' || connectionSnapshot) && (
+            {/* Password Required - only show if no file-based EA available */}
+            {needsPassword && !hasFileBasedEA && (terminalStatus === 'running' || connectionSnapshot) && (
               <Card>
                 <CardHeader>
                   <CardTitle className="flex items-center gap-2 text-sm">

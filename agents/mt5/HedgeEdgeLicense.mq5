@@ -30,6 +30,7 @@ input string InpLicenseKey = "";                    // License Key (required)
 input string InpDeviceId = "";                      // Device ID (from app, or auto-generate)
 input string InpEndpointUrl = "https://api.hedge-edge.com/v1/license/validate"; // API Endpoint
 input int    InpPollIntervalSeconds = 600;          // License Check Interval (seconds)
+input bool   InpDevMode = true;                     // DEV MODE (bypass license check)
 
 input group "=== Communication Settings ==="
 input string InpStatusChannel = "HedgeEdgeMT5";     // Status Channel (pipe/file name)
@@ -84,7 +85,33 @@ int OnInit()
 {
    Print("Hedge Edge License EA initializing...");
    
-   //--- Validate license key
+   //--- DEV MODE - bypass license check for testing
+   if(InpDevMode)
+   {
+      Print("*** DEV MODE ENABLED - License check bypassed ***");
+      g_isLicenseValid = true;
+      g_statusMessage = "DEV MODE - Active (No License Required)";
+      g_deviceId = (StringLen(InpDeviceId) > 0) ? InpDeviceId : GenerateDeviceId();
+      UpdateComment();
+      
+      //--- Initialize communication channels
+      if(!InitializeCommunication())
+      {
+         Print("Warning: Communication channels not initialized (app may not be running)");
+      }
+      
+      //--- Emit initial data immediately
+      Print("Emitting initial account data...");
+      EmitAccountData();
+      
+      //--- Start data streaming timer
+      EventSetTimer(InpDataEmitInterval);
+      
+      Print("Hedge Edge EA initialized successfully in DEV MODE");
+      return INIT_SUCCEEDED;
+   }
+   
+   //--- Validate license key (production mode)
    if(StringLen(InpLicenseKey) == 0)
    {
       g_statusMessage = "ERROR: License Key is required";
@@ -200,25 +227,29 @@ void OnTimer()
 {
    datetime currentTime = TimeCurrent();
    
-   //--- Periodic license check
-   if(currentTime - g_lastLicenseCheck >= InpPollIntervalSeconds)
+   //--- Skip license checks in DEV MODE
+   if(!InpDevMode)
    {
-      Print("Performing periodic license check...");
-      
-      if(!ValidateLicenseWithDLL())
+      //--- Periodic license check
+      if(currentTime - g_lastLicenseCheck >= InpPollIntervalSeconds)
       {
-         g_isLicenseValid = false;
-         g_statusMessage = "License expired/invalid: " + g_lastError;
-         UpdateComment();
-         Alert("Hedge Edge: License validation failed - ", g_lastError);
+         Print("Performing periodic license check...");
+         
+         if(!ValidateLicenseWithDLL())
+         {
+            g_isLicenseValid = false;
+            g_statusMessage = "License expired/invalid: " + g_lastError;
+            UpdateComment();
+            Alert("Hedge Edge: License validation failed - ", g_lastError);
+         }
       }
-   }
-   
-   //--- Check token expiry (refresh 60 seconds before)
-   if(g_tokenExpiry > 0 && currentTime >= g_tokenExpiry - 60)
-   {
-      Print("Token expiring soon, refreshing...");
-      ValidateLicenseWithDLL();
+      
+      //--- Check token expiry (refresh 60 seconds before)
+      if(g_tokenExpiry > 0 && currentTime >= g_tokenExpiry - 60)
+      {
+         Print("Token expiring soon, refreshing...");
+         ValidateLicenseWithDLL();
+      }
    }
    
    //--- Emit data
@@ -268,6 +299,22 @@ bool InitializeDLL()
    g_lastError = "DLL initialization failed with code: " + IntegerToString(result);
    Print(g_lastError);
    return false;
+}
+
+//+------------------------------------------------------------------+
+//| Initialize communication channels                                  |
+//+------------------------------------------------------------------+
+bool InitializeCommunication()
+{
+   //--- Open status channel for communication with desktop app
+   if(!OpenStatusChannel())
+   {
+      Print("Warning: Could not open status channel");
+      return false;
+   }
+   
+   Print("Communication channels initialized");
+   return true;
 }
 
 //+------------------------------------------------------------------+

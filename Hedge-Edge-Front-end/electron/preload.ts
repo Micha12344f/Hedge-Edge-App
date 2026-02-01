@@ -82,6 +82,30 @@ interface DetectionResult {
 }
 
 // ============================================================================
+// Helper to sanitize objects for IPC (prevent DataCloneError)
+// ============================================================================
+
+function sanitizeForIPC<T>(obj: T): T {
+  if (obj === null || obj === undefined) return obj;
+  if (typeof obj !== 'object') return obj;
+  // Use JSON round-trip to ensure plain serializable object
+  try {
+    return JSON.parse(JSON.stringify(obj));
+  } catch {
+    return obj;
+  }
+}
+
+function sanitizeCredentials(credentials?: TradingCredentials): TradingCredentials | undefined {
+  if (!credentials) return undefined;
+  return {
+    login: String(credentials.login || ''),
+    password: String(credentials.password || ''),
+    server: String(credentials.server || ''),
+  };
+}
+
+// ============================================================================
 // Trading Bridge API
 // ============================================================================
 
@@ -89,40 +113,60 @@ const tradingAPI = {
   /**
    * Get terminal connection status
    */
-  getStatus: (platform: TradingPlatform): Promise<any> => {
-    return ipcRenderer.invoke('trading:getStatus', platform);
+  getStatus: async (platform: TradingPlatform): Promise<any> => {
+    try {
+      return await ipcRenderer.invoke('trading:getStatus', String(platform));
+    } catch (err) {
+      console.error('[Preload] getStatus error:', err);
+      return { success: false, error: err instanceof Error ? err.message : String(err) };
+    }
   },
 
   /**
    * Validate trading credentials
    */
-  validateCredentials: (platform: TradingPlatform, credentials: TradingCredentials): Promise<any> => {
+  validateCredentials: async (platform: TradingPlatform, credentials: TradingCredentials): Promise<any> => {
     // Basic validation before sending
     if (!credentials.login || !credentials.server) {
-      return Promise.resolve({ success: false, error: 'Login and server are required' });
+      return { success: false, error: 'Login and server are required' };
     }
-    return ipcRenderer.invoke('trading:validateCredentials', platform, credentials);
+    try {
+      return await ipcRenderer.invoke('trading:validateCredentials', String(platform), sanitizeCredentials(credentials));
+    } catch (err) {
+      console.error('[Preload] validateCredentials error:', err);
+      return { success: false, error: err instanceof Error ? err.message : String(err) };
+    }
   },
 
   /**
    * Get full account snapshot
    */
-  getSnapshot: (platform: TradingPlatform, credentials?: TradingCredentials): Promise<any> => {
-    return ipcRenderer.invoke('trading:getSnapshot', platform, credentials);
+  getSnapshot: async (platform: TradingPlatform, credentials?: TradingCredentials): Promise<any> => {
+    try {
+      return await ipcRenderer.invoke('trading:getSnapshot', String(platform), sanitizeCredentials(credentials));
+    } catch (err) {
+      console.error('[Preload] getSnapshot error:', err);
+      return { success: false, error: err instanceof Error ? err.message : String(err) };
+    }
   },
 
   /**
    * Get balance info (lightweight)
    */
-  getBalance: (platform: TradingPlatform, credentials?: TradingCredentials): Promise<any> => {
-    return ipcRenderer.invoke('trading:getBalance', platform, credentials);
+  getBalance: async (platform: TradingPlatform, credentials?: TradingCredentials): Promise<any> => {
+    try {
+      return await ipcRenderer.invoke('trading:getBalance', String(platform), sanitizeCredentials(credentials));
+    } catch (err) {
+      console.error('[Preload] getBalance error:', err);
+      return { success: false, error: err instanceof Error ? err.message : String(err) };
+    }
   },
 
   /**
    * Get open positions
    */
   getPositions: (platform: TradingPlatform, credentials?: TradingCredentials): Promise<any> => {
-    return ipcRenderer.invoke('trading:getPositions', platform, credentials);
+    return ipcRenderer.invoke('trading:getPositions', String(platform), sanitizeCredentials(credentials));
   },
 
   /**
@@ -132,14 +176,14 @@ const tradingAPI = {
     if (!symbol || typeof symbol !== 'string') {
       return Promise.resolve({ success: false, error: 'Valid symbol required' });
     }
-    return ipcRenderer.invoke('trading:getTick', platform, symbol);
+    return ipcRenderer.invoke('trading:getTick', String(platform), String(symbol));
   },
 
   /**
    * Get available symbols
    */
   getSymbols: (platform: TradingPlatform): Promise<any> => {
-    return ipcRenderer.invoke('trading:getSymbols', platform);
+    return ipcRenderer.invoke('trading:getSymbols', String(platform));
   },
 
   /**
@@ -156,7 +200,7 @@ const tradingAPI = {
     if (order.volume <= 0) {
       return Promise.resolve({ success: false, error: 'Volume must be positive' });
     }
-    return ipcRenderer.invoke('trading:placeOrder', platform, order, credentials);
+    return ipcRenderer.invoke('trading:placeOrder', String(platform), sanitizeForIPC(order), sanitizeCredentials(credentials));
   },
 
   /**
@@ -166,7 +210,7 @@ const tradingAPI = {
     if (!request.ticket || request.ticket <= 0) {
       return Promise.resolve({ success: false, error: 'Valid ticket number required' });
     }
-    return ipcRenderer.invoke('trading:closeOrder', platform, request, credentials);
+    return ipcRenderer.invoke('trading:closeOrder', String(platform), sanitizeForIPC(request), sanitizeCredentials(credentials));
   },
 };
 
@@ -430,49 +474,74 @@ const connectionsAPI = {
   /**
    * List all connection snapshots
    */
-  list: (): Promise<ConnectionSnapshotMap> => {
-    return ipcRenderer.invoke('connections:list');
+  list: async (): Promise<ConnectionSnapshotMap> => {
+    try {
+      return await ipcRenderer.invoke('connections:list');
+    } catch (err) {
+      console.error('[Preload] connections:list error:', err);
+      return {};
+    }
   },
 
   /**
    * Connect an account
    */
-  connect: (params: ConnectParams): Promise<{ success: boolean; error?: string }> => {
+  connect: async (params: ConnectParams): Promise<{ success: boolean; error?: string }> => {
     // Validate required fields
     if (!params.accountId || !params.credentials?.login || !params.credentials?.server) {
-      return Promise.resolve({ success: false, error: 'Account ID, login, and server are required' });
+      return { success: false, error: 'Account ID, login, and server are required' };
     }
-    return ipcRenderer.invoke('connections:connect', params);
+    try {
+      return await ipcRenderer.invoke('connections:connect', params);
+    } catch (err) {
+      console.error('[Preload] connections:connect error:', err);
+      return { success: false, error: err instanceof Error ? err.message : String(err) };
+    }
   },
 
   /**
    * Disconnect an account
    */
-  disconnect: (params: DisconnectParams): Promise<{ success: boolean; error?: string }> => {
+  disconnect: async (params: DisconnectParams): Promise<{ success: boolean; error?: string }> => {
     if (!params.accountId) {
-      return Promise.resolve({ success: false, error: 'Account ID is required' });
+      return { success: false, error: 'Account ID is required' };
     }
-    return ipcRenderer.invoke('connections:disconnect', params);
+    try {
+      return await ipcRenderer.invoke('connections:disconnect', params);
+    } catch (err) {
+      console.error('[Preload] connections:disconnect error:', err);
+      return { success: false, error: err instanceof Error ? err.message : String(err) };
+    }
   },
 
   /**
    * Get status for a specific account
    */
-  status: (accountId: string): Promise<ConnectionSnapshot | null> => {
+  status: async (accountId: string): Promise<ConnectionSnapshot | null> => {
     if (!accountId) {
-      return Promise.resolve(null);
+      return null;
     }
-    return ipcRenderer.invoke('connections:status', accountId);
+    try {
+      return await ipcRenderer.invoke('connections:status', accountId);
+    } catch (err) {
+      console.error('[Preload] connections:status error:', err);
+      return null;
+    }
   },
 
   /**
    * Refresh connection data for an account
    */
-  refresh: (accountId: string): Promise<{ success: boolean; error?: string }> => {
+  refresh: async (accountId: string): Promise<{ success: boolean; error?: string }> => {
     if (!accountId) {
-      return Promise.resolve({ success: false, error: 'Account ID is required' });
+      return { success: false, error: 'Account ID is required' };
     }
-    return ipcRenderer.invoke('connections:refresh', accountId);
+    try {
+      return await ipcRenderer.invoke('connections:refresh', accountId);
+    } catch (err) {
+      console.error('[Preload] connections:refresh error:', err);
+      return { success: false, error: err instanceof Error ? err.message : String(err) };
+    }
   },
 
   /**
