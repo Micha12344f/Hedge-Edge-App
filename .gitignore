@@ -28,6 +28,9 @@ backend/.env.mt5
 *.swp
 *.swo
 
+# Workspace section markers
+.sections/
+
 # Logs
 *.log
 npm-debug.log*

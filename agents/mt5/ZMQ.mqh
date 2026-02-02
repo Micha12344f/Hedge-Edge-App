@@ -7,6 +7,9 @@
 //| Based on mql-zmq by nicholashagen / dingmaotu                    |
 //| Provides high-performance messaging between EA and Hedge Edge app|
 //+------------------------------------------------------------------+
+#ifndef ZMQ_MQH
+#define ZMQ_MQH
+
 #property copyright "Copyright 2026, Hedge Edge"
 #property link      "https://www.hedge-edge.com"
 #property version   "1.00"
@@ -161,10 +164,10 @@ long zmq_socket(long context, int type);
 int  zmq_close(long socket);
 int  zmq_setsockopt(long socket, int option, const uchar &optval[], int optvallen);
 int  zmq_getsockopt(long socket, int option, uchar &optval[], int &optvallen);
-int  zmq_bind(long socket, const char &endpoint[]);
-int  zmq_connect(long socket, const char &endpoint[]);
-int  zmq_unbind(long socket, const char &endpoint[]);
-int  zmq_disconnect(long socket, const char &endpoint[]);
+int  zmq_bind(long socket, const uchar &endpoint[]);
+int  zmq_connect(long socket, const uchar &endpoint[]);
+int  zmq_unbind(long socket, const uchar &endpoint[]);
+int  zmq_disconnect(long socket, const uchar &endpoint[]);
 
 // Message
 int  zmq_msg_init(long &msg[]);

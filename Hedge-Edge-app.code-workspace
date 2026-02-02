@@ -5,27 +5,47 @@
 			"path": "."
 		},
 		{
-			"name": "📱 Desktop App (Electron + React)",
+			"name": "━━━━━━━━━━ 🎨 FRONT-END ━━━━━━━━━━",
+			"path": ".sections/front-end"
+		},
+		{
+			"name": "    📱 Desktop App (Electron + React)",
 			"path": "Hedge-Edge-Front-end"
 		},
 		{
-			"name": "🤖 Trading Agents (MT4/MT5/cTrader)",
-			"path": "agents"
+			"name": "    🧪 UI Testing",
+			"path": "testing/ui"
 		},
 		{
-			"name": "⚙️ Backend API (Python/FastAPI)",
+			"name": "━━━━━━━━━━ ⚙️ BACK-END ━━━━━━━━━━",
+			"path": ".sections/back-end"
+		},
+		{
+			"name": "    🔌 API Server (Python/FastAPI)",
 			"path": "backend"
 		},
 		{
-			"name": "🧪 Testing Suite",
-			"path": "testing"
+			"name": "    🤖 Trading Agents (MT4/MT5/cTrader)",
+			"path": "agents"
 		},
 		{
-			"name": "📋 Task Management",
+			"name": "    🧪 API Testing",
+			"path": "testing/api"
+		},
+		{
+			"name": "    🔗 Integration Testing",
+			"path": "testing/integration"
+		},
+		{
+			"name": "━━━━━━━━━━ 📦 SHARED ━━━━━━━━━━",
+			"path": ".sections/shared"
+		},
+		{
+			"name": "    📋 Task Management",
 			"path": "tasks"
 		},
 		{
-			"name": "🔧 Build Scripts",
+			"name": "    🔧 Build Scripts",
 			"path": "bin"
 		}
 	],
@@ -58,7 +78,7 @@
 		"version": "0.2.0",
 		"configurations": [
 			{
-				"name": "Electron: Main",
+				"name": "🎨 FE: Electron Main",
 				"type": "node",
 				"request": "launch",
 				"cwd": "${workspaceFolder}/Hedge-Edge-Front-end",
@@ -69,7 +89,7 @@
 				}
 			},
 			{
-				"name": "Python: License API Server",
+				"name": "⚙️ BE: License API Server",
 				"type": "python",
 				"request": "launch",
 				"program": "${workspaceFolder}/backend/license_api_server.py",
@@ -77,7 +97,7 @@
 				"console": "integratedTerminal"
 			},
 			{
-				"name": "Python: QA Integration Tests",
+				"name": "⚙️ BE: QA Integration Tests",
 				"type": "python",
 				"request": "launch",
 				"program": "${workspaceFolder}/testing/integration/qa001_integration_suite.py",
@@ -88,8 +108,8 @@
 		],
 		"compounds": [
 			{
-				"name": "Full Stack (API + Electron)",
-				"configurations": ["Python: License API Server", "Electron: Main"]
+				"name": "🚀 Full Stack (BE + FE)",
+				"configurations": ["⚙️ BE: License API Server", "🎨 FE: Electron Main"]
 			}
 		]
 	},
@@ -97,17 +117,7 @@
 		"version": "2.0.0",
 		"tasks": [
 			{
-				"label": "Start License API Server",
-				"type": "shell",
-				"command": "python license_api_server.py",
-				"options": {
-					"cwd": "${workspaceFolder}/backend"
-				},
-				"group": "build",
-				"isBackground": true
-			},
-			{
-				"label": "Start Electron Dev",
+				"label": "🎨 FE: Start Electron Dev",
 				"type": "shell",
 				"command": "npm run electron:dev",
 				"options": {
@@ -116,7 +126,7 @@
 				"group": "build"
 			},
 			{
-				"label": "Start Vite Dev",
+				"label": "🎨 FE: Start Vite Dev",
 				"type": "shell",
 				"command": "npm run vite:dev",
 				"options": {
@@ -126,16 +136,7 @@
 				"isBackground": true
 			},
 			{
-				"label": "Run Integration Tests",
-				"type": "shell",
-				"command": "python qa001_integration_suite.py --verbose",
-				"options": {
-					"cwd": "${workspaceFolder}/testing/integration"
-				},
-				"group": "test"
-			},
-			{
-				"label": "TypeScript Check",
+				"label": "🎨 FE: TypeScript Check",
 				"type": "shell",
 				"command": "npx tsc --noEmit",
 				"options": {
@@ -143,6 +144,25 @@
 				},
 				"group": "build",
 				"problemMatcher": "$tsc"
+			},
+			{
+				"label": "⚙️ BE: Start License API Server",
+				"type": "shell",
+				"command": "python license_api_server.py",
+				"options": {
+					"cwd": "${workspaceFolder}/backend"
+				},
+				"group": "build",
+				"isBackground": true
+			},
+			{
+				"label": "⚙️ BE: Run Integration Tests",
+				"type": "shell",
+				"command": "python qa001_integration_suite.py --verbose",
+				"options": {
+					"cwd": "${workspaceFolder}/testing/integration"
+				},
+				"group": "test"
 			}
 		]
 	}

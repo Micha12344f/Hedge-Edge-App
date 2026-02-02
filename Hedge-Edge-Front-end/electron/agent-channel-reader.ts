@@ -1,28 +1,32 @@
 /**
  * Agent Data Channel Reader
  * 
- * Reads data from trading terminal agents using:
+ * HIGH-PERFORMANCE MESSAGING FOR TRADING TERMINALS
  * 
- * MT5:
- * 1. ZeroMQ (high-performance, sub-millisecond latency) - preferred
- * 2. File-based channels (fallback for compatibility)
+ * MT5: ZeroMQ (sub-millisecond latency)
+ * - SUB socket subscribes to EA's PUB socket for real-time snapshots
+ * - REQ socket sends commands to EA's REP socket
+ * - Default ports: 51810 (data), 51811 (commands)
  * 
- * cTrader:
- * 1. Windows Named Pipes (high-performance, native Windows IPC)
- * 
- * ZeroMQ Mode (MT5):
- * - SUB socket connects to EA's PUB socket for real-time snapshots
- * - REQ socket connects to EA's REP socket for commands
- * 
- * Named Pipe Mode (cTrader):
+ * cTrader: Windows Named Pipes
  * - Data pipe receives account snapshots from cBot
  * - Command pipe sends commands to cBot
  * 
- * File Mode (Fallback):
- * - MT5: File-based (MQL5/Files/HedgeEdgeMT5.json)
+ * Architecture:
+ * ┌─────────────────┐     ZeroMQ      ┌─────────────────┐
+ * │   MT5 EA (ZMQ)  │ ◄─────PUB/SUB────► │  Desktop App    │
+ * │  PUB: 51810     │ ◄─────REQ/REP────► │  (Electron)     │
+ * │  REP: 51811     │                  │                 │
+ * └─────────────────┘                  └─────────────────┘
+ * 
+ * ┌─────────────────┐   Named Pipes   ┌─────────────────┐
+ * │ cTrader cBot    │ ◄─────────────► │  Desktop App    │
+ * │ HedgeEdgeCTrader│                 │  (Electron)     │
+ * └─────────────────┘                  └─────────────────┘
  */
 
 import { promises as fs } from 'fs';
+import { EventEmitter } from 'events';
 import net from 'net';
 import path from 'path';
 import { 
@@ -452,13 +456,13 @@ export interface TerminalConfig {
   mode: ChannelMode;
 }
 
-export class AgentChannelReader {
+export class AgentChannelReader extends EventEmitter {
   private mt5DataPaths: Map<string, string> = new Map();
   private pollingIntervals: Map<string, NodeJS.Timeout> = new Map();
   private lastSnapshots: Map<string, AgentSnapshot> = new Map();
-  private listeners: Set<(accountId: string, snapshot: AgentSnapshot) => void> = new Set();
+  private snapshotListeners: Set<(accountId: string, snapshot: AgentSnapshot) => void> = new Set();
   
-  // ZMQ bridges for high-performance mode (MT5)
+  // ZMQ bridges for high-performance mode (MT5) - PRIMARY
   private zmqBridges: Map<string, ZmqBridge> = new Map();
   private zmqAvailable: boolean | null = null;
   private terminalConfigs: Map<string, TerminalConfig> = new Map();
@@ -466,9 +470,15 @@ export class AgentChannelReader {
   // Named Pipe clients for cTrader
   private pipeClients: Map<string, NamedPipeClient> = new Map();
   
+  // Default ZMQ endpoints (match EA defaults)
+  private static readonly DEFAULT_ZMQ_DATA_PORT = 51810;
+  private static readonly DEFAULT_ZMQ_COMMAND_PORT = 51811;
+  
   constructor() {
+    super();
     // Check ZMQ availability on construction
     this.checkZmqAvailability();
+    console.log('[AgentChannelReader] Initialized - ZeroMQ is PRIMARY communication method');
   }
   
   /**
@@ -494,9 +504,95 @@ export class AgentChannelReader {
   }
   
   /**
+   * PREFERRED: Connect to MT5 terminal via ZeroMQ
+   * This is the primary method for MT5 communication.
+   * 
+   * @param terminalId - Unique identifier for this terminal
+   * @param options - ZMQ connection options (ports default to 51810/51811)
+   * @returns true if connection successful
+   */
+  async connectMT5(
+    terminalId: string,
+    options: {
+      dataPort?: number;
+      commandPort?: number;
+      host?: string;
+    } = {}
+  ): Promise<boolean> {
+    const dataPort = options.dataPort || AgentChannelReader.DEFAULT_ZMQ_DATA_PORT;
+    const commandPort = options.commandPort || AgentChannelReader.DEFAULT_ZMQ_COMMAND_PORT;
+    const host = options.host || '127.0.0.1';
+    
+    console.log(`[AgentChannelReader] Connecting to MT5 via ZeroMQ...`);
+    console.log(`  Data endpoint: tcp://${host}:${dataPort}`);
+    console.log(`  Command endpoint: tcp://${host}:${commandPort}`);
+    
+    // Check ZMQ availability first
+    if (!this.zmqAvailable) {
+      await this.checkZmqAvailability();
+    }
+    
+    if (!this.zmqAvailable) {
+      console.error('[AgentChannelReader] ZeroMQ not available - install zeromq package');
+      return false;
+    }
+    
+    const config: TerminalConfig = {
+      terminalId,
+      platform: 'MT5',
+      dataPort,
+      commandPort,
+      host,
+      mode: 'zmq',
+    };
+    
+    try {
+      const bridge = createZmqBridgeForPorts(dataPort, commandPort, host);
+      
+      // Set up event handlers
+      bridge.on('snapshot', (snapshot: ZmqSnapshot) => {
+        const agentSnapshot = this.convertZmqSnapshot(snapshot);
+        this.lastSnapshots.set(terminalId, agentSnapshot);
+        this.notifyListeners(terminalId, agentSnapshot);
+      });
+      
+      bridge.on('goodbye', () => {
+        console.log(`[AgentChannelReader] MT5 EA ${terminalId} disconnected (GOODBYE received)`);
+        this.emit('terminalDisconnected', terminalId, 'MT5');
+      });
+      
+      bridge.on('error', (error: Error) => {
+        console.error(`[AgentChannelReader] ZMQ error for ${terminalId}:`, error.message);
+      });
+      
+      bridge.on('status', (status: any) => {
+        console.log(`[AgentChannelReader] ZMQ status for ${terminalId}:`, status.dataSocket, status.commandSocket);
+      });
+      
+      // Start the bridge
+      const started = await bridge.start();
+      
+      if (started) {
+        this.zmqBridges.set(terminalId, bridge);
+        this.terminalConfigs.set(terminalId, config);
+        console.log(`[AgentChannelReader] ✅ Connected to MT5 ${terminalId} via ZeroMQ`);
+        return true;
+      } else {
+        console.error(`[AgentChannelReader] Failed to start ZMQ bridge for ${terminalId}`);
+        return false;
+      }
+    } catch (error) {
+      console.error(`[AgentChannelReader] Error connecting to MT5 ${terminalId}:`, error);
+      return false;
+    }
+  }
+  
+  /**
+   * @deprecated Use connectMT5() instead - file mode is deprecated
    * Register an MT5 terminal for monitoring (legacy file mode)
    */
   registerMT5Terminal(terminalId: string, dataPath: string): void {
+    console.warn(`[AgentChannelReader] ⚠️ File mode is deprecated - use connectMT5() for ZeroMQ`);
     this.mt5DataPaths.set(terminalId, dataPath);
     this.terminalConfigs.set(terminalId, {
       terminalId,
@@ -624,7 +720,7 @@ export class AgentChannelReader {
   }
   
   /**
-   * Register an MT5 terminal with ZMQ support
+   * Register an MT5 terminal with ZMQ support (ZeroMQ only - no file fallback)
    */
   async registerMT5TerminalZmq(
     terminalId: string,
@@ -632,7 +728,6 @@ export class AgentChannelReader {
       dataPort?: number;
       commandPort?: number;
       host?: string;
-      fallbackDataPath?: string;
     } = {}
   ): Promise<boolean> {
     const dataPort = options.dataPort || DEFAULT_ZMQ_CONFIG.dataPort;
@@ -642,83 +737,55 @@ export class AgentChannelReader {
     const config: TerminalConfig = {
       terminalId,
       platform: 'MT5',
-      dataPath: options.fallbackDataPath,
+      dataPath: undefined,
       dataPort,
       commandPort,
       host,
-      mode: 'auto',
+      mode: 'zmq',
     };
     
     this.terminalConfigs.set(terminalId, config);
     
-    // If ZMQ is available, try to create a bridge
-    if (this.zmqAvailable) {
-      try {
-        const bridge = createZmqBridgeForPorts(dataPort, commandPort, host);
-        
-        // Set up event handlers
-        bridge.on('snapshot', (snapshot: ZmqSnapshot) => {
-          // Convert ZMQ snapshot to agent snapshot format
-          const agentSnapshot = this.convertZmqSnapshot(snapshot);
-          this.lastSnapshots.set(terminalId, agentSnapshot);
-          this.notifyListeners(terminalId, agentSnapshot);
-        });
-        
-        bridge.on('goodbye', () => {
-          console.log(`[AgentChannelReader] EA ${terminalId} disconnected`);
-          // Fall back to file mode
-          this.fallbackToFileMode(terminalId);
-        });
-        
-        bridge.on('error', (error: Error) => {
-          console.error(`[AgentChannelReader] ZMQ error for ${terminalId}:`, error);
-        });
-        
-        // Try to start the bridge
-        const started = await bridge.start();
-        
-        if (started) {
-          this.zmqBridges.set(terminalId, bridge);
-          config.mode = 'zmq';
-          console.log(`[AgentChannelReader] Registered MT5 terminal (ZMQ mode): ${terminalId}`);
-          return true;
-        }
-      } catch (error) {
-        console.warn(`[AgentChannelReader] Failed to start ZMQ bridge for ${terminalId}:`, error);
-      }
+    // ZMQ is required - no file fallback
+    if (!this.zmqAvailable) {
+      console.error('[AgentChannelReader] ZeroMQ not available');
+      return false;
     }
     
-    // Fall back to file mode if provided
-    if (options.fallbackDataPath) {
-      this.mt5DataPaths.set(terminalId, options.fallbackDataPath);
-      config.mode = 'file';
-      console.log(`[AgentChannelReader] Registered MT5 terminal (file fallback): ${terminalId}`);
-      return true;
+    try {
+      const bridge = createZmqBridgeForPorts(dataPort, commandPort, host);
+      
+      // Set up event handlers
+      bridge.on('snapshot', (snapshot: ZmqSnapshot) => {
+        // Convert ZMQ snapshot to agent snapshot format
+        const agentSnapshot = this.convertZmqSnapshot(snapshot);
+        this.lastSnapshots.set(terminalId, agentSnapshot);
+        this.notifyListeners(terminalId, agentSnapshot);
+      });
+      
+      bridge.on('goodbye', () => {
+        console.log(`[AgentChannelReader] EA ${terminalId} disconnected`);
+        // Mark as disconnected
+        this.zmqBridges.delete(terminalId);
+      });
+      
+      bridge.on('error', (error: Error) => {
+        console.error(`[AgentChannelReader] ZMQ error for ${terminalId}:`, error);
+      });
+      
+      // Try to start the bridge
+      const started = await bridge.start();
+      
+      if (started) {
+        this.zmqBridges.set(terminalId, bridge);
+        console.log(`[AgentChannelReader] Registered MT5 terminal (ZeroMQ): ${terminalId}`);
+        return true;
+      }
+    } catch (error) {
+      console.warn(`[AgentChannelReader] Failed to start ZMQ bridge for ${terminalId}:`, error);
     }
     
     return false;
-  }
-  
-  /**
-   * Fall back to file mode for a terminal
-   */
-  private fallbackToFileMode(terminalId: string): void {
-    const config = this.terminalConfigs.get(terminalId);
-    if (!config || !config.dataPath) return;
-    
-    // Stop ZMQ bridge
-    const bridge = this.zmqBridges.get(terminalId);
-    if (bridge) {
-      bridge.stop();
-      this.zmqBridges.delete(terminalId);
-    }
-    
-    // Switch to file mode
-    config.mode = 'file';
-    this.mt5DataPaths.set(terminalId, config.dataPath);
-    this.startPolling(terminalId);
-    
-    console.log(`[AgentChannelReader] Fell back to file mode for ${terminalId}`);
   }
   
   /**
@@ -884,15 +951,15 @@ export class AgentChannelReader {
    * Subscribe to snapshot updates
    */
   subscribe(listener: (accountId: string, snapshot: AgentSnapshot) => void): () => void {
-    this.listeners.add(listener);
-    return () => this.listeners.delete(listener);
+    this.snapshotListeners.add(listener);
+    return () => this.snapshotListeners.delete(listener);
   }
   
   /**
    * Notify listeners of snapshot update
    */
   private notifyListeners(accountId: string, snapshot: AgentSnapshot): void {
-    for (const listener of this.listeners) {
+    for (const listener of this.snapshotListeners) {
       try {
         listener(accountId, snapshot);
       } catch (error) {
@@ -1162,7 +1229,7 @@ export class AgentChannelReader {
     this.mt5DataPaths.clear();
     this.terminalConfigs.clear();
     this.lastSnapshots.clear();
-    this.listeners.clear();
+    this.snapshotListeners.clear();
     
     console.log('[AgentChannelReader] Shutdown complete');
   }

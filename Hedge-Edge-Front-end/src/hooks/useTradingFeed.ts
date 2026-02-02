@@ -252,12 +252,24 @@ export function useTradingFeed(options?: UseTradingFeedOptions): UseTradingFeedR
       const isAgentError = errorMessage.includes('ECONNREFUSED') || 
                           errorMessage.includes('agent') ||
                           errorMessage.includes('not running') ||
-                          errorMessage.includes('not responding');
+                          errorMessage.includes('not responding') ||
+                          errorMessage.includes('terminal') ||
+                          errorMessage.includes('closed') ||
+                          errorMessage.includes('removed') ||
+                          errorMessage.includes('No fresh data');
       setIsWaitingForAgent(isAgentError);
       
+      // Customize toast message based on error type
+      const isTerminalClosed = errorMessage.includes('terminal') || 
+                               errorMessage.includes('closed') || 
+                               errorMessage.includes('removed') ||
+                               errorMessage.includes('No fresh data');
+      
       showThrottledToast(
-        `${config.platform.toUpperCase()} Connection Error`,
-        `Failed to connect to your local ${config.platform.toUpperCase()} terminal. Make sure the trading agent is running.`
+        `${config.platform.toUpperCase()} ${isTerminalClosed ? 'Disconnected' : 'Connection Error'}`,
+        isTerminalClosed 
+          ? `The ${config.platform.toUpperCase()} terminal appears to be closed or the EA/cBot was removed.`
+          : `Failed to connect to your local ${config.platform.toUpperCase()} terminal. Make sure the trading agent is running.`
       );
     } finally {
       setIsLoading(false);

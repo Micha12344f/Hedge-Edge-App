@@ -54,10 +54,10 @@ import {
 } from './mt5-webrequest-helper.js';
 import { 
   agentChannelReader, 
-  readMT5Snapshot, 
   readCTraderSnapshot,
   sendMT5Command,
   sendCTraderCommand,
+  isCTraderPipeAvailable,
   type AgentSnapshot,
   type AgentCommand,
 } from './agent-channel-reader.js';
@@ -126,10 +126,16 @@ interface ConnectionSnapshot {
 
 type ConnectionSnapshotMap = Record<string, ConnectionSnapshot>;
 
+// EA/cBot heartbeat configuration
+// If no fresh data from EA/cBot within this threshold, consider it disconnected
+const EA_STALENESS_THRESHOLD_MS = 15000; // 15 seconds - EAs typically update every 1-2 seconds
+
 // In-memory connection sessions
 const connectionSessions: Map<string, ConnectionSession> = new Map();
 const connectionMetrics: Map<string, ConnectionMetrics> = new Map();
 const connectionPositions: Map<string, ConnectionPosition[]> = new Map();
+// Track last time we received fresh data from EA/cBot per account
+const lastEADataTimestamp: Map<string, Date> = new Map();
 
 // ============================================================================
 // Connection Session Persistence & Auto-Reconnect
@@ -192,103 +198,89 @@ async function savePersistedSessions(): Promise<void> {
 }
 
 /**
- * Auto-reconnect accounts by scanning for running EAs
- * Called on app startup to restore connections without requiring passwords
+ * Auto-reconnect accounts via ZeroMQ
+ * Called on app startup to restore connections
  */
-async function autoReconnectFromEAFiles(): Promise<void> {
-  console.log('[Main] Auto-reconnecting from EA files...');
+async function autoReconnectFromZMQ(): Promise<void> {
+  console.log('[Main] Auto-reconnecting via ZeroMQ...');
   
   try {
-    // Scan for MT5 terminals and their EA data files
-    const detectionResult = await detectTerminals();
-    if (!detectionResult.success || !detectionResult.terminals) {
-      console.log('[Main] No terminals detected for auto-reconnect');
-      return;
-    }
+    // Try to connect to default MT5 ZeroMQ ports
+    const connected = await agentChannelReader.connectMT5('mt5-default', {
+      dataPort: 51810,
+      commandPort: 51811,
+    });
     
-    const mt5Terminals = detectionResult.terminals.filter((t: { type: string }) => t.type === 'mt5');
-    console.log('[Main] Found', mt5Terminals.length, 'MT5 terminals to check for EA files');
-    
-    for (const terminal of mt5Terminals) {
-      console.log('[Main] Checking terminal:', terminal.name, 'dataPath:', terminal.dataPath);
-      if (!terminal.dataPath) {
-        console.log('[Main] Skipping terminal - no dataPath');
-        continue;
-      }
+    if (connected) {
+      console.log('[Main] ZeroMQ connected, waiting for first snapshot...');
+      // Wait for first snapshot
+      await new Promise(resolve => setTimeout(resolve, 1000));
       
-      try {
-        const snapshotResult = await readMT5Snapshot(terminal.dataPath);
-        console.log('[Main] EA file read result:', snapshotResult.success, snapshotResult.error || '');
-        if (!snapshotResult.success || !snapshotResult.data) {
-          console.log('[Main] No EA snapshot data for terminal');
-          continue;
-        }
-        
-        const data = snapshotResult.data;
-        const accountId = String(data.accountId);
+      const snapshot = agentChannelReader.getLastSnapshot('mt5-default');
+      if (snapshot) {
+        const accountId = String(snapshot.accountId);
         
         // Check if session already exists
-        if (connectionSessions.has(accountId)) {
-          console.log('[Main] Session already exists for account:', accountId);
-          continue;
+        if (!connectionSessions.has(accountId)) {
+          console.log('[Main] Auto-connecting account via ZeroMQ:', accountId, snapshot.broker);
+          
+          // Create session from ZeroMQ data
+          const session: ConnectionSession = {
+            id: accountId,
+            accountId,
+            platform: 'mt5',
+            role: 'local',
+            status: 'connected',
+            lastUpdate: new Date().toISOString(),
+            lastConnected: new Date().toISOString(),
+            autoReconnect: true,
+            _credentials: {
+              login: accountId,
+              password: '',
+              server: snapshot.server || snapshot.broker || '',
+            },
+          };
+          connectionSessions.set(accountId, session);
+          
+          // Track EA data timestamp for health checking
+          lastEADataTimestamp.set(accountId, new Date());
+          
+          // Store metrics from ZeroMQ snapshot
+          const metrics: ConnectionMetrics = {
+            balance: snapshot.balance ?? 0,
+            equity: snapshot.equity ?? 0,
+            profit: snapshot.floatingPnL ?? 0,
+            positionCount: snapshot.positions?.length ?? 0,
+            margin: snapshot.margin,
+            freeMargin: snapshot.freeMargin,
+            marginLevel: snapshot.marginLevel,
+          };
+          connectionMetrics.set(accountId, metrics);
+          
+          // Store positions
+          if (snapshot.positions) {
+            const positions: ConnectionPosition[] = snapshot.positions.map((p: any) => ({
+              ticket: parseInt(p.id) || 0,
+              symbol: p.symbol,
+              type: p.side === 'BUY' ? 'buy' : 'sell',
+              volume: p.volumeLots,
+              openPrice: p.entryPrice,
+              currentPrice: p.currentPrice,
+              profit: p.profit,
+              stopLoss: p.stopLoss,
+              takeProfit: p.takeProfit,
+              openTime: p.openTime || new Date().toISOString(),
+              magic: 0,
+              comment: p.comment || '',
+            }));
+            connectionPositions.set(accountId, positions);
+          }
+          
+          console.log('[Main] Auto-connected account via ZeroMQ:', accountId, 'Balance:', metrics.balance);
         }
-        
-        console.log('[Main] Auto-connecting account from EA file:', accountId, data.broker);
-        
-        // Create session from EA data (no password needed for file-based reading)
-        const session: ConnectionSession = {
-          id: accountId,
-          accountId,
-          platform: 'mt5',
-          role: 'local',
-          status: 'connected', // Already connected via EA file
-          lastUpdate: new Date().toISOString(),
-          lastConnected: new Date().toISOString(),
-          autoReconnect: true,
-          // Store credentials for matching (password empty since we use file-based)
-          _credentials: {
-            login: accountId,
-            password: '', // Not needed for file-based
-            server: data.server || data.broker || '',
-          },
-        };
-        connectionSessions.set(accountId, session);
-        
-        // Store metrics from EA snapshot
-        const metrics: ConnectionMetrics = {
-          balance: data.balance ?? 0,
-          equity: data.equity ?? 0,
-          profit: data.floatingPnL ?? 0,
-          positionCount: data.positions?.length ?? 0,
-          margin: data.margin,
-          freeMargin: data.freeMargin,
-          marginLevel: data.marginLevel,
-        };
-        connectionMetrics.set(accountId, metrics);
-        
-        // Store positions
-        if (data.positions) {
-          const positions: ConnectionPosition[] = data.positions.map((p: any) => ({
-            ticket: parseInt(p.id) || 0,
-            symbol: p.symbol,
-            type: p.side === 'BUY' ? 'buy' : 'sell',
-            volume: p.volumeLots,
-            openPrice: p.entryPrice,
-            currentPrice: p.currentPrice,
-            profit: p.profit,
-            stopLoss: p.stopLoss,
-            takeProfit: p.takeProfit,
-            openTime: p.openTime || new Date().toISOString(),
-            magic: 0,
-            comment: p.comment || '',
-          }));
-          connectionPositions.set(accountId, positions);
-        }
-        
-        console.log('[Main] Auto-connected account:', accountId, 'Balance:', metrics.balance);
-      } catch (err) {
-        console.log('[Main] Failed to auto-connect from terminal:', terminal.dataPath, err);
       }
+    } else {
+      console.log('[Main] ZeroMQ connection failed - EA not running');
     }
     
     // Also try to load persisted sessions and mark them for reconnect
@@ -307,7 +299,7 @@ async function autoReconnectFromEAFiles(): Promise<void> {
           autoReconnect: true,
           _credentials: {
             login: ps.login,
-            password: '', // Will need password to fully reconnect
+            password: '',
             server: ps.server,
           },
         };
@@ -357,6 +349,118 @@ function buildAllSnapshots(): ConnectionSnapshotMap {
     }
   }
   return snapshots;
+}
+
+/**
+ * Check ZeroMQ health for all connected sessions
+ * Marks sessions as disconnected if ZeroMQ data is stale
+ */
+async function checkZMQHealthForAllSessions(): Promise<void> {
+  const now = new Date();
+  
+  for (const [accountId, session] of connectionSessions) {
+    // Only check connected sessions
+    if (session.status !== 'connected') continue;
+    
+    // Check if we have recent ZeroMQ data
+    const lastUpdate = lastEADataTimestamp.get(accountId);
+    const isStale = !lastUpdate || (now.getTime() - lastUpdate.getTime() > EA_STALENESS_THRESHOLD_MS);
+    
+    if (isStale) {
+      // Try to refresh from ZeroMQ to confirm disconnection
+      const stillConnected = await verifyZMQConnection(accountId, session);
+      
+      if (!stillConnected) {
+        console.log(`[Main] ZeroMQ disconnected for account ${accountId} - terminal closed or EA removed`);
+        updateSessionStatus(accountId, 'disconnected', 'Trading terminal closed or HedgeEdgeZMQ EA removed');
+      }
+    }
+  }
+}
+
+/**
+ * Verify if ZeroMQ connection is still active
+ * Returns true if connection is still active, false if disconnected
+ */
+async function verifyZMQConnection(accountId: string, session: ConnectionSession): Promise<boolean> {
+  try {
+    if (session.platform === 'mt5') {
+      // Check ZeroMQ connection for MT5
+      const zmqTerminals = agentChannelReader.getMT5Terminals().filter(
+        id => agentChannelReader.isTerminalConnected(id)
+      );
+      
+      for (const terminalId of zmqTerminals) {
+        const snapshot = agentChannelReader.getLastSnapshot(terminalId);
+        if (snapshot) {
+          const login = session._credentials?.login || accountId;
+          
+          // Check if this ZMQ data matches our account
+          if (String(snapshot.accountId) === String(login)) {
+            // Check if the data timestamp is fresh
+            const zmqTimestamp = new Date(snapshot.timestamp);
+            const now = new Date();
+            const ageMs = now.getTime() - zmqTimestamp.getTime();
+            
+            if (ageMs < EA_STALENESS_THRESHOLD_MS) {
+              // ZMQ is still running and providing fresh data
+              lastEADataTimestamp.set(accountId, now);
+              
+              // Update metrics from fresh data
+              const metrics: ConnectionMetrics = {
+                balance: snapshot.balance ?? 0,
+                equity: snapshot.equity ?? 0,
+                profit: snapshot.floatingPnL ?? 0,
+                positionCount: snapshot.positions?.length ?? 0,
+                margin: snapshot.margin,
+                freeMargin: snapshot.freeMargin,
+                marginLevel: snapshot.marginLevel,
+              };
+              connectionMetrics.set(accountId, metrics);
+              
+              return true;
+            }
+          }
+        }
+      }
+      
+      // Try to reconnect via ZeroMQ
+      const connected = await agentChannelReader.connectMT5('mt5-default', {
+        dataPort: 51810,
+        commandPort: 51811,
+      });
+      
+      if (connected) {
+        await new Promise(resolve => setTimeout(resolve, 500));
+        const snapshot = agentChannelReader.getLastSnapshot('mt5-default');
+        if (snapshot && String(snapshot.accountId) === String(accountId)) {
+          lastEADataTimestamp.set(accountId, new Date());
+          return true;
+        }
+      }
+      
+      // No fresh MT5 ZMQ data found
+      return false;
+      
+    } else if (session.platform === 'ctrader') {
+      // For cTrader, check if the named pipe is still available
+      try {
+        const pipeAvailable = await isCTraderPipeAvailable();
+        if (pipeAvailable) {
+          lastEADataTimestamp.set(accountId, new Date());
+          return true;
+        }
+      } catch {
+        // Pipe not available
+      }
+      return false;
+    }
+    
+    return false;
+  } catch (error) {
+    console.error(`[Main] Error verifying ZMQ connection for ${accountId}:`, error);
+    return false;
+  }
 }
 
 /**
@@ -419,6 +523,9 @@ async function fetchSessionMetrics(accountId: string): Promise<void> {
     if (result.success && result.data) {
       const data = result.data;
       
+      // Track successful data fetch for health checking
+      lastEADataTimestamp.set(accountId, new Date());
+      
       // Update metrics
       const metrics: ConnectionMetrics = {
         balance: data.balance ?? 0,
@@ -463,7 +570,7 @@ async function fetchSessionMetrics(accountId: string): Promise<void> {
 
 /**
  * Connect an account
- * For MT5: First tries to connect via EA file (no password needed), falls back to agent API
+ * For MT5: Connects via ZeroMQ (HedgeEdgeZMQ EA)
  */
 async function connectAccount(params: {
   accountId: string;
@@ -489,77 +596,95 @@ async function connectAccount(params: {
   };
   connectionSessions.set(accountId, session);
 
-  // For MT5, try file-based connection first (no password needed)
+  // For MT5, connect via ZeroMQ
   if (platform === 'mt5') {
     try {
-      const detectionResult = await detectTerminals();
-      if (detectionResult.success && detectionResult.terminals) {
-        const mt5Terminals = detectionResult.terminals.filter((t: { type: string }) => t.type === 'mt5');
+      // Check for existing ZeroMQ connection
+      let snapshot = null;
+      const zmqTerminals = agentChannelReader.getMT5Terminals().filter(
+        id => agentChannelReader.isTerminalConnected(id)
+      );
+      
+      for (const terminalId of zmqTerminals) {
+        const s = agentChannelReader.getLastSnapshot(terminalId);
+        if (s && String(s.accountId) === String(credentials.login)) {
+          snapshot = s;
+          break;
+        }
+      }
+      
+      // Try to connect via ZeroMQ if no existing connection
+      if (!snapshot) {
+        const connected = await agentChannelReader.connectMT5('mt5-default', {
+          dataPort: 51810,
+          commandPort: 51811,
+        });
         
-        for (const terminal of mt5Terminals) {
-          if (!terminal.dataPath) continue;
-          
-          const snapshotResult = await readMT5Snapshot(terminal.dataPath);
-          if (snapshotResult.success && snapshotResult.data) {
-            const data = snapshotResult.data;
-            
-            // Check if this matches the account we're trying to connect
-            if (String(data.accountId) === String(credentials.login)) {
-              console.log('[Main] Connected via EA file for account:', credentials.login);
-              
-              // Update session to connected
-              session.status = 'connected';
-              session.lastConnected = new Date().toISOString();
-              session.lastUpdate = session.lastConnected;
-              connectionSessions.set(accountId, session);
-              
-              // Store metrics
-              const metrics: ConnectionMetrics = {
-                balance: data.balance ?? 0,
-                equity: data.equity ?? 0,
-                profit: data.floatingPnL ?? 0,
-                positionCount: data.positions?.length ?? 0,
-                margin: data.margin,
-                freeMargin: data.freeMargin,
-                marginLevel: data.marginLevel,
-              };
-              connectionMetrics.set(accountId, metrics);
-              
-              // Store positions
-              if (data.positions) {
-                const positions: ConnectionPosition[] = data.positions.map((p: any) => ({
-                  ticket: parseInt(p.id) || 0,
-                  symbol: p.symbol,
-                  type: p.side === 'BUY' ? 'buy' : 'sell',
-                  volume: p.volumeLots,
-                  openPrice: p.entryPrice,
-                  currentPrice: p.currentPrice,
-                  profit: p.profit,
-                  stopLoss: p.stopLoss,
-                  takeProfit: p.takeProfit,
-                  openTime: p.openTime || new Date().toISOString(),
-                  magic: 0,
-                  comment: p.comment || '',
-                }));
-                connectionPositions.set(accountId, positions);
-              }
-              
-              // Save session for reconnect on restart
-              savePersistedSessions().catch(err => console.error('[Main] Failed to save sessions:', err));
-              
-              return { success: true };
-            }
+        if (connected) {
+          await new Promise(resolve => setTimeout(resolve, 500));
+          const s = agentChannelReader.getLastSnapshot('mt5-default');
+          if (s && String(s.accountId) === String(credentials.login)) {
+            snapshot = s;
           }
         }
       }
       
-      // EA file not found for this account
-      console.log('[Main] No EA file found for account:', credentials.login);
-      updateSessionStatus(accountId, 'error', 'EA not running for this account. Start the HedgeEdge EA on MT5.');
-      return { success: false, error: 'EA not running for this account. Start the HedgeEdge EA on MT5.' };
+      if (snapshot) {
+        console.log('[Main] Connected via ZeroMQ for account:', credentials.login);
+        
+        // Track timestamp for health checking
+        lastEADataTimestamp.set(accountId, new Date());
+        
+        // Update session to connected
+        session.status = 'connected';
+        session.lastConnected = new Date().toISOString();
+        session.lastUpdate = session.lastConnected;
+        connectionSessions.set(accountId, session);
+        
+        // Store metrics
+        const metrics: ConnectionMetrics = {
+          balance: snapshot.balance ?? 0,
+          equity: snapshot.equity ?? 0,
+          profit: snapshot.floatingPnL ?? 0,
+          positionCount: snapshot.positions?.length ?? 0,
+          margin: snapshot.margin,
+          freeMargin: snapshot.freeMargin,
+          marginLevel: snapshot.marginLevel,
+        };
+        connectionMetrics.set(accountId, metrics);
+        
+        // Store positions
+        if (snapshot.positions) {
+          const positions: ConnectionPosition[] = snapshot.positions.map((p: any) => ({
+            ticket: parseInt(p.id) || 0,
+            symbol: p.symbol,
+            type: p.side === 'BUY' ? 'buy' : 'sell',
+            volume: p.volumeLots,
+            openPrice: p.entryPrice,
+            currentPrice: p.currentPrice,
+            profit: p.profit,
+            stopLoss: p.stopLoss,
+            takeProfit: p.takeProfit,
+            openTime: p.openTime || new Date().toISOString(),
+            magic: 0,
+            comment: p.comment || '',
+          }));
+          connectionPositions.set(accountId, positions);
+        }
+        
+        // Save session for reconnect on restart
+        savePersistedSessions().catch(err => console.error('[Main] Failed to save sessions:', err));
+        
+        return { success: true };
+      }
+      
+      // ZeroMQ connection not found for this account
+      console.log('[Main] No ZeroMQ connection found for account:', credentials.login);
+      updateSessionStatus(accountId, 'error', 'HedgeEdgeZMQ EA not running for this account.');
+      return { success: false, error: 'HedgeEdgeZMQ EA not running for this account. Attach the EA to a chart in MT5.' };
       
     } catch (error) {
-      console.log('[Main] File-based connection failed:', error);
+      console.log('[Main] ZeroMQ connection failed:', error);
       updateSessionStatus(accountId, 'error', error instanceof Error ? error.message : 'Connection failed');
       return { success: false, error: error instanceof Error ? error.message : 'Connection failed' };
     }
@@ -1102,13 +1227,10 @@ function setupIpcHandlers() {
     return { success: true, data: bundledAgentExists(platform) };
   });
 
-  // Get connected accounts from EAs/cBots
+  // Get connected accounts from ZeroMQ
   ipcMain.handle('agent:getConnectedAccounts', async () => {
     try {
-      // Scan all detected MT5 terminals for account data files
-      await debugLog('[getConnectedAccounts] Starting terminal detection...');
-      const detectionResult = await detectTerminals();
-      await debugLog(`[getConnectedAccounts] Found ${detectionResult.terminals.length} terminals`);
+      await debugLog('[getConnectedAccounts] Checking ZeroMQ connections...');
       
       const connectedAccounts: Array<{
         login: string;
@@ -1121,31 +1243,51 @@ function setupIpcHandlers() {
         leverage?: number;
       }> = [];
       
-      for (const terminal of detectionResult.terminals) {
-        await debugLog(`[getConnectedAccounts] Checking terminal: ${terminal.id}, type: ${terminal.type}, dataPath: ${terminal.dataPath}, installPath: ${terminal.installPath}`);
-        if (terminal.type === 'mt5' || terminal.type === 'mt4') {
-          const dataPath = terminal.dataPath || terminal.installPath;
-          await debugLog(`[getConnectedAccounts] Reading from: ${dataPath}`);
-          try {
-            const snapshot = await readMT5Snapshot(dataPath);
-            await debugLog(`[getConnectedAccounts] Snapshot result: success=${snapshot.success}, error=${snapshot.error}`);
-            if (snapshot.success && snapshot.data) {
-              await debugLog(`[getConnectedAccounts] Found account: ${snapshot.data.accountId} @ ${snapshot.data.broker}`);
-              // Found a connected account!
-              connectedAccounts.push({
-                login: snapshot.data.accountId,
-                server: snapshot.data.server || snapshot.data.broker || 'Unknown',
-                name: snapshot.data.accountId,
-                broker: snapshot.data.broker,
-                balance: snapshot.data.balance,
-                equity: snapshot.data.equity,
-                currency: snapshot.data.currency,
-                leverage: snapshot.data.leverage,
-              });
-            }
-          } catch (err) {
-            await debugLog(`[getConnectedAccounts] Error reading terminal: ${err}`);
-            // No data file for this terminal, skip
+      // Check for existing ZeroMQ connections
+      const zmqTerminals = agentChannelReader.getMT5Terminals().filter(
+        id => agentChannelReader.isTerminalConnected(id)
+      );
+      
+      for (const terminalId of zmqTerminals) {
+        const snapshot = agentChannelReader.getLastSnapshot(terminalId);
+        if (snapshot) {
+          await debugLog(`[getConnectedAccounts] Found ZMQ account: ${snapshot.accountId} @ ${snapshot.broker}`);
+          connectedAccounts.push({
+            login: String(snapshot.accountId),
+            server: snapshot.server || snapshot.broker || 'Unknown',
+            name: String(snapshot.accountId),
+            broker: snapshot.broker,
+            balance: snapshot.balance,
+            equity: snapshot.equity,
+            currency: snapshot.currency,
+            leverage: snapshot.leverage,
+          });
+        }
+      }
+      
+      // Try to connect via ZeroMQ if no existing connections
+      if (connectedAccounts.length === 0) {
+        await debugLog('[getConnectedAccounts] No existing ZMQ connections, trying to connect...');
+        const connected = await agentChannelReader.connectMT5('mt5-default', {
+          dataPort: 51810,
+          commandPort: 51811,
+        });
+        
+        if (connected) {
+          await new Promise(resolve => setTimeout(resolve, 500));
+          const snapshot = agentChannelReader.getLastSnapshot('mt5-default');
+          if (snapshot) {
+            await debugLog(`[getConnectedAccounts] Found ZMQ account after connect: ${snapshot.accountId}`);
+            connectedAccounts.push({
+              login: String(snapshot.accountId),
+              server: snapshot.server || snapshot.broker || 'Unknown',
+              name: String(snapshot.accountId),
+              broker: snapshot.broker,
+              balance: snapshot.balance,
+              equity: snapshot.equity,
+              currency: snapshot.currency,
+              leverage: snapshot.leverage,
+            });
           }
         }
       }
@@ -1169,6 +1311,7 @@ function setupIpcHandlers() {
   // -------------------------------------------------------------------------
 
   // Get terminal status
+  // MT5: ZeroMQ only | cTrader: Named Pipes
   ipcMain.handle('trading:getStatus', async (_event, platform: unknown) => {
     // Wrap in safe serialization to prevent IPC DataCloneError
     const getStatusInternal = async () => {
@@ -1177,32 +1320,64 @@ function setupIpcHandlers() {
       }
       
       try {
-        // First, check for file-based EA connection (works for MT5 EA without separate agent)
+        // MT5: Check ZeroMQ first (PRIMARY)
         if (platform === 'mt5') {
-          const detectionResult = await detectTerminals();
-          if (detectionResult.success && detectionResult.terminals) {
-            const mt5Terminals = detectionResult.terminals.filter((t: { type: string }) => t.type === 'mt5');
-            
-            for (const terminal of mt5Terminals) {
-              if (terminal.dataPath) {
-                const snapshot = await readMT5Snapshot(terminal.dataPath);
-                if (snapshot.success && snapshot.data) {
-                  // EA is writing data - terminal is running and connected
-                  return {
-                    success: true,
-                    data: {
-                      connected: true,
-                      platform,
-                      terminalRunning: true,
-                      lastHeartbeat: snapshot.data.timestamp || new Date().toISOString(),
-                    },
-                  };
-                }
-              }
-            }
+          // Check for active ZeroMQ connections
+          const zmqTerminals = agentChannelReader.getMT5Terminals().filter(
+            id => agentChannelReader.isTerminalConnected(id)
+          );
+          
+          if (zmqTerminals.length > 0) {
+            const stats = agentChannelReader.getStats(zmqTerminals[0]);
+            return {
+              success: true,
+              data: {
+                connected: true,
+                platform,
+                terminalRunning: true,
+                zmqMode: true,
+                zmqConnected: true,
+                snapshotsReceived: stats?.snapshotsReceived || 0,
+                lastHeartbeat: new Date().toISOString(),
+              },
+            };
           }
+          
+          // Try to connect via ZeroMQ
+          const zmqConnected = await agentChannelReader.connectMT5('mt5-default', {
+            dataPort: 51810,
+            commandPort: 51811,
+          });
+          
+          if (zmqConnected) {
+            return {
+              success: true,
+              data: {
+                connected: true,
+                platform,
+                terminalRunning: true,
+                zmqMode: true,
+                zmqConnected: true,
+                lastHeartbeat: new Date().toISOString(),
+              },
+            };
+          }
+          
+          // ZeroMQ connection failed - EA not running
+          return {
+            success: true,
+            data: {
+              connected: false,
+              platform,
+              terminalRunning: false,
+              zmqMode: false,
+              zmqConnected: false,
+              error: 'HedgeEdgeZMQ EA not running. Attach the EA to a chart in MT5.',
+            },
+          };
         }
         
+        // cTrader: Use agent API
         const config = getAgentConfig();
         const platformConfig = config[platform];
         const isLocalAgent = platformConfig.endpoint.host === '127.0.0.1' || platformConfig.endpoint.host === 'localhost';
@@ -1214,15 +1389,13 @@ function setupIpcHandlers() {
           const portAvailable = await isPortAvailable(port);
           
           if (portAvailable) {
-            // Port is available = agent not running, but check if we found EA above
-            // If we get here for MT5, it means no EA data was found
             return {
               success: true,
               data: {
                 connected: false,
                 platform,
                 terminalRunning: false,
-                error: platform === 'mt5' ? 'MT5 EA not running or not writing data' : 'Trading agent not running',
+                error: 'Trading agent not running',
               },
             };
           }
@@ -1283,29 +1456,42 @@ function setupIpcHandlers() {
       return { success: false, error: 'Invalid credentials format' };
     }
     
-    // For MT5, first try to validate via file-based EA (if no HTTP agent running)
+    // For MT5, validate via ZeroMQ snapshot
     if (platform === 'mt5') {
-      try {
-        const detectionResult = await detectTerminals();
-        if (detectionResult.success && detectionResult.terminals) {
-          const mt5Terminals = detectionResult.terminals.filter((t: { type: string }) => t.type === 'mt5');
-          
-          for (const terminal of mt5Terminals) {
-            if (terminal.dataPath) {
-              const snapshot = await readMT5Snapshot(terminal.dataPath);
-              if (snapshot.success && snapshot.data) {
-                // Check if the account ID matches the credentials
-                if (snapshot.data.accountId === credentials.login) {
-                  console.log('[Main] Validated MT5 credentials via EA file for account:', credentials.login);
-                  return { success: true, data: { valid: true } };
-                }
-              }
-            }
+      // Check for active ZeroMQ connections
+      const zmqTerminals = agentChannelReader.getMT5Terminals().filter(
+        id => agentChannelReader.isTerminalConnected(id)
+      );
+      
+      for (const terminalId of zmqTerminals) {
+        const snapshot = agentChannelReader.getLastSnapshot(terminalId);
+        if (snapshot && String(snapshot.accountId) === String(credentials.login)) {
+          console.log('[Main] Validated MT5 credentials via ZeroMQ for account:', credentials.login);
+          return { success: true, data: { valid: true } };
+        }
+      }
+      
+      // Try to connect via ZeroMQ if not connected
+      if (zmqTerminals.length === 0) {
+        const connected = await agentChannelReader.connectMT5('mt5-default', {
+          dataPort: 51810,
+          commandPort: 51811,
+        });
+        
+        if (connected) {
+          await new Promise(resolve => setTimeout(resolve, 500));
+          const snapshot = agentChannelReader.getLastSnapshot('mt5-default');
+          if (snapshot && String(snapshot.accountId) === String(credentials.login)) {
+            console.log('[Main] Validated MT5 credentials via new ZeroMQ connection:', credentials.login);
+            return { success: true, data: { valid: true } };
           }
         }
-      } catch (err) {
-        console.log('[Main] File-based validation failed, trying agent:', err);
       }
+      
+      return { 
+        success: false, 
+        error: 'MT5 not connected. Make sure HedgeEdgeZMQ EA is running on the account.' 
+      };
     }
     
     // NOTE: Password is never stored at rest - only passed through to agent
@@ -1313,6 +1499,7 @@ function setupIpcHandlers() {
   });
 
   // Get account snapshot (with payload validation)
+  // ZeroMQ ONLY for MT5
   ipcMain.handle('trading:getSnapshot', async (
     _event,
     platform: unknown,
@@ -1329,93 +1516,39 @@ function setupIpcHandlers() {
         return { success: false, error: 'Invalid credentials format' };
       }
     
-    // For MT5, first try to get snapshot from file-based EA
+    // For MT5 - ZeroMQ is PRIMARY
     if (platform === 'mt5') {
-      try {
-        const detectionResult = await detectTerminals();
-        if (detectionResult.success && detectionResult.terminals) {
-          const mt5Terminals = detectionResult.terminals.filter((t: { type: string }) => t.type === 'mt5');
-          
-          // Collect all available snapshots first
-          const availableSnapshots: Array<{ terminal: typeof mt5Terminals[0], data: any }> = [];
-          
-          for (const terminal of mt5Terminals) {
-            if (terminal.dataPath) {
-              const snapshotResult = await readMT5Snapshot(terminal.dataPath);
-              if (snapshotResult.success && snapshotResult.data) {
-                availableSnapshots.push({ terminal, data: snapshotResult.data });
-              }
+      // First, check if we have an active ZeroMQ connection
+      const zmqTerminals = agentChannelReader.getMT5Terminals().filter(
+        id => agentChannelReader.isTerminalUsingZmq(id)
+      );
+      
+      // Try ZeroMQ connection first (if available)
+      if (zmqTerminals.length > 0) {
+        for (const terminalId of zmqTerminals) {
+          const snapshot = agentChannelReader.getLastSnapshot(terminalId);
+          if (snapshot) {
+            // Check if credentials match (if provided)
+            if (credentials && String(snapshot.accountId) !== String(credentials.login)) {
+              continue;
             }
-          }
-          
-          // If credentials provided, find the matching account
-          if (credentials) {
-            // Convert both sides to strings for comparison (JSON may parse accountId as number)
-            const matchingSnapshot = availableSnapshots.find(
-              s => String(s.data.accountId) === String(credentials.login)
-            );
             
-            if (matchingSnapshot) {
-              console.log('[Main] Got MT5 snapshot via EA file for account:', matchingSnapshot.data.accountId);
-              const data = matchingSnapshot.data;
-              return {
-                success: true,
-                data: {
-                  balance: data.balance,
-                  equity: data.equity,
-                  margin: data.margin,
-                  freeMargin: data.freeMargin,
-                  marginLevel: data.marginLevel,
-                  profit: data.floatingPnL,
-                  currency: data.currency,
-                  leverage: data.leverage,
-                  accountId: data.accountId,
-                  broker: data.broker,
-                  server: data.server || '',
-                  positions: (data.positions || []).map((p: any) => ({
-                    ticket: parseInt(p.id) || 0,
-                    symbol: p.symbol,
-                    type: p.side === 'BUY' ? 0 : 1,
-                    volume: p.volumeLots,
-                    openPrice: p.entryPrice,
-                    currentPrice: p.currentPrice,
-                    stopLoss: p.stopLoss || 0,
-                    takeProfit: p.takeProfit || 0,
-                    profit: p.profit,
-                    swap: p.swap,
-                    commission: p.commission,
-                    openTime: p.openTime,
-                    comment: p.comment || '',
-                  })),
-                  timestamp: data.timestamp,
-                },
-              };
-            }
-            // If credentials provided but no match found, return error
-            console.log('[Main] No MT5 file found for account:', credentials.login);
-            return { 
-              success: false, 
-              error: `No data found for account ${credentials.login}. Make sure the EA is running on that terminal.` 
-            };
-          } else if (availableSnapshots.length === 1) {
-            // No credentials but only one account available - return it
-            const data = availableSnapshots[0].data;
-            console.log('[Main] Got MT5 snapshot (single account):', data.accountId);
+            console.log('[Main] Got MT5 snapshot via ZeroMQ for account:', snapshot.accountId);
             return {
               success: true,
               data: {
-                balance: data.balance,
-                equity: data.equity,
-                margin: data.margin,
-                freeMargin: data.freeMargin,
-                marginLevel: data.marginLevel,
-                profit: data.floatingPnL,
-                currency: data.currency,
-                leverage: data.leverage,
-                accountId: data.accountId,
-                broker: data.broker,
-                server: data.server || '',
-                positions: (data.positions || []).map((p: any) => ({
+                balance: snapshot.balance,
+                equity: snapshot.equity,
+                margin: snapshot.margin,
+                freeMargin: snapshot.freeMargin,
+                marginLevel: snapshot.marginLevel,
+                profit: snapshot.floatingPnL,
+                currency: snapshot.currency,
+                leverage: snapshot.leverage,
+                accountId: snapshot.accountId,
+                broker: snapshot.broker,
+                server: snapshot.server || '',
+                positions: (snapshot.positions || []).map((p: any) => ({
                   ticket: parseInt(p.id) || 0,
                   symbol: p.symbol,
                   type: p.side === 'BUY' ? 0 : 1,
@@ -1430,26 +1563,71 @@ function setupIpcHandlers() {
                   openTime: p.openTime,
                   comment: p.comment || '',
                 })),
-                timestamp: data.timestamp,
+                timestamp: snapshot.timestamp,
+                zmqMode: true, // Indicate ZMQ mode
               },
             };
           }
-          // Multiple accounts but no credentials - return error
-          if (availableSnapshots.length > 1 && !credentials) {
+        }
+      }
+      
+      // Try to establish ZeroMQ connection if none exists
+      if (zmqTerminals.length === 0) {
+        console.log('[Main] No active ZMQ connections, attempting to connect...');
+        const connected = await agentChannelReader.connectMT5('mt5-default', {
+          dataPort: 51810,
+          commandPort: 51811,
+        });
+        
+        if (connected) {
+          // Wait a moment for first snapshot
+          await new Promise(resolve => setTimeout(resolve, 500));
+          const snapshot = agentChannelReader.getLastSnapshot('mt5-default');
+          if (snapshot) {
+            console.log('[Main] Got MT5 snapshot via new ZeroMQ connection:', snapshot.accountId);
             return {
-              success: false,
-              error: 'Multiple accounts detected. Please specify which account to connect to.',
+              success: true,
+              data: {
+                balance: snapshot.balance,
+                equity: snapshot.equity,
+                margin: snapshot.margin,
+                freeMargin: snapshot.freeMargin,
+                marginLevel: snapshot.marginLevel,
+                profit: snapshot.floatingPnL,
+                currency: snapshot.currency,
+                leverage: snapshot.leverage,
+                accountId: snapshot.accountId,
+                broker: snapshot.broker,
+                server: snapshot.server || '',
+                positions: (snapshot.positions || []).map((p: any) => ({
+                  ticket: parseInt(p.id) || 0,
+                  symbol: p.symbol,
+                  type: p.side === 'BUY' ? 0 : 1,
+                  volume: p.volumeLots,
+                  openPrice: p.entryPrice,
+                  currentPrice: p.currentPrice,
+                  stopLoss: p.stopLoss || 0,
+                  takeProfit: p.takeProfit || 0,
+                  profit: p.profit,
+                  swap: p.swap,
+                  commission: p.commission,
+                  openTime: p.openTime,
+                  comment: p.comment || '',
+                })),
+                timestamp: snapshot.timestamp,
+                zmqMode: true,
+              },
             };
           }
         }
-      } catch (err) {
-        console.log('[Main] File-based snapshot failed:', err);
-        // Return a proper error instead of falling through to agentRequest
-        return {
-          success: false,
-          error: err instanceof Error ? err.message : 'Failed to read MT5 data',
-        };
       }
+      
+      // ZeroMQ connection failed - no MT5 data available
+      console.log('[Main] ZeroMQ not available. HedgeEdgeZMQ EA must be running.');
+      return {
+        success: false,
+        error: 'MT5 not connected. Make sure HedgeEdgeZMQ EA is attached to a chart in MT5.',
+      };
     }
     
     // Only try agentRequest for cTrader or if explicitly configured
@@ -1460,10 +1638,10 @@ function setupIpcHandlers() {
       return agentRequest(platform, '/api/snapshot');
     }
     
-    // For MT5 without file-based data, return error (no HTTP agent available)
+    // Unknown platform
     return {
       success: false,
-      error: 'MT5 data not available. Make sure the HedgeEdge EA is running.',
+      error: `Unsupported platform: ${platform}`,
     };
     };
     
@@ -1677,7 +1855,6 @@ function setupIpcHandlers() {
     const dataPort = typeof p.dataPort === 'number' ? p.dataPort : undefined;
     const commandPort = typeof p.commandPort === 'number' ? p.commandPort : undefined;
     const host = typeof p.host === 'string' ? p.host : '127.0.0.1';
-    const fallbackDataPath = typeof p.fallbackDataPath === 'string' ? p.fallbackDataPath : undefined;
 
     if (!terminalId) {
       return { success: false, error: 'Terminal ID is required' };
@@ -1688,13 +1865,12 @@ function setupIpcHandlers() {
         dataPort,
         commandPort,
         host,
-        fallbackDataPath,
       });
 
       return { 
         success, 
         mode: agentChannelReader.getTerminalMode(terminalId),
-        error: success ? undefined : 'Failed to connect ZMQ, may be using file fallback',
+        error: success ? undefined : 'Failed to connect ZeroMQ. Make sure HedgeEdgeZMQ EA is running.',
       };
     } catch (error) {
       return {
@@ -1800,8 +1976,11 @@ function setupIpcHandlers() {
   // Connection Management Handlers
   // -------------------------------------------------------------------------
 
-  // List all connection snapshots
-  ipcMain.handle('connections:list', () => {
+  // List all connection snapshots (with ZeroMQ health check)
+  ipcMain.handle('connections:list', async () => {
+    // Check ZeroMQ health before returning snapshots
+    // This ensures the UI reflects actual connection state
+    await checkZMQHealthForAllSessions();
     return safeSerializeForIPC(buildAllSnapshots());
   });
 
@@ -1899,7 +2078,7 @@ function setupIpcHandlers() {
   ipcMain.handle('connections:reconnect', async () => {
     console.log('[Main] Manual reconnect triggered');
     try {
-      await autoReconnectFromEAFiles();
+      await autoReconnectFromZMQ();
       return { 
         success: true, 
         sessionsCount: connectionSessions.size,
@@ -1913,7 +2092,7 @@ function setupIpcHandlers() {
     }
   });
 
-  // Refresh data for a specific account by re-reading EA file
+  // Refresh connection data from ZeroMQ
   ipcMain.handle('connections:refreshFromEA', async (_event, accountId: unknown) => {
     if (typeof accountId !== 'string' || !accountId) {
       return { success: false, error: 'Account ID is required' };
@@ -1924,75 +2103,90 @@ function setupIpcHandlers() {
       return { success: false, error: 'Session not found' };
     }
     
-    // Try to refresh from EA file
+    // Try to refresh from ZeroMQ
     if (session.platform === 'mt5') {
       try {
-        const detectionResult = await detectTerminals();
-        if (detectionResult.success && detectionResult.terminals) {
-          const mt5Terminals = detectionResult.terminals.filter((t: { type: string }) => t.type === 'mt5');
-          
-          for (const terminal of mt5Terminals) {
-            if (!terminal.dataPath) continue;
+        // Check existing ZeroMQ connections
+        const zmqTerminals = agentChannelReader.getMT5Terminals().filter(
+          id => agentChannelReader.isTerminalConnected(id)
+        );
+        
+        for (const terminalId of zmqTerminals) {
+          const snapshot = agentChannelReader.getLastSnapshot(terminalId);
+          if (snapshot && String(snapshot.accountId) === String(session._credentials?.login || accountId)) {
+            // Track timestamp for health checking
+            lastEADataTimestamp.set(accountId, new Date());
             
-            const snapshotResult = await readMT5Snapshot(terminal.dataPath);
-            if (snapshotResult.success && snapshotResult.data) {
-              const data = snapshotResult.data;
-              
-              if (String(data.accountId) === String(session._credentials?.login || accountId)) {
-                // Update metrics
-                const metrics: ConnectionMetrics = {
-                  balance: data.balance ?? 0,
-                  equity: data.equity ?? 0,
-                  profit: data.floatingPnL ?? 0,
-                  positionCount: data.positions?.length ?? 0,
-                  margin: data.margin,
-                  freeMargin: data.freeMargin,
-                  marginLevel: data.marginLevel,
-                };
-                connectionMetrics.set(accountId, metrics);
-                
-                // Update session status
-                session.status = 'connected';
-                session.lastUpdate = new Date().toISOString();
-                session.error = undefined;
-                connectionSessions.set(accountId, session);
-                
-                // Update positions
-                if (data.positions) {
-                  const positions: ConnectionPosition[] = data.positions.map((p: any) => ({
-                    ticket: parseInt(p.id) || 0,
-                    symbol: p.symbol,
-                    type: p.side === 'BUY' ? 'buy' : 'sell',
-                    volume: p.volumeLots,
-                    openPrice: p.entryPrice,
-                    currentPrice: p.currentPrice,
-                    profit: p.profit,
-                    stopLoss: p.stopLoss,
-                    takeProfit: p.takeProfit,
-                    openTime: p.openTime || new Date().toISOString(),
-                    magic: 0,
-                    comment: p.comment || '',
-                  }));
-                  connectionPositions.set(accountId, positions);
-                }
-                
-                return { success: true };
-              }
+            // Update metrics
+            const metrics: ConnectionMetrics = {
+              balance: snapshot.balance ?? 0,
+              equity: snapshot.equity ?? 0,
+              profit: snapshot.floatingPnL ?? 0,
+              positionCount: snapshot.positions?.length ?? 0,
+              margin: snapshot.margin,
+              freeMargin: snapshot.freeMargin,
+              marginLevel: snapshot.marginLevel,
+            };
+            connectionMetrics.set(accountId, metrics);
+            
+            // Update session status
+            session.status = 'connected';
+            session.lastUpdate = new Date().toISOString();
+            session.error = undefined;
+            connectionSessions.set(accountId, session);
+            
+            // Update positions
+            if (snapshot.positions) {
+              const positions: ConnectionPosition[] = snapshot.positions.map((p: any) => ({
+                ticket: parseInt(p.id) || 0,
+                symbol: p.symbol,
+                type: p.side === 'BUY' ? 'buy' : 'sell',
+                volume: p.volumeLots,
+                openPrice: p.entryPrice,
+                currentPrice: p.currentPrice,
+                profit: p.profit,
+                stopLoss: p.stopLoss,
+                takeProfit: p.takeProfit,
+                openTime: p.openTime || new Date().toISOString(),
+                magic: 0,
+                comment: p.comment || '',
+              }));
+              connectionPositions.set(accountId, positions);
             }
+            
+            return { success: true };
           }
         }
         
-        // EA file not found
+        // Try to reconnect via ZeroMQ
+        const connected = await agentChannelReader.connectMT5('mt5-default', {
+          dataPort: 51810,
+          commandPort: 51811,
+        });
+        
+        if (connected) {
+          await new Promise(resolve => setTimeout(resolve, 500));
+          const snapshot = agentChannelReader.getLastSnapshot('mt5-default');
+          if (snapshot && String(snapshot.accountId) === String(accountId)) {
+            lastEADataTimestamp.set(accountId, new Date());
+            session.status = 'connected';
+            session.lastUpdate = new Date().toISOString();
+            connectionSessions.set(accountId, session);
+            return { success: true };
+          }
+        }
+        
+        // ZeroMQ connection not found
         session.status = 'error';
-        session.error = 'EA not running or data file not found';
+        session.error = 'HedgeEdgeZMQ EA not running';
         session.lastUpdate = new Date().toISOString();
         connectionSessions.set(accountId, session);
         
-        return { success: false, error: 'EA not running or data file not found' };
+        return { success: false, error: 'HedgeEdgeZMQ EA not running' };
       } catch (error) {
         return { 
           success: false, 
-          error: error instanceof Error ? error.message : 'Failed to refresh from EA' 
+          error: error instanceof Error ? error.message : 'Failed to refresh from ZeroMQ' 
         };
       }
     }
@@ -2268,30 +2462,47 @@ function setupIpcHandlers() {
   // Agent Data Channel Handlers
   // -------------------------------------------------------------------------
 
-  // Read agent snapshot from MT5 file channel
+  // Read agent snapshot from ZeroMQ or Named Pipe
   ipcMain.handle('agent:readSnapshot', async (_event, terminalId: unknown) => {
     if (typeof terminalId !== 'string' || !terminalId) {
       return { success: false, error: 'Terminal ID is required' };
     }
 
     try {
-      const detectionResult = await detectTerminals();
-      const terminal = detectionResult.terminals.find(t => t.id === terminalId);
-      if (!terminal) {
-        return { success: false, error: 'Terminal not found' };
+      // For MT5, use ZeroMQ
+      if (terminalId.startsWith('mt5') || terminalId.includes('mt5')) {
+        // Check existing ZeroMQ connections
+        const zmqTerminals = agentChannelReader.getMT5Terminals().filter(
+          id => agentChannelReader.isTerminalConnected(id)
+        );
+        
+        for (const tid of zmqTerminals) {
+          const snapshot = agentChannelReader.getLastSnapshot(tid);
+          if (snapshot) {
+            return { success: true, data: snapshot };
+          }
+        }
+        
+        // Try to connect
+        const connected = await agentChannelReader.connectMT5('mt5-default', {
+          dataPort: 51810,
+          commandPort: 51811,
+        });
+        
+        if (connected) {
+          await new Promise(resolve => setTimeout(resolve, 500));
+          const snapshot = agentChannelReader.getLastSnapshot('mt5-default');
+          if (snapshot) {
+            return { success: true, data: snapshot };
+          }
+        }
+        
+        return { success: false, error: 'HedgeEdgeZMQ EA not running' };
       }
-
-      const dataPath = terminal.dataPath || terminal.installPath;
       
-      if (terminal.type === 'mt5' || terminal.type === 'mt4') {
-        const result = await readMT5Snapshot(dataPath);
-        return result;
-      } else if (terminal.type === 'ctrader') {
-        const result = await readCTraderSnapshot();
-        return result;
-      }
-      
-      return { success: false, error: 'Unsupported terminal type' };
+      // For cTrader, use named pipe
+      const result = await readCTraderSnapshot();
+      return result;
     } catch (error) {
       return {
         success: false,
@@ -2836,10 +3047,10 @@ app.whenReady().then(async () => {
     console.error('[Main] Failed to initialize agent supervisor:', error);
   }
   
-  // Auto-reconnect accounts from running EAs (restore connections on restart)
+  // Auto-reconnect accounts via ZeroMQ (restore connections on restart)
   try {
-    await autoReconnectFromEAFiles();
-    console.log('[Main] Auto-reconnect from EA files complete');
+    await autoReconnectFromZMQ();
+    console.log('[Main] Auto-reconnect via ZeroMQ complete');
   } catch (error) {
     console.error('[Main] Auto-reconnect failed:', error);
   }

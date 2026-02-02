@@ -588,7 +588,7 @@ export async function isZmqAvailable(): Promise<boolean> {
     console.log('[ZmqBridge] ZeroMQ is available');
   } catch {
     zmqAvailable = false;
-    console.log('[ZmqBridge] ZeroMQ is not available, falling back to file-based IPC');
+    console.log('[ZmqBridge] ZeroMQ is not available');
   }
 
   return zmqAvailable;
