@@ -38,7 +38,9 @@ import {
   Server,
   Power,
   PowerOff,
+  Archive,
 } from "lucide-react";
+import { cn } from "@/lib/utils";
 
 // Type alias for backwards compatibility  
 type MT5Position = Position;
@@ -182,7 +184,8 @@ export function AccountDetailsModal({
     login: account?.login || "",
     password: cachedPassword || "",
     server: account?.server || "",
-    enabled: open && terminalStatus === 'running' && (hasFileBasedEA || (!!cachedPassword && !needsPassword)),
+    // NEVER fetch snapshots for archived accounts - they are fully disconnected
+    enabled: open && !account?.is_archived && terminalStatus === 'running' && (hasFileBasedEA || (!!cachedPassword && !needsPassword)),
     pollInterval: 3000,
     fullSnapshot: true,
   });
@@ -261,17 +264,23 @@ export function AccountDetailsModal({
   };
 
   const config = phaseConfig[account.phase];
+  
+  // Check if account is archived
+  const isArchived = account.is_archived;
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
-      <SheetContent className="w-full sm:max-w-xl md:max-w-2xl overflow-hidden flex flex-col">
+      <SheetContent className={cn(
+        "w-full sm:max-w-xl md:max-w-2xl overflow-hidden flex flex-col",
+        isArchived && "grayscale opacity-80"
+      )}>
         <SheetHeader className="flex-shrink-0">
           <div className="flex items-center justify-between">
             <div>
               <SheetTitle className="flex items-center gap-2">
                 {account.account_name}
-                <Badge variant="outline" className={config.badge}>
-                  {config.label}
+                <Badge variant="outline" className={isArchived ? "bg-muted/30 text-muted-foreground border-muted-foreground/20" : config.badge}>
+                  {isArchived ? "Archived" : config.label}
                 </Badge>
               </SheetTitle>
               <SheetDescription>
@@ -280,7 +289,16 @@ export function AccountDetailsModal({
             </div>
           </div>
 
-          {/* VPS and Connection Status */}
+          {/* Archived Account Notice */}
+          {isArchived && (
+            <div className="flex items-center gap-2 p-3 bg-muted/30 rounded-lg mt-2 text-sm text-muted-foreground">
+              <Archive className="h-4 w-4" />
+              <span>This account is archived and fully disconnected. Showing last recorded data.</span>
+            </div>
+          )}
+
+          {/* VPS and Connection Status - only show for non-archived accounts */}
+          {!isArchived && (
           <div className="flex items-center justify-between p-2 bg-muted/50 rounded-lg mt-2">
             <div className="flex items-center gap-2">
               {/* Supervised Connection Status (if using connection supervisor) */}
@@ -390,6 +408,7 @@ export function AccountDetailsModal({
               )}
             </div>
           </div>
+          )}
         </SheetHeader>
 
         <ScrollArea className="flex-1 mt-4">

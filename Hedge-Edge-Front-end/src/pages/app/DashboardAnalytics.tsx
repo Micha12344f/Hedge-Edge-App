@@ -35,34 +35,41 @@ const DashboardAnalytics = () => {
   const [performanceTab, setPerformanceTab] = useState('instrument');
   const [selectedAccountId, setSelectedAccountId] = useState<string>('all');
 
+  // Separate active and archived accounts - archived accounts don't need live data
+  const activeAccounts = accounts.filter(a => !a.is_archived);
+  const archivedAccounts = accounts.filter(a => a.is_archived);
+
   // Get selected account or all accounts
   const selectedAccount = selectedAccountId === 'all' 
     ? null 
     : accounts.find(a => a.id === selectedAccountId);
+  
+  const isSelectedArchived = selectedAccount?.is_archived;
 
-  // Calculate stats based on selection
-  const relevantAccounts = selectedAccount ? [selectedAccount] : accounts;
+  // Calculate stats based on selection (only from active accounts for "all")
+  const relevantAccounts = selectedAccount 
+    ? [selectedAccount] 
+    : activeAccounts; // Only active accounts for aggregate stats
   
   const totalPnL = relevantAccounts.reduce((sum, acc) => sum + (Number(acc.pnl) || 0), 0);
   const totalInvestment = relevantAccounts.reduce((sum, acc) => sum + (Number(acc.account_size) || 0), 0);
   const roi = totalInvestment > 0 ? (totalPnL / totalInvestment) * 100 : 0;
 
-  // Calculate hedge discrepancy (difference between hedge accounts and prop accounts P&L)
-  const propAccounts = accounts.filter(a => a.phase === 'funded' || a.phase === 'evaluation');
-  const hedgeAccounts = accounts.filter(a => a.phase === 'live');
+  // Calculate hedge discrepancy (only active accounts)
+  const propAccounts = activeAccounts.filter(a => a.phase === 'funded' || a.phase === 'evaluation');
+  const hedgeAccounts = activeAccounts.filter(a => a.phase === 'live');
   const propPnL = propAccounts.reduce((sum, acc) => sum + (Number(acc.pnl) || 0), 0);
   const hedgePnL = hedgeAccounts.reduce((sum, acc) => sum + (Number(acc.pnl) || 0), 0);
   const hedgeDiscrepancy = propPnL + hedgePnL; // Should be close to 0 if properly hedged
 
-  // Calculate totals for the chart header - funded and evaluation account balances
-  const fundedAccounts = accounts.filter(a => a.phase === 'funded');
-  const evaluationAccounts = accounts.filter(a => a.phase === 'evaluation');
+  // Calculate totals for the chart header - funded and evaluation account balances (active only)
+  const fundedAccounts = activeAccounts.filter(a => a.phase === 'funded');
+  const evaluationAccounts = activeAccounts.filter(a => a.phase === 'evaluation');
   const totalFunded = fundedAccounts.reduce((sum, acc) => sum + (Number(acc.current_balance) || Number(acc.account_size) || 0), 0);
   const totalEvaluation = evaluationAccounts.reduce((sum, acc) => sum + (Number(acc.current_balance) || Number(acc.account_size) || 0), 0);
 
-  // Get unique prop firms from connected accounts and aggregate profit by firm
-  // Get unique prop firms from connected accounts (excluding hedge accounts) and aggregate balance by firm
-  const propFirmData = accounts
+  // Get unique prop firms from connected accounts (excluding hedge and archived accounts)
+  const propFirmData = activeAccounts
     .filter(account => account.phase !== 'live') // Exclude hedge accounts
     .reduce((acc, account) => {
       const firmName = account.prop_firm || 'Unknown';
@@ -175,7 +182,7 @@ const DashboardAnalytics = () => {
 
   return (
     <PageBackground>
-      <div className="p-6 pt-16 space-y-6">
+      <div className={`p-6 pt-16 space-y-6 ${isSelectedArchived ? 'grayscale opacity-60' : ''}`}>
         <div>
           <h1 className="text-2xl font-bold text-foreground">Analytics</h1>
           <p className="text-muted-foreground">Tracking your overall hedging performance</p>
@@ -293,16 +300,40 @@ const DashboardAnalytics = () => {
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="all">All Accounts</SelectItem>
-                      {accounts
+                      {activeAccounts
                         .filter((account) => account.phase !== 'live')
                         .map((account) => (
                           <SelectItem key={account.id} value={account.id}>
                             {account.account_name}
                           </SelectItem>
                         ))}
+                      {archivedAccounts.length > 0 && (
+                        <>
+                          <div className="px-2 py-1.5 text-xs text-muted-foreground border-t border-border/30 mt-1 pt-2">
+                            Archived (Last Recorded)
+                          </div>
+                          {archivedAccounts.map((account) => (
+                            <SelectItem 
+                              key={account.id} 
+                              value={account.id}
+                              className="text-muted-foreground"
+                            >
+                              {account.account_name} (Archived)
+                            </SelectItem>
+                          ))}
+                        </>
+                      )}
                     </SelectContent>
                   </Select>
                 </div>
+
+                {/* Archived account notice */}
+                {isSelectedArchived && (
+                  <div className="flex items-center gap-2 px-3 py-2 rounded-md bg-muted/50 border border-border/30 text-muted-foreground text-xs mb-4">
+                    <span className="opacity-60">📦</span>
+                    <span>Showing last recorded data • This account is archived and no longer syncing</span>
+                  </div>
+                )}
 
                 <Separator className="mb-4" />
 

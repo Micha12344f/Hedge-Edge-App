@@ -272,87 +272,160 @@ export const DraggableHedgeMap = ({
     }
   }, [accounts]);
 
-  // Auto-align function
+  // Auto-align function with intelligent positioning
   const autoAlign = () => {
-    const hedgeAccounts = accounts.filter(a => a.phase === 'live');
-    const linkedAccounts = accounts.filter(a => a.phase !== 'live');
-    
     if (accounts.length === 0) return;
     
+    const hedgeAccounts = accounts.filter(a => a.phase === 'live');
+    const linkedAccounts = accounts.filter(a => a.phase !== 'live');
     const newPositions: NodePosition[] = [];
+    
+    // Spacing configuration
     const verticalSpacing = CARD_HEIGHT + VERTICAL_GAP;
+    const horizontalSpacing = CARD_WIDTH + HORIZONTAL_GAP;
     
-    // Column X positions
-    const columnOffset = (CARD_WIDTH / 2) + (HORIZONTAL_GAP / 2);
-    const hedgeColumnX = -columnOffset;
-    const linkedColumnX = columnOffset;
+    // Build connection map
+    const hedgeConnections: Map<string, string[]> = new Map();
+    const linkedToHedge: Map<string, string> = new Map();
     
-    // Group linked accounts by their connected hedge
-    const hedgeGroups: Map<string, string[]> = new Map();
-    const unlinkedAccounts: string[] = [];
+    hedgeAccounts.forEach(h => hedgeConnections.set(h.id, []));
     
-    // Initialize groups for each hedge
-    hedgeAccounts.forEach(h => hedgeGroups.set(h.id, []));
-    
-    // Assign linked accounts to their hedge
     linkedAccounts.forEach(linked => {
       const rel = relationships.find(
         r => r.sourceId === linked.id || r.targetId === linked.id
       );
       if (rel) {
         const hedgeId = rel.sourceId === linked.id ? rel.targetId : rel.sourceId;
-        if (hedgeGroups.has(hedgeId)) {
-          hedgeGroups.get(hedgeId)!.push(linked.id);
-        } else {
-          unlinkedAccounts.push(linked.id);
+        if (hedgeConnections.has(hedgeId)) {
+          hedgeConnections.get(hedgeId)!.push(linked.id);
+          linkedToHedge.set(linked.id, hedgeId);
         }
-      } else {
-        unlinkedAccounts.push(linked.id);
       }
     });
     
-    // Calculate total height needed for each hedge group
-    let currentY = 0;
+    // Get unlinked accounts
+    const unlinkedLinkedAccounts = linkedAccounts.filter(a => !linkedToHedge.has(a.id));
     
-    hedgeAccounts.forEach((hedge) => {
-      const connectedIds = hedgeGroups.get(hedge.id) || [];
-      const groupSize = Math.max(1, connectedIds.length);
-      const groupHeight = (groupSize - 1) * verticalSpacing;
+    // CASE 1: Only 2 nodes total and they are connected -> place them parallel (side by side)
+    if (accounts.length === 2) {
+      const [first, second] = accounts;
+      const areConnected = relationships.some(
+        r => (r.sourceId === first.id && r.targetId === second.id) ||
+             (r.sourceId === second.id && r.targetId === first.id)
+      );
       
-      // Position hedge at center of its group
-      const hedgeY = currentY + groupHeight / 2;
-      newPositions.push({
-        id: hedge.id,
-        x: hedgeColumnX,
-        y: hedgeY,
+      if (areConnected) {
+        // Place them side by side, horizontally centered
+        const hedge = first.phase === 'live' ? first : second;
+        const linked = first.phase === 'live' ? second : first;
+        
+        newPositions.push({ id: hedge.id, x: -horizontalSpacing / 2, y: 0 });
+        newPositions.push({ id: linked.id, x: horizontalSpacing / 2, y: 0 });
+      } else {
+        // Not connected, stack vertically centered
+        newPositions.push({ id: first.id, x: 0, y: -verticalSpacing / 2 });
+        newPositions.push({ id: second.id, x: 0, y: verticalSpacing / 2 });
+      }
+    }
+    // CASE 2: Multiple nodes - use column-based layout
+    else {
+      // Position hedge accounts in left column, linked accounts in right column
+      // Align connected pairs at the same Y level
+      
+      let currentY = 0;
+      const processedLinked = new Set<string>();
+      
+      // First, position hedge accounts with their connected accounts
+      hedgeAccounts.forEach((hedge, hedgeIdx) => {
+        const connected = hedgeConnections.get(hedge.id) || [];
+        const groupSize = Math.max(1, connected.length);
+        
+        if (connected.length === 0) {
+          // Hedge with no connections - position alone
+          newPositions.push({
+            id: hedge.id,
+            x: -horizontalSpacing / 2,
+            y: currentY,
+          });
+          currentY += verticalSpacing;
+        } else if (connected.length === 1) {
+          // Single connection - place at same Y level (parallel)
+          const linkedId = connected[0];
+          newPositions.push({
+            id: hedge.id,
+            x: -horizontalSpacing / 2,
+            y: currentY,
+          });
+          newPositions.push({
+            id: linkedId,
+            x: horizontalSpacing / 2,
+            y: currentY,
+          });
+          processedLinked.add(linkedId);
+          currentY += verticalSpacing;
+        } else {
+          // Multiple connections - hedge centered, linked accounts stacked
+          const groupHeight = (connected.length - 1) * verticalSpacing;
+          const hedgeY = currentY + groupHeight / 2;
+          
+          newPositions.push({
+            id: hedge.id,
+            x: -horizontalSpacing / 2,
+            y: hedgeY,
+          });
+          
+          connected.forEach((linkedId, idx) => {
+            newPositions.push({
+              id: linkedId,
+              x: horizontalSpacing / 2,
+              y: currentY + idx * verticalSpacing,
+            });
+            processedLinked.add(linkedId);
+          });
+          
+          currentY += groupHeight + verticalSpacing;
+        }
+        
+        // Add spacing between hedge groups
+        if (hedgeIdx < hedgeAccounts.length - 1) {
+          currentY += verticalSpacing * 0.5;
+        }
       });
       
-      // Position connected accounts vertically centered around hedge
-      connectedIds.forEach((linkedId, idx) => {
-        newPositions.push({
-          id: linkedId,
-          x: linkedColumnX,
-          y: currentY + idx * verticalSpacing,
+      // Position unlinked linked accounts (evaluation/funded with no hedge connection)
+      unlinkedLinkedAccounts.forEach((account, idx) => {
+        if (!processedLinked.has(account.id)) {
+          newPositions.push({
+            id: account.id,
+            x: horizontalSpacing / 2,
+            y: currentY + idx * verticalSpacing,
+          });
+        }
+      });
+      
+      // Handle case where there are only linked accounts (no hedge accounts)
+      if (hedgeAccounts.length === 0) {
+        linkedAccounts.forEach((account, idx) => {
+          newPositions.push({
+            id: account.id,
+            x: 0,
+            y: idx * verticalSpacing,
+          });
         });
-      });
-      
-      // Move to next group with extra spacing between groups
-      currentY += groupHeight + verticalSpacing * 1.5;
-    });
+      }
+    }
     
-    // Position unlinked accounts at the bottom
-    unlinkedAccounts.forEach((id, idx) => {
-      newPositions.push({
-        id,
-        x: linkedColumnX,
-        y: currentY + idx * verticalSpacing,
+    // Center the entire layout
+    if (newPositions.length > 0) {
+      const allY = newPositions.map(p => p.y);
+      const allX = newPositions.map(p => p.x);
+      const centerY = (Math.min(...allY) + Math.max(...allY)) / 2;
+      const centerX = (Math.min(...allX) + Math.max(...allX)) / 2;
+      newPositions.forEach(p => {
+        p.y -= centerY;
+        p.x -= centerX;
       });
-    });
-    
-    // Center the layout vertically
-    const allY = newPositions.map(p => p.y);
-    const centerOffset = (Math.min(...allY) + Math.max(...allY)) / 2;
-    newPositions.forEach(p => p.y -= centerOffset);
+    }
     
     setNodePositions(newPositions);
     savePositions(newPositions);
@@ -614,14 +687,14 @@ export const DraggableHedgeMap = ({
     setSelectedLink(null);
   };
 
-  // Zoom handlers
+  // Zoom handlers (5% increments)
   const handleZoomIn = () => setZoom(z => {
-    const newZoom = Math.min(z + 0.2, 2);
+    const newZoom = Math.min(z + 0.05, 2);
     saveZoom(newZoom);
     return newZoom;
   });
   const handleZoomOut = () => setZoom(z => {
-    const newZoom = Math.max(z - 0.2, 0.3);
+    const newZoom = Math.max(z - 0.05, 0.3);
     saveZoom(newZoom);
     return newZoom;
   });
@@ -632,14 +705,15 @@ export const DraggableHedgeMap = ({
     savePan({ x: 0, y: 0 });
   };
 
-  // Wheel event handler for Ctrl+scroll zoom
+  // Wheel event handler for Ctrl+scroll zoom (5% increments)
   const handleWheel = useCallback((e: React.WheelEvent) => {
     if (e.ctrlKey) {
       e.preventDefault();
       e.stopPropagation();
-      const delta = -e.deltaY * 0.001;
+      // Use 5% steps (0.05) regardless of scroll amount
+      const step = e.deltaY < 0 ? 0.05 : -0.05;
       setZoom(z => {
-        const newZoom = Math.max(0.3, Math.min(z + delta, 2));
+        const newZoom = Math.max(0.3, Math.min(z + step, 2));
         saveZoom(newZoom);
         return newZoom;
       });

@@ -14,10 +14,13 @@ import {
 import { cn } from '@/lib/utils';
 import type { ConnectionSnapshot, ConnectionStatus, LicenseStatus } from '@/types/connections';
 import { getStatusBadgeClass, formatConnectionStatus } from '@/lib/desktop';
+import { Archive, ArchiveRestore } from 'lucide-react';
 
 interface AccountCardProps {
   account: TradingAccount;
   onDelete: (id: string) => void;
+  onArchive?: (id: string) => void;
+  onRestore?: (id: string) => void;
   onSync?: (id: string) => void;
   onClick?: (account: TradingAccount) => void;
   /** Connection snapshot for this account (from useConnectionsFeed) */
@@ -32,7 +35,9 @@ interface AccountCardProps {
 
 export const AccountCard = ({ 
   account, 
-  onDelete, 
+  onDelete,
+  onArchive,
+  onRestore,
   onSync, 
   onClick,
   connectionSnapshot,
@@ -47,6 +52,9 @@ export const AccountCard = ({
   const profitTarget = Number(account.profit_target) || 0;
   const maxLoss = Number(account.max_loss) || 0;
   const accountSize = Number(account.account_size) || 0;
+  
+  const isHedgeAccount = account.phase === 'live';
+  const isArchived = account.is_archived;
   
   // Calculate progress towards profit target
   const progressPercent = profitTarget > 0 ? Math.min((pnlPercent / profitTarget) * 100, 100) : 0;
@@ -105,13 +113,69 @@ export const AccountCard = ({
   };
 
   const config = phaseConfig[account.phase];
-  const isHedgeAccount = account.phase === 'live';
 
   const handleCardClick = () => {
     if (onClick) {
       onClick(account);
     }
   };
+
+  // Archived accounts are greyed out and disconnected
+  if (isArchived) {
+    return (
+      <Card 
+        className={cn(
+          "border-border/20 bg-gradient-to-br from-muted/30 to-muted/10 backdrop-blur-sm transition-all duration-300 group opacity-60",
+          onClick && "cursor-pointer hover:opacity-80"
+        )}
+        onClick={handleCardClick}
+      >
+        <CardHeader className="flex flex-row items-start justify-between pb-2">
+          <div className="space-y-1">
+            <div className="flex items-center gap-2">
+              <h3 className="font-medium text-muted-foreground">{account.account_name}</h3>
+              <Badge variant="outline" className="text-xs bg-muted/30 text-muted-foreground border-muted-foreground/20">
+                Archived
+              </Badge>
+            </div>
+            <p className="text-xs text-muted-foreground/70">
+              {account.prop_firm || 'Personal'} • Phase {account.evaluation_phase || 1}
+              {account.evaluation_fee ? ` • $${account.evaluation_fee} fee` : ''}
+            </p>
+          </div>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="ghost" size="icon" className="h-8 w-8 opacity-0 group-hover:opacity-100 transition-opacity">
+                <MoreHorizontal className="h-4 w-4 text-muted-foreground" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-48 bg-card/95 backdrop-blur-xl border-border/30">
+              {onRestore && (
+                <DropdownMenuItem onClick={(e) => { e.stopPropagation(); onRestore(account.id); }} className="text-primary">
+                  <ArchiveRestore className="mr-2 h-4 w-4" />
+                  Restore Account
+                </DropdownMenuItem>
+              )}
+              <DropdownMenuSeparator />
+              <DropdownMenuItem onClick={(e) => { e.stopPropagation(); onDelete(account.id); }} className="text-destructive">
+                <Trash2 className="mr-2 h-4 w-4" />
+                Delete Permanently
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </CardHeader>
+        <CardContent className="pt-0">
+          <div className="flex items-center justify-between text-xs text-muted-foreground/60">
+            <span>{formatCurrency(accountSize)} account</span>
+            <span className="flex items-center gap-1">
+              <Archive className="h-3 w-3" />
+              Disconnected
+            </span>
+          </div>
+        </CardContent>
+      </Card>
+    );
+  }
 
   return (
     <Card 
@@ -171,13 +235,36 @@ export const AccountCard = ({
               </DropdownMenuItem>
             )}
             <DropdownMenuSeparator />
-            <DropdownMenuItem 
-              onClick={() => onDelete(account.id)}
-              className="text-destructive focus:text-destructive cursor-pointer"
-            >
-              <Trash2 className="mr-2 h-4 w-4" />
-              Delete Account
-            </DropdownMenuItem>
+            {/* For archived accounts - show restore option */}
+            {isArchived && onRestore && (
+              <DropdownMenuItem 
+                onClick={() => onRestore(account.id)}
+                className="cursor-pointer"
+              >
+                <ArchiveRestore className="mr-2 h-4 w-4" />
+                Restore Account
+              </DropdownMenuItem>
+            )}
+            {/* For non-hedge accounts (evaluation/funded) - show archive instead of delete */}
+            {!isHedgeAccount && !isArchived && onArchive && (
+              <DropdownMenuItem 
+                onClick={() => onArchive(account.id)}
+                className="text-yellow-600 focus:text-yellow-600 cursor-pointer"
+              >
+                <Archive className="mr-2 h-4 w-4" />
+                Archive Account
+              </DropdownMenuItem>
+            )}
+            {/* For hedge accounts or archived accounts - show delete option */}
+            {(isHedgeAccount || isArchived) && (
+              <DropdownMenuItem 
+                onClick={() => onDelete(account.id)}
+                className="text-destructive focus:text-destructive cursor-pointer"
+              >
+                <Trash2 className="mr-2 h-4 w-4" />
+                Delete Account
+              </DropdownMenuItem>
+            )}
           </DropdownMenuContent>
         </DropdownMenu>
       </CardHeader>

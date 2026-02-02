@@ -25,7 +25,9 @@ import {
   WifiOff,
   User,
   DollarSign,
-  Server
+  Server,
+  Archive,
+  Link2
 } from 'lucide-react';
 import { CreateAccountData, TradingAccount } from '@/hooks/useTradingAccounts';
 import { cn } from '@/lib/utils';
@@ -37,7 +39,7 @@ import { PermissionsChecklist, CTraderGuidance } from './PermissionsChecklist';
 // Types
 // ============================================================================
 
-type WizardStep = 'account-type' | 'platform' | 'terminal' | 'prop-firm' | 'prop-details' | 'listening';
+type WizardStep = 'account-type' | 'platform' | 'terminal' | 'prop-firm' | 'hedge-pipeline' | 'prop-details' | 'listening';
 type AccountPhase = 'evaluation' | 'funded' | 'live';
 type Platform = 'MT4' | 'MT5' | 'cTrader';
 type TerminalType = 'mt4' | 'mt5' | 'ctrader';
@@ -79,6 +81,7 @@ interface AddAccountModalProps {
   onSubmit: (data: CreateAccountData) => Promise<{ error: Error | null }>;
   defaultType?: 'hedge' | 'linked';
   hedgeAccounts?: TradingAccount[];
+  existingAccounts?: TradingAccount[];
 }
 
 // ============================================================================
@@ -195,7 +198,8 @@ export const AddAccountModal = ({
   onOpenChange, 
   onSubmit, 
   defaultType, 
-  hedgeAccounts = [] 
+  hedgeAccounts = [],
+  existingAccounts = [] 
 }: AddAccountModalProps) => {
   // Wizard state
   const [step, setStep] = useState<WizardStep>('account-type');
@@ -213,8 +217,10 @@ export const AddAccountModal = ({
     max_loss: 10,
     max_daily_loss: 5,
     min_trading_days: 4,
+    evaluation_fee: 0,
+    evaluation_phase: 1,
+    previous_account_id: '',
   });
-  const [showRules, setShowRules] = useState(false);
   const [propFirmSearch, setPropFirmSearch] = useState('');
   
   // Terminal detection state
@@ -249,8 +255,10 @@ export const AddAccountModal = ({
         max_loss: 10,
         max_daily_loss: 5,
         min_trading_days: 4,
+        evaluation_fee: 0,
+        evaluation_phase: 1,
+        previous_account_id: '',
       });
-      setShowRules(false);
       setPropFirmSearch('');
       setTerminals([]);
       setTerminalError(null);
@@ -410,6 +418,10 @@ export const AddAccountModal = ({
         max_loss: formData.max_loss,
         max_daily_loss: formData.max_daily_loss,
         min_trading_days: formData.min_trading_days,
+        // Progression fields
+        evaluation_fee: formData.evaluation_fee || undefined,
+        evaluation_phase: formData.evaluation_phase || undefined,
+        previous_account_id: formData.previous_account_id || undefined,
       }),
       // Add detected account details if available
       ...(selectedDetectedAccount && {
@@ -453,6 +465,10 @@ export const AddAccountModal = ({
         max_loss: formData.max_loss,
         max_daily_loss: formData.max_daily_loss,
         min_trading_days: formData.min_trading_days,
+        // Progression fields
+        evaluation_fee: formData.evaluation_fee || undefined,
+        evaluation_phase: accountPhase === 'evaluation' ? formData.evaluation_phase : undefined,
+        previous_account_id: formData.previous_account_id || undefined,
       }),
     };
     
@@ -474,6 +490,7 @@ export const AddAccountModal = ({
       case 'platform': return 'Select Platform';
       case 'terminal': return platform === 'cTrader' ? 'cTrader Setup' : `Select ${platform} Installation`;
       case 'prop-firm': return 'Select Prop Firm';
+      case 'hedge-pipeline': return 'Hedge Pipeline';
       case 'prop-details': return 'Account Details';
       case 'listening': return 'Connect Account';
       default: return 'Add Account';
@@ -486,6 +503,7 @@ export const AddAccountModal = ({
       case 'platform': return 'Select the trading platform for this account';
       case 'terminal': return platform === 'cTrader' ? 'Configure the cBot in your cTrader application' : 'Choose which terminal installation to use';
       case 'prop-firm': return 'Select the prop firm for this account';
+      case 'hedge-pipeline': return 'Track your evaluation journey';
       case 'prop-details': return 'Provide additional account information';
       case 'listening': return 'Waiting for your trading platform to connect';
       default: return '';
@@ -832,47 +850,153 @@ export const AddAccountModal = ({
     );
   };
 
-  const renderPropDetailsStep = () => (
-    <div className="space-y-4 py-2 pb-4">
-      {/* Show selected prop firm */}
-      {formData.prop_firm && (
-        <div className="flex items-center gap-3 p-3 rounded-lg bg-primary/5 border border-primary/20">
-          <div className="w-10 h-10 rounded-lg bg-muted/50 flex items-center justify-center overflow-hidden">
-            <img 
-              src={PROP_FIRMS.find(f => f.name === formData.prop_firm)?.logo || ''}
-              alt={formData.prop_firm}
-              className="w-6 h-6 object-contain"
-              referrerPolicy="no-referrer"
-              onError={(e) => { e.currentTarget.style.display = 'none'; }}
-            />
-          </div>
-          <div className="flex-1">
-            <p className="text-sm font-medium">{formData.prop_firm}</p>
-            <p className="text-xs text-muted-foreground">Selected prop firm</p>
-          </div>
-          <CheckCircle2 className="h-5 w-5 text-primary" />
-        </div>
-      )}
+  // Get archived accounts for linking
+  const archivedAccounts = existingAccounts.filter(a => a.is_archived);
 
-      <div className="space-y-3">
+  const renderHedgePipelineStep = () => {
+    const selectedArchivedAccount = archivedAccounts.find(a => a.id === formData.previous_account_id);
+    const showArchivedMapping = formData.evaluation_phase >= 2;
+
+    return (
+      <div className="space-y-4 py-2">
+        {/* Evaluation Phase Selection - Compact */}
         <div className="space-y-2">
-          <Label htmlFor="account_name">Account Name</Label>
+          <Label className="text-sm font-medium">Select Phase</Label>
+          <div className="grid grid-cols-4 gap-2">
+            {[1, 2, 3, 4].map((phase) => (
+              <button
+                key={phase}
+                type="button"
+                onClick={() => {
+                  setFormData({ 
+                    ...formData, 
+                    evaluation_phase: phase,
+                    previous_account_id: phase === 1 ? '' : formData.previous_account_id
+                  });
+                }}
+                className={cn(
+                  "p-2 rounded-lg border-2 transition-all",
+                  "hover:scale-[1.02] active:scale-[0.98]",
+                  formData.evaluation_phase === phase
+                    ? "border-primary bg-primary/10 text-primary"
+                    : "border-border/50 hover:border-primary/30"
+                )}
+              >
+                <p className="text-sm font-bold text-center">{phase}</p>
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* Archived Account Mapping - Only for Phase 2, 3, or 4 */}
+        {showArchivedMapping && (
+          <div className="space-y-2 p-3 rounded-lg bg-muted/30 border border-border/30">
+            <div className="flex items-center gap-2">
+              <Link2 className="h-4 w-4 text-primary" />
+              <Label className="text-xs font-medium">Link to Previous Account</Label>
+            </div>
+
+            {archivedAccounts.length > 0 ? (
+              <div className="space-y-1.5 max-h-[120px] overflow-y-auto">
+                {archivedAccounts.map((account) => {
+                  const isSelected = formData.previous_account_id === account.id;
+                  const firmLogo = PROP_FIRMS.find(f => f.name === account.prop_firm)?.logo;
+                  return (
+                    <button
+                      key={account.id}
+                      type="button"
+                      onClick={() => {
+                        setFormData({
+                          ...formData,
+                          previous_account_id: isSelected ? '' : account.id,
+                          evaluation_fee: isSelected ? 0 : (account.evaluation_fee || formData.evaluation_fee),
+                          account_size: isSelected ? 0 : (account.account_size || formData.account_size),
+                        });
+                      }}
+                      className={cn(
+                        "w-full p-2 rounded-md border transition-all text-left",
+                        "hover:bg-muted/50",
+                        isSelected ? "border-primary bg-primary/10" : "border-border/30"
+                      )}
+                    >
+                      <div className="flex items-center gap-2">
+                        <div className="w-5 h-5 rounded bg-muted/50 flex items-center justify-center overflow-hidden shrink-0">
+                          {firmLogo ? (
+                            <img 
+                              src={firmLogo}
+                              alt={account.prop_firm || ''}
+                              className="w-3.5 h-3.5 object-contain"
+                              referrerPolicy="no-referrer"
+                              onError={(e) => { e.currentTarget.style.display = 'none'; }}
+                            />
+                          ) : (
+                            <Archive className="h-3 w-3 text-muted-foreground" />
+                          )}
+                        </div>
+                        <span className="text-xs font-medium truncate flex-1">{account.account_name}</span>
+                        {isSelected && <CheckCircle2 className="h-3.5 w-3.5 text-primary shrink-0" />}
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            ) : (
+              <p className="text-xs text-muted-foreground text-center py-2">No archived accounts</p>
+            )}
+          </div>
+        )}
+
+        {/* Evaluation Fee - Using NumberInput for consistent styling */}
+        <div className="flex items-center gap-3">
+          <Label className="text-sm font-medium whitespace-nowrap flex items-center gap-1.5">
+            <DollarSign className="h-3.5 w-3.5 text-muted-foreground" />
+            Eval Fee
+          </Label>
+          <NumberInput
+            id="evaluation_fee"
+            value={formData.evaluation_fee || 0}
+            onChange={(value) => setFormData({ ...formData, evaluation_fee: value })}
+            min={0}
+            step={10}
+          />
+        </div>
+
+        {/* Compact Summary */}
+        {(selectedArchivedAccount || formData.evaluation_fee > 0) && (
+          <div className="flex items-center gap-2 p-2 rounded-md bg-primary/5 border border-primary/20 text-xs">
+            <CheckCircle2 className="h-3.5 w-3.5 text-primary shrink-0" />
+            <span className="text-muted-foreground">
+              Phase {formData.evaluation_phase}
+              {formData.evaluation_fee > 0 && ` • $${formData.evaluation_fee} fee`}
+              {selectedArchivedAccount && ` • Linked`}
+            </span>
+          </div>
+        )}
+      </div>
+    );
+  };
+
+  const renderPropDetailsStep = () => (
+    <div className="space-y-3 py-2">
+      <div className="space-y-3">
+        <div className="space-y-1.5">
+          <Label htmlFor="account_name" className="text-sm">Account Name</Label>
           <Input
             id="account_name"
             placeholder="My FTMO Challenge"
             value={formData.account_name}
             onChange={(e) => setFormData({ ...formData, account_name: e.target.value })}
-            className="bg-muted/30 border-border/50"
+            className="h-9 bg-muted/30 border-border/50"
           />
         </div>
 
-        <div className="space-y-2">
-          <Label htmlFor="account_size">Account Size</Label>
+        <div className="space-y-1.5">
+          <Label htmlFor="account_size" className="text-sm">Account Size</Label>
           <Select
             value={formData.account_size.toString()}
             onValueChange={(value) => setFormData({ ...formData, account_size: parseInt(value) })}
           >
-            <SelectTrigger className="bg-muted/30 border-border/50">
+            <SelectTrigger className="h-9 bg-muted/30 border-border/50">
               <SelectValue placeholder="Select account size" />
             </SelectTrigger>
             <SelectContent className="bg-card/95 backdrop-blur-xl border-border/30">
@@ -885,19 +1009,12 @@ export const AddAccountModal = ({
           </Select>
         </div>
 
-        <div className="flex items-center justify-between py-2 px-3 rounded-lg bg-muted/30 border border-border/30">
-          <Label htmlFor="show_rules" className="cursor-pointer text-sm">Add Prop Firm Rules</Label>
-          <Switch
-            id="show_rules"
-            checked={showRules}
-            onCheckedChange={setShowRules}
-          />
-        </div>
-
-        {showRules && (
-          <div className="grid grid-cols-2 gap-3 p-4 rounded-lg bg-muted/30 border border-border/30 mb-2">
-            <div className="space-y-2">
-              <Label htmlFor="profit_target" className="text-xs">Profit Target (%)</Label>
+        {/* Prop Firm Rules - Always visible */}
+        <div className="space-y-2">
+          <Label className="text-sm">Prop Firm Rules</Label>
+          <div className="grid grid-cols-2 gap-2 p-3 rounded-lg bg-muted/30 border border-border/30">
+            <div className="space-y-1">
+              <Label htmlFor="profit_target" className="text-xs text-muted-foreground">Profit Target (%)</Label>
               <NumberInput
                 id="profit_target"
                 value={formData.profit_target}
@@ -907,8 +1024,8 @@ export const AddAccountModal = ({
                 step={1}
               />
             </div>
-            <div className="space-y-2">
-              <Label htmlFor="max_loss" className="text-xs">Max Loss (%)</Label>
+            <div className="space-y-1">
+              <Label htmlFor="max_loss" className="text-xs text-muted-foreground">Max Loss (%)</Label>
               <NumberInput
                 id="max_loss"
                 value={formData.max_loss}
@@ -918,8 +1035,8 @@ export const AddAccountModal = ({
                 step={1}
               />
             </div>
-            <div className="space-y-2">
-              <Label htmlFor="max_daily_loss" className="text-xs">Max Daily Loss (%)</Label>
+            <div className="space-y-1">
+              <Label htmlFor="max_daily_loss" className="text-xs text-muted-foreground">Daily Loss (%)</Label>
               <NumberInput
                 id="max_daily_loss"
                 value={formData.max_daily_loss}
@@ -929,8 +1046,8 @@ export const AddAccountModal = ({
                 step={0.5}
               />
             </div>
-            <div className="space-y-2">
-              <Label htmlFor="min_trading_days" className="text-xs">Min Trading Days</Label>
+            <div className="space-y-1">
+              <Label htmlFor="min_trading_days" className="text-xs text-muted-foreground">Min Days</Label>
               <NumberInput
                 id="min_trading_days"
                 value={formData.min_trading_days}
@@ -940,25 +1057,37 @@ export const AddAccountModal = ({
               />
             </div>
           </div>
-        )}
+        </div>
       </div>
     </div>
   );
 
-  const renderListeningStep = () => (
+  const renderListeningStep = () => {
+    // Filter out accounts that are already connected (match by login + server)
+    const existingLoginServers = new Set(
+      existingAccounts
+        .filter(acc => acc.login && acc.server)
+        .map(acc => `${acc.login}@${acc.server}`)
+    );
+    const availableDetectedAccounts = detectedAccounts.filter(
+      acc => !existingLoginServers.has(`${acc.login}@${acc.server}`)
+    );
+    const availableCount = availableDetectedAccounts.length;
+    
+    return (
     <div className="space-y-4 py-2 pb-4">
       {/* Connection status banner */}
       <div className={cn(
         "flex items-center gap-3 p-4 rounded-lg border transition-all",
-        detectedAccounts.length > 0
+        availableCount > 0
           ? "bg-emerald-500/10 border-emerald-500/30"
           : "bg-primary/10 border-primary/30"
       )}>
         <div className={cn(
           "relative w-10 h-10 rounded-full flex items-center justify-center",
-          detectedAccounts.length > 0 ? "bg-emerald-500/20" : "bg-primary/20"
+          availableCount > 0 ? "bg-emerald-500/20" : "bg-primary/20"
         )}>
-          {detectedAccounts.length > 0 ? (
+          {availableCount > 0 ? (
             <Wifi className="h-5 w-5 text-emerald-400" />
           ) : (
             <>
@@ -971,15 +1100,15 @@ export const AddAccountModal = ({
         <div className="flex-1">
           <p className={cn(
             "text-sm font-medium",
-            detectedAccounts.length > 0 ? "text-emerald-400" : "text-primary"
+            availableCount > 0 ? "text-emerald-400" : "text-primary"
           )}>
-            {detectedAccounts.length > 0 
-              ? `${detectedAccounts.length} account${detectedAccounts.length > 1 ? 's' : ''} detected`
+            {availableCount > 0 
+              ? `${availableCount} account${availableCount > 1 ? 's' : ''} detected`
               : "Listening for connections..."
             }
           </p>
           <p className="text-xs text-muted-foreground mt-0.5">
-            {detectedAccounts.length > 0 
+            {availableCount > 0 
               ? "Select an account below to connect"
               : `Waiting for ${platform === 'cTrader' ? 'cBot' : 'Expert Advisor'} to connect...`
             }
@@ -988,7 +1117,7 @@ export const AddAccountModal = ({
       </div>
 
       {/* Platform instructions */}
-      {detectedAccounts.length === 0 && (
+      {availableCount === 0 && (
         <div className="p-3 rounded-lg bg-muted/30 border border-border/30">
           <p className="text-xs font-medium text-foreground mb-2">How to connect:</p>
           <ol className="text-xs text-muted-foreground space-y-1.5 list-decimal list-inside">
@@ -999,14 +1128,14 @@ export const AddAccountModal = ({
         </div>
       )}
 
-      {/* Detected accounts list */}
-      {detectedAccounts.length > 0 && (
+      {/* Detected accounts list - already filtered to exclude connected accounts */}
+      {availableDetectedAccounts.length > 0 && (
         <div className="space-y-2">
           <p className="text-xs text-muted-foreground uppercase tracking-wider font-medium">
-            Connected Accounts
+            Available Accounts
           </p>
           <div className="space-y-2 max-h-[200px] overflow-y-auto pr-1">
-            {detectedAccounts.map((account, idx) => (
+            {availableDetectedAccounts.map((account, idx) => (
               <button
                 key={`${account.login}-${account.server}`}
                 type="button"
@@ -1105,7 +1234,8 @@ export const AddAccountModal = ({
         Cancel and close
       </button>
     </div>
-  );
+    );
+  };
 
   // ============================================================================
   // Main Render
@@ -1113,7 +1243,7 @@ export const AddAccountModal = ({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-[480px] border-border/30 bg-card/95 backdrop-blur-xl flex flex-col">
+      <DialogContent className="sm:max-w-[480px] max-h-[85vh] border-border/30 bg-card/95 backdrop-blur-xl flex flex-col overflow-hidden">
         <DialogHeader className="pb-2 flex-shrink-0">
           <DialogTitle className="text-xl font-semibold">
             {getStepTitle()}
@@ -1123,11 +1253,12 @@ export const AddAccountModal = ({
           </DialogDescription>
         </DialogHeader>
 
-        <div className="flex-1">
+        <div className="flex-1 overflow-y-auto min-h-0">
           {step === 'account-type' && renderAccountTypeStep()}
           {step === 'platform' && renderPlatformStep()}
           {step === 'terminal' && renderTerminalStep()}
           {step === 'prop-firm' && renderPropFirmStep()}
+          {step === 'hedge-pipeline' && renderHedgePipelineStep()}
           {step === 'prop-details' && renderPropDetailsStep()}
           {step === 'listening' && renderListeningStep()}
         </div>
@@ -1141,7 +1272,8 @@ export const AddAccountModal = ({
                 if (step === 'platform') setStep('account-type');
                 else if (step === 'terminal') setStep('platform');
                 else if (step === 'prop-firm') setStep('terminal');
-                else if (step === 'prop-details') setStep('prop-firm');
+                else if (step === 'hedge-pipeline') setStep('prop-firm');
+                else if (step === 'prop-details') setStep('hedge-pipeline');
               }} 
               className="flex-1"
             >
@@ -1206,8 +1338,17 @@ export const AddAccountModal = ({
           )}
           {step === 'prop-firm' && (
             <Button
-              onClick={() => setStep('prop-details')}
+              onClick={() => setStep('hedge-pipeline')}
               disabled={!formData.prop_firm}
+              className="flex-1"
+            >
+              Continue
+              <ChevronRight className="w-4 h-4 ml-2" />
+            </Button>
+          )}
+          {step === 'hedge-pipeline' && (
+            <Button
+              onClick={() => setStep('prop-details')}
               className="flex-1"
             >
               Continue

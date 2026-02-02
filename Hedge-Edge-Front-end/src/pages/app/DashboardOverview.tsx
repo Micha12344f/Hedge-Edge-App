@@ -27,8 +27,8 @@ import {
 } from 'lucide-react';
 
 const DashboardOverview = () => {
-  const { accounts, loading, createAccount, deleteAccount, syncAccountFromMT5 } = useTradingAccounts();
-  const { snapshots, getSnapshot, refreshFromEA } = useConnectionsFeed({ autoStart: true, debug: true });
+  const { accounts, loading, createAccount, deleteAccount, archiveAccount, restoreAccount, syncAccountFromMT5 } = useTradingAccounts();
+  const { snapshots, getSnapshot, disconnect, refreshFromEA } = useConnectionsFeed({ autoStart: true, debug: true });
   const [addModalOpen, setAddModalOpen] = useState(false);
   const [activeTab, setActiveTab] = useState('all');
   const [selectedAccount, setSelectedAccount] = useState<TradingAccount | null>(null);
@@ -47,7 +47,11 @@ const DashboardOverview = () => {
 
   // Helper to get connection snapshot for an account
   // The connection system uses MT5 login as the key
+  // Returns null for archived accounts - they should be fully disconnected
   const getAccountSnapshot = (account: TradingAccount) => {
+    // Archived accounts should NEVER have connection snapshots - they are fully disconnected
+    if (account.is_archived) return null;
+    
     if (!account.login) return null;
     // Try login as key first (MT5 login number)
     return getSnapshot(account.login) || getSnapshot(account.id) || null;
@@ -58,23 +62,59 @@ const DashboardOverview = () => {
     setDetailsModalOpen(true);
   };
 
+  // Wrapper to disconnect account from MT5 before archiving
+  const handleArchiveAccount = async (id: string) => {
+    // Find the account to get its login for disconnecting
+    const account = accounts.find(a => a.id === id);
+    if (account?.login) {
+      // Disconnect from MT5 first
+      console.log('[DashboardOverview] Disconnecting account before archive:', account.login);
+      await disconnect(account.login, 'Account archived');
+      // Also try with account id in case that's the key used
+      await disconnect(account.id, 'Account archived');
+    }
+    // Then archive the account
+    return archiveAccount(id);
+  };
+
+  // Wrapper to handle restore and tab switching
+  const handleRestoreAccount = async (id: string) => {
+    // Count archived accounts BEFORE restoring (excluding the one being restored)
+    const archivedCountAfterRestore = accounts.filter(a => a.is_archived && a.id !== id).length;
+    
+    // Restore the account
+    await restoreAccount(id);
+    
+    // If no more archived accounts remain, switch to "All Accounts" tab
+    if (archivedCountAfterRestore === 0) {
+      setActiveTab('all');
+    }
+    // Otherwise, stay on the archived tab (no action needed)
+  };
+
+  // Filter accounts: "all" excludes archived, "archived" shows only archived
   const filteredAccounts = accounts.filter((account) => {
-    if (activeTab === 'all') return true;
-    return account.phase === activeTab;
+    const isArchived = account.is_archived;
+    if (activeTab === 'archived') return isArchived;
+    if (activeTab === 'all') return !isArchived;
+    // For phase-specific tabs, exclude archived
+    return account.phase === activeTab && !isArchived;
   });
 
-  // Calculate stats
-  const propAccounts = accounts.filter(a => a.phase === 'funded' || a.phase === 'evaluation');
+  // Calculate stats (exclude archived accounts)
+  const activeAccounts = accounts.filter(a => !a.is_archived);
+  const propAccounts = activeAccounts.filter(a => a.phase === 'funded' || a.phase === 'evaluation');
   const propBalance = propAccounts.reduce((sum, acc) => sum + (Number(acc.current_balance) || Number(acc.account_size) || 0), 0);
-  const totalPnL = accounts.reduce((sum, acc) => sum + (Number(acc.pnl) || 0), 0);
-  const totalAccountValue = accounts.reduce((sum, acc) => sum + (Number(acc.account_size) || 0), 0);
-  const avgPnLPercent = accounts.length > 0 
-    ? accounts.reduce((sum, acc) => sum + (Number(acc.pnl_percent) || 0), 0) / accounts.length 
+  const totalPnL = activeAccounts.reduce((sum, acc) => sum + (Number(acc.pnl) || 0), 0);
+  const totalAccountValue = activeAccounts.reduce((sum, acc) => sum + (Number(acc.account_size) || 0), 0);
+  const avgPnLPercent = activeAccounts.length > 0 
+    ? activeAccounts.reduce((sum, acc) => sum + (Number(acc.pnl_percent) || 0), 0) / activeAccounts.length 
     : 0;
 
-  const evaluationCount = accounts.filter(a => a.phase === 'evaluation').length;
-  const fundedCount = accounts.filter(a => a.phase === 'funded').length;
-  const hedgeCount = accounts.filter(a => a.phase === 'live').length;
+  const evaluationCount = activeAccounts.filter(a => a.phase === 'evaluation').length;
+  const fundedCount = activeAccounts.filter(a => a.phase === 'funded').length;
+  const hedgeCount = activeAccounts.filter(a => a.phase === 'live').length;
+  const archivedCount = accounts.filter(a => a.is_archived).length;
 
   const formatCurrency = (value: number) => {
     return new Intl.NumberFormat('en-US', {
@@ -209,6 +249,11 @@ const DashboardOverview = () => {
                 <TabsTrigger value="live" className="data-[state=active]:bg-accent/40 data-[state=active]:text-foreground transition-all">
                   Hedge
                 </TabsTrigger>
+                {archivedCount > 0 && (
+                  <TabsTrigger value="archived" className="data-[state=active]:bg-muted data-[state=active]:text-muted-foreground transition-all">
+                    Archived ({archivedCount})
+                  </TabsTrigger>
+                )}
               </TabsList>
               <Button variant="outline" size="sm" className="hidden sm:flex group">
                 <RefreshCw className="mr-2 h-4 w-4 transition-transform group-hover:rotate-180 duration-500" />
@@ -329,6 +374,8 @@ const DashboardOverview = () => {
                       <AccountCard
                         account={account}
                         onDelete={deleteAccount}
+                        onArchive={handleArchiveAccount}
+                        onRestore={handleRestoreAccount}
                         onClick={handleAccountClick}
                         connectionSnapshot={getAccountSnapshot(account)}
                       />
@@ -345,6 +392,7 @@ const DashboardOverview = () => {
         open={addModalOpen}
         onOpenChange={setAddModalOpen}
         onSubmit={createAccount}
+        existingAccounts={accounts}
       />
 
       <AccountDetailsModal

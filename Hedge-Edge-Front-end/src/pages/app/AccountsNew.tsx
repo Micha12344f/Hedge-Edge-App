@@ -305,6 +305,7 @@ const Accounts = () => {
         onSubmit={createAccount}
         defaultType={addModalType}
         hedgeAccounts={hedgeAccounts}
+        existingAccounts={accounts}
       />
     </div>
   );

@@ -23,6 +23,10 @@ export interface TradingAccount {
   pnl: number;
   pnl_percent: number;
   is_active: boolean;
+  is_archived: boolean;
+  evaluation_fee?: number | null;
+  evaluation_phase?: number | null; // 1, 2, 3, or 4
+  previous_account_id?: string | null; // Link to archived account for progression tracking
   last_sync_at: string | null;
   created_at: string;
   updated_at: string;
@@ -42,6 +46,9 @@ export interface CreateAccountData {
   max_loss?: number;
   max_daily_loss?: number;
   min_trading_days?: number;
+  evaluation_fee?: number;
+  evaluation_phase?: number;
+  previous_account_id?: string;
 }
 
 // Local storage key for demo accounts
@@ -132,6 +139,10 @@ export const useTradingAccounts = () => {
         pnl: 0,
         pnl_percent: 0,
         is_active: true,
+        is_archived: false,
+        evaluation_fee: data.evaluation_fee || null,
+        evaluation_phase: data.evaluation_phase || null,
+        previous_account_id: data.previous_account_id || null,
         last_sync_at: null,
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
@@ -230,6 +241,72 @@ export const useTradingAccounts = () => {
     await fetchAccounts();
   };
 
+  const archiveAccount = async (id: string) => {
+    if (user && isSupabaseEnabled && supabase) {
+      const { error } = await supabase
+        .from('trading_accounts')
+        .update({ is_archived: true, is_active: false })
+        .eq('id', id);
+
+      if (error) {
+        toast({
+          title: 'Error archiving account ❌',
+          description: error.message,
+          variant: 'destructive',
+        });
+        return { error };
+      }
+    } else {
+      // Demo mode
+      const localAccounts = getLocalAccounts();
+      const updated = localAccounts.map(acc => 
+        acc.id === id ? { ...acc, is_archived: true, is_active: false, updated_at: new Date().toISOString() } : acc
+      );
+      saveLocalAccounts(updated);
+    }
+
+    toast({
+      title: 'Account archived 📦',
+      description: 'Your trading account has been archived.',
+    });
+    
+    await fetchAccounts();
+    return { error: null };
+  };
+
+  const restoreAccount = async (id: string) => {
+    if (user && isSupabaseEnabled && supabase) {
+      const { error } = await supabase
+        .from('trading_accounts')
+        .update({ is_archived: false, is_active: true })
+        .eq('id', id);
+
+      if (error) {
+        toast({
+          title: 'Error restoring account ❌',
+          description: error.message,
+          variant: 'destructive',
+        });
+        return { error };
+      }
+    } else {
+      // Demo mode
+      const localAccounts = getLocalAccounts();
+      const updated = localAccounts.map(acc => 
+        acc.id === id ? { ...acc, is_archived: false, is_active: true, updated_at: new Date().toISOString() } : acc
+      );
+      saveLocalAccounts(updated);
+    }
+
+    toast({
+      title: 'Account restored ✅',
+      description: 'Your trading account has been restored.',
+    });
+    
+    await fetchAccounts();
+    return { error: null };
+  };
+
   const deleteAccount = async (id: string) => {
     if (user && isSupabaseEnabled && supabase) {
       const { error } = await supabase
@@ -271,6 +348,8 @@ export const useTradingAccounts = () => {
     fetchAccounts,
     createAccount,
     updateAccount,
+    archiveAccount,
+    restoreAccount,
     deleteAccount,
     syncAccountFromMT5,
   };

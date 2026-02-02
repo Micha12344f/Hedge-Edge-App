@@ -153,11 +153,11 @@ const Accounts = () => {
   };
 
   const handleOpenAddAccount = () => {
-    if (availableAccounts.length === 0) {
-      // No existing accounts to add, open the create account modal
+    // Always show selection dialog to add existing accounts or create new
+    // Only open create modal directly if there are NO accounts at all
+    if (accounts.length === 0) {
       setAddModalOpen(true);
     } else {
-      // Show selection dialog
       setSelectAccountModalOpen(true);
     }
   };
@@ -193,23 +193,31 @@ const Accounts = () => {
             <DialogTitle>Add Account to Hedge Map</DialogTitle>
           </DialogHeader>
           <div className="space-y-4 py-4">
-            <div className="space-y-2">
-              <Label>Select an account</Label>
-              <Select value={selectedAccountToAdd} onValueChange={setSelectedAccountToAdd}>
-                <SelectTrigger>
-                  <SelectValue placeholder="Choose an account..." />
-                </SelectTrigger>
-                <SelectContent>
-                  {availableAccounts.map((account) => (
-                    <SelectItem key={account.id} value={account.id}>
-                      {account.account_name} ({account.phase === 'live' ? 'Hedge' : account.phase === 'funded' ? 'Funded' : 'Evaluation'})
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
+            {availableAccounts.length > 0 ? (
+              <div className="space-y-2">
+                <Label>Select an existing account to add</Label>
+                <Select value={selectedAccountToAdd} onValueChange={setSelectedAccountToAdd}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Choose an account..." />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {availableAccounts.map((account) => (
+                      <SelectItem key={account.id} value={account.id}>
+                        {account.account_name} ({account.phase === 'live' ? 'Hedge' : account.phase === 'funded' ? 'Funded' : 'Evaluation'})
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            ) : (
+              <div className="text-center py-4">
+                <p className="text-sm text-muted-foreground mb-2">
+                  All your accounts are already on the map.
+                </p>
+              </div>
+            )}
             <p className="text-sm text-muted-foreground">
-              Or{' '}
+              {availableAccounts.length > 0 ? 'Or ' : ''}
               <button
                 type="button"
                 className="text-primary hover:underline"
@@ -218,7 +226,7 @@ const Accounts = () => {
                   setAddModalOpen(true);
                 }}
               >
-                create a new account
+                Create a new account
               </button>
             </p>
           </div>
@@ -237,6 +245,7 @@ const Accounts = () => {
         open={addModalOpen}
         onOpenChange={setAddModalOpen}
         onSubmit={createAccount}
+        existingAccounts={accounts}
       />
 
       <AccountDetailsModal
