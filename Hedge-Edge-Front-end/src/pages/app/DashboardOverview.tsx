@@ -8,6 +8,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Skeleton } from '@/components/ui/skeleton';
+import { Badge } from '@/components/ui/badge';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { GradientText } from '@/components/ui/gradient-text';
 import { AnimatedCurrency } from '@/components/ui/animated-counter';
@@ -108,7 +109,7 @@ const DashboardOverview = () => {
   // Calculate stats (exclude archived accounts)
   const activeAccounts = accounts.filter(a => !a.is_archived);
   const propAccounts = activeAccounts.filter(a => a.phase === 'funded' || a.phase === 'evaluation');
-  const propBalance = propAccounts.reduce((sum, acc) => sum + (Number(acc.current_balance) || Number(acc.account_size) || 0), 0);
+  const propBalance = propAccounts.reduce((sum, acc) => sum + (Number(acc.account_size) || 0), 0);
   const totalPnL = activeAccounts.reduce((sum, acc) => sum + (Number(acc.pnl) || 0), 0);
   const totalAccountValue = activeAccounts.reduce((sum, acc) => sum + (Number(acc.account_size) || 0), 0);
   // Calculate weighted average return based on account sizes (more accurate than simple average)
@@ -132,16 +133,6 @@ const DashboardOverview = () => {
 
   const statsCards = [
     {
-      title: 'Prop Balance',
-      icon: Wallet,
-      value: propBalance,
-      type: 'currency' as const,
-      className: 'text-foreground',
-      iconClassName: 'text-muted-foreground',
-      tooltip: 'Total balance across all prop firm accounts (Evaluation + Funded)',
-      colorByValue: false,
-    },
-    {
       title: 'Total P&L',
       icon: totalPnL >= 0 ? TrendingUp : TrendingDown,
       value: totalPnL,
@@ -151,6 +142,16 @@ const DashboardOverview = () => {
       tooltip: 'Combined profit/loss across all accounts',
       colorByValue: true,
       shiny: totalPnL > 0,
+    },
+    {
+      title: 'Assets Under Management',
+      icon: Wallet,
+      value: propBalance,
+      type: 'currency' as const,
+      className: 'text-foreground',
+      iconClassName: 'text-muted-foreground',
+      tooltip: 'Total account sizes across all prop firm accounts (Evaluation + Funded)',
+      colorByValue: false,
     },
     {
       title: 'Avg. Return',
@@ -188,6 +189,7 @@ const DashboardOverview = () => {
               Overview
             </GradientText>
             <Sparkles className="w-5 h-5 text-secondary animate-pulse" />
+            <Badge variant="secondary" className="text-xs">Beta</Badge>
           </h1>
           <p className="text-muted-foreground">Manage all your trading accounts in one place</p>
         </div>

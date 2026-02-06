@@ -3,6 +3,9 @@ import { useTradingAccounts, TradingAccount } from '@/hooks/useTradingAccounts';
 import { DraggableHedgeMap, HedgeRelationship } from '@/components/dashboard/DraggableHedgeMap';
 import { AddAccountModal } from '@/components/dashboard/AddAccountModal';
 import { AccountDetailsModal } from '@/components/dashboard/AccountDetailsModal';
+import { ConfigureCopierGroupModal } from '@/components/dashboard/ConfigureCopierGroupModal';
+import { useCopierGroupsContext } from '@/contexts/CopierGroupsContext';
+import type { CopierGroup } from '@/types/copier';
 import { useToast } from '@/hooks/use-toast';
 import {
   Dialog,
@@ -47,7 +50,7 @@ const saveHedgeMapAccounts = (accountIds: string[]) => {
 };
 
 const Accounts = () => {
-  const { accounts, loading, createAccount, deleteAccount, syncAccountFromMT5 } = useTradingAccounts();
+  const { createAccount, deleteAccount, syncAccountFromMT5 } = useTradingAccounts();
   const [addModalOpen, setAddModalOpen] = useState(false);
   const [selectAccountModalOpen, setSelectAccountModalOpen] = useState(false);
   const [selectedAccountToAdd, setSelectedAccountToAdd] = useState<string>('');
@@ -56,6 +59,23 @@ const Accounts = () => {
   const [detailsModalOpen, setDetailsModalOpen] = useState(false);
   const [hedgeMapAccountIds, setHedgeMapAccountIds] = useState<string[]>(getStoredHedgeMapAccounts);
   const { toast } = useToast();
+
+  // Copier groups integration for sync + status colors + ConfigureCopierGroupModal
+  const {
+    groups: copierGroups,
+    addGroup,
+    updateGroup,
+    getConnectionStatus,
+    createGroupFromRelationship,
+    syncRelationshipsFromGroups,
+    deleteGroupForPair,
+    updateGroupFromRelationship,
+    accounts,
+    accountsLoading: loading,
+  } = useCopierGroupsContext();
+
+  // State for the Configure Copier Group Modal (opens after linking accounts)
+  const [configuringGroup, setConfiguringGroup] = useState<CopierGroup | null>(null);
 
   // Clean up invalid hedge map account IDs only after accounts have loaded
   useEffect(() => {
@@ -67,6 +87,53 @@ const Accounts = () => {
       }
     }
   }, [accounts, loading]); // Only run when accounts change or loading finishes
+
+  // Sync: ensure accounts from copier groups appear on the hedge map
+  useEffect(() => {
+    if (loading || accounts.length === 0) return;
+    let changed = false;
+    const currentIds = new Set(hedgeMapAccountIds);
+    for (const group of copierGroups) {
+      // Add leader to map if not already there
+      if (!currentIds.has(group.leaderAccountId) && accounts.some(a => a.id === group.leaderAccountId)) {
+        currentIds.add(group.leaderAccountId);
+        changed = true;
+      }
+      // Add followers to map if not already there
+      for (const follower of group.followers) {
+        if (!currentIds.has(follower.accountId) && accounts.some(a => a.id === follower.accountId)) {
+          currentIds.add(follower.accountId);
+          changed = true;
+        }
+      }
+    }
+    if (changed) {
+      const updated = Array.from(currentIds);
+      setHedgeMapAccountIds(updated);
+      saveHedgeMapAccounts(updated);
+    }
+  }, [copierGroups, accounts, loading]);
+
+  // Sync: ensure copier group relationships appear in hedge map relationships
+  useEffect(() => {
+    if (loading) return;
+    syncRelationshipsFromGroups();
+    // Re-read relationships after sync
+    const stored = getStoredRelationships();
+    if (JSON.stringify(stored) !== JSON.stringify(relationships)) {
+      setRelationships(stored);
+    }
+  }, [copierGroups, loading]);
+
+  // Listen for relationship changes dispatched by context (e.g. when Trade Copier deletes a group)
+  useEffect(() => {
+    const handleRelationshipsChanged = () => {
+      const stored = getStoredRelationships();
+      setRelationships(stored);
+    };
+    window.addEventListener('hedge-relationships-changed', handleRelationshipsChanged);
+    return () => window.removeEventListener('hedge-relationships-changed', handleRelationshipsChanged);
+  }, []);
 
   const handleAccountClick = (account: TradingAccount) => {
     setSelectedAccount(account);
@@ -89,6 +156,24 @@ const Accounts = () => {
       return;
     }
 
+    // Funded/Evaluation accounts can only connect to ONE hedge account at a time
+    const sourceAccount = accounts.find(a => a.id === sourceId);
+    const targetAccount = accounts.find(a => a.id === targetId);
+    const propAccount = sourceAccount?.phase === 'live' ? targetAccount : sourceAccount;
+    if (propAccount && (propAccount.phase === 'evaluation' || propAccount.phase === 'funded')) {
+      const alreadyLinked = relationships.some(
+        r => r.sourceId === propAccount.id || r.targetId === propAccount.id
+      );
+      if (alreadyLinked) {
+        toast({
+          title: 'Already connected ⛔',
+          description: `${propAccount.account_name} is already linked to a hedge account. Remove the existing connection first.`,
+          variant: 'destructive',
+        });
+        return;
+      }
+    }
+
     const newRelationship: HedgeRelationship = {
       id: crypto.randomUUID(),
       sourceId,
@@ -101,24 +186,57 @@ const Accounts = () => {
     const updated = [...relationships, newRelationship];
     setRelationships(updated);
     saveRelationships(updated);
+
+    // Auto-create a copier group for this new relationship and open Configure modal
+    const newGroup = createGroupFromRelationship(sourceId, targetId, accounts);
+    if (newGroup) {
+      addGroup(newGroup);
+      // Open Configure Copier Group modal so user can customize settings
+      setConfiguringGroup(newGroup);
+      toast({
+        title: 'Copier group created 🔗',
+        description: 'Configure the copier settings for this connection.',
+      });
+    }
   };
 
   const handleUpdateRelationship = (id: string, updates: Partial<HedgeRelationship>) => {
+    const rel = relationships.find(r => r.id === id);
     const updated = relationships.map(r => 
       r.id === id ? { ...r, ...updates } : r
     );
     setRelationships(updated);
     saveRelationships(updated);
+
+    // Propagate changes to the matching copier group
+    if (rel) {
+      updateGroupFromRelationship(rel.sourceId, rel.targetId, {
+        logic: updates.logic ?? rel.logic,
+        offsetPercentage: updates.offsetPercentage ?? rel.offsetPercentage,
+        isActive: updates.isActive ?? rel.isActive,
+      });
+    }
   };
 
   const handleDeleteRelationship = (id: string) => {
+    // Find the relationship before removing so we can clean up the copier group
+    const rel = relationships.find(r => r.id === id);
     const updated = relationships.filter(r => r.id !== id);
     setRelationships(updated);
     saveRelationships(updated);
+
+    // Delete the matching copier group
+    if (rel) {
+      deleteGroupForPair(rel.sourceId, rel.targetId);
+    }
   };
 
   const handleDeleteAccount = async (id: string) => {
-    // Also remove any relationships involving this account
+    // Also remove any relationships and their copier groups involving this account
+    const relsToDelete = relationships.filter(r => r.sourceId === id || r.targetId === id);
+    for (const rel of relsToDelete) {
+      deleteGroupForPair(rel.sourceId, rel.targetId);
+    }
     const updatedRelationships = relationships.filter(r => r.sourceId !== id && r.targetId !== id);
     setRelationships(updatedRelationships);
     saveRelationships(updatedRelationships);
@@ -162,6 +280,16 @@ const Accounts = () => {
     }
   };
 
+  // Handle save from Configure Copier Group modal
+  const handleConfigureSave = (updated: CopierGroup) => {
+    updateGroup(updated);
+    setConfiguringGroup(null);
+    toast({
+      title: 'Copier group configured ✅',
+      description: 'The copier group settings have been saved.',
+    });
+  };
+
   if (loading) {
     return (
       <div className="h-screen flex items-center justify-center">
@@ -184,6 +312,7 @@ const Accounts = () => {
         onDeleteRelationship={handleDeleteRelationship}
         onUpdateRelationship={handleUpdateRelationship}
         onAccountClick={handleAccountClick}
+        getConnectionStatus={getConnectionStatus}
       />
 
       {/* Select existing account dialog */}
@@ -253,6 +382,14 @@ const Accounts = () => {
         open={detailsModalOpen}
         onOpenChange={setDetailsModalOpen}
         onSyncAccount={syncAccountFromMT5}
+      />
+
+      {/* Configure Copier Group Modal - opens after linking accounts on hedge map */}
+      <ConfigureCopierGroupModal
+        open={configuringGroup !== null}
+        onOpenChange={(open) => { if (!open) setConfiguringGroup(null); }}
+        group={configuringGroup}
+        onSave={handleConfigureSave}
       />
     </div>
   );

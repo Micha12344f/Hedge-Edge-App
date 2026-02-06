@@ -10,17 +10,21 @@ import {
   TrendingDown
 } from 'lucide-react';
 
+import type { ConnectionStatus } from '@/contexts/CopierGroupsContext';
+
 interface MapNodeProps {
   account: TradingAccount;
   isSelected?: boolean;
   isDragging?: boolean;
   isLinkSource?: boolean;
+  /** Copier connection status for status-based node coloring */
+  copierStatus?: ConnectionStatus;
   onMouseDown?: (e: React.MouseEvent) => void;
   onClick?: () => void;
   onDetailsClick?: () => void;
 }
 
-export const MapNode = ({ account, isSelected, isDragging, isLinkSource, onMouseDown, onClick, onDetailsClick }: MapNodeProps) => {
+export const MapNode = ({ account, isSelected, isDragging, isLinkSource, copierStatus = 'none', onMouseDown, onClick, onDetailsClick }: MapNodeProps) => {
   const pnl = Number(account.pnl) || 0;
   const pnlPercent = Number(account.pnl_percent) || 0;
   const isProfit = pnl >= 0;
@@ -177,10 +181,13 @@ export const MapNode = ({ account, isSelected, isDragging, isLinkSource, onMouse
           )}
         </div>
 
-        {/* Connection indicator - shows active state */}
+        {/* Connection status indicator - shows copier status */}
         <div className={cn(
           'absolute -top-1 -right-1 w-4 h-4 rounded-full border-2 border-background',
-          'bg-emerald-400'
+          copierStatus === 'active' && 'bg-green-400',
+          copierStatus === 'paused' && 'bg-yellow-400',
+          copierStatus === 'error' && 'bg-red-400 animate-pulse',
+          copierStatus === 'none' && 'bg-gray-400'
         )} />
       </div>
 

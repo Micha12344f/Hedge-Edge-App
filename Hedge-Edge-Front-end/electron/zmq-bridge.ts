@@ -41,8 +41,98 @@ namespace ZmqTypes {
 // Types
 // ============================================================================
 
+/**
+ * Event types from the EA (event-driven mode)
+ */
+export type ZmqEventType = 
+  | 'CONNECTED'        // EA started, initial account state
+  | 'DISCONNECTED'     // EA shutting down
+  | 'HEARTBEAT'        // Periodic keepalive with basic metrics
+  | 'POSITION_OPENED'  // New position opened
+  | 'POSITION_CLOSED'  // Position closed
+  | 'POSITION_MODIFIED' // SL/TP changed
+  | 'POSITION_REVERSED' // Position reversed (in-out)
+  | 'DEAL_EXECUTED'    // Generic deal execution
+  | 'ORDER_PLACED'     // Pending order placed
+  | 'ORDER_CANCELLED'  // Pending order cancelled
+  | 'ACCOUNT_UPDATE'   // Full account state update (after trade)
+  | 'PRICE_UPDATE'     // Position price/profit update (optional high-bandwidth)
+  | 'PAUSED'           // Trading paused
+  | 'RESUMED';         // Trading resumed
+
+/**
+ * Base event structure from EA
+ */
+export interface ZmqEvent {
+  type: ZmqEventType;
+  eventIndex: number;
+  timestamp: string;
+  platform: 'MT5';
+  accountId: string;
+  data: unknown;
+}
+
+/**
+ * Account data (sent with CONNECTED, ACCOUNT_UPDATE events)
+ */
+export interface ZmqAccountData {
+  accountId?: string;
+  accountName?: string;
+  broker: string;
+  server?: string;
+  balance: number;
+  equity: number;
+  margin: number;
+  freeMargin: number;
+  marginLevel: number | null;
+  floatingPnL: number;
+  currency: string;
+  leverage: number;
+  status: string;
+  isLicenseValid: boolean;
+  isPaused: boolean;
+  lastError: string | null;
+  eventDriven: boolean;
+  positions: ZmqPosition[];
+}
+
+/**
+ * Heartbeat data (real-time metrics with positions for live updates)
+ */
+export interface ZmqHeartbeatData {
+  balance: number;
+  equity: number;
+  profit: number;
+  margin?: number;
+  freeMargin?: number;
+  positionCount: number;
+  isLicenseValid: boolean;
+  isPaused: boolean;
+  positions?: ZmqPosition[];
+}
+
+/**
+ * Position event data (POSITION_OPENED, POSITION_CLOSED, etc.)
+ */
+export interface ZmqPositionEventData {
+  deal?: number;
+  position: number;
+  symbol: string;
+  volume?: number;
+  price?: number;
+  profit?: number;
+  type?: 'BUY' | 'SELL';
+  entry?: 'IN' | 'OUT' | 'INOUT' | 'OTHER';
+  stopLoss?: number;
+  takeProfit?: number;
+}
+
+/**
+ * Legacy snapshot format (backwards compatibility)
+ * @deprecated Use ZmqEvent with CONNECTED/ACCOUNT_UPDATE type instead
+ */
 export interface ZmqSnapshot {
-  type: 'SNAPSHOT' | 'LICENSE_STATUS' | 'GOODBYE';
+  type: 'SNAPSHOT' | 'LICENSE_STATUS' | 'GOODBYE' | ZmqEventType;
   timestamp: string;
   platform: 'MT5';
   accountId: string;
@@ -60,10 +150,14 @@ export interface ZmqSnapshot {
   isLicenseValid: boolean;
   isPaused: boolean;
   lastError: string | null;
-  zmqMode: boolean;
-  snapshotIndex: number;
-  avgLatencyUs: number;
+  zmqMode?: boolean;
+  eventDriven?: boolean;
+  snapshotIndex?: number;
+  eventIndex?: number;
+  avgLatencyUs?: number;
   positions: ZmqPosition[];
+  // Event data (when type is an event type)
+  data?: unknown;
 }
 
 export interface ZmqPosition {
@@ -84,7 +178,7 @@ export interface ZmqPosition {
 }
 
 export interface ZmqCommand {
-  action: 'PAUSE' | 'RESUME' | 'CLOSE_ALL' | 'CLOSE_POSITION' | 'STATUS' | 'PING' | 'CONFIG';
+  action: 'PAUSE' | 'RESUME' | 'CLOSE_ALL' | 'CLOSE_POSITION' | 'STATUS' | 'GET_ACCOUNT' | 'PING' | 'CONFIG';
   positionId?: string;
   params?: Record<string, unknown>;
 }
@@ -104,10 +198,11 @@ export interface ZmqResponse {
 }
 
 export interface ZmqConfig {
-  zmqEnabled: boolean;
+  eventDriven: boolean;
   dataPort: number;
   commandPort: number;
-  publishIntervalMs: number;
+  heartbeatIntervalMs: number;
+  streamPriceUpdates: boolean;
   licenseCheckIntervalSec: number;
 }
 
@@ -124,10 +219,12 @@ export interface ZmqBridgeConfig {
 export interface ZmqConnectionStatus {
   dataSocket: 'disconnected' | 'connecting' | 'connected' | 'error';
   commandSocket: 'disconnected' | 'connecting' | 'connected' | 'error';
-  lastSnapshot?: Date;
-  snapshotsReceived: number;
+  lastEvent?: Date;
+  eventsReceived: number;
   commandsSent: number;
   lastError?: string;
+  // Track last account state from events
+  lastAccountState?: ZmqAccountData;
 }
 
 // ============================================================================
@@ -149,13 +246,20 @@ export const DEFAULT_ZMQ_CONFIG: ZmqBridgeConfig = {
 // ============================================================================
 
 /**
- * ZeroMQ Bridge for MT5 EA Communication
+ * ZeroMQ Bridge for MT5 EA Communication (Event-Driven Mode)
  * 
- * Events:
- * - 'snapshot': Emitted when a new account snapshot is received
- * - 'status': Emitted when connection status changes
- * - 'error': Emitted on errors
- * - 'goodbye': Emitted when EA sends goodbye message (shutting down)
+ * Events emitted:
+ * - 'event': Emitted for all EA events (type in event.type)
+ * - 'connected': EA connected (CONNECTED event with full account state)
+ * - 'disconnected': EA disconnecting (DISCONNECTED event)
+ * - 'heartbeat': Periodic keepalive (HEARTBEAT event)
+ * - 'positionOpened': New position opened (POSITION_OPENED event)
+ * - 'positionClosed': Position closed (POSITION_CLOSED event)
+ * - 'positionModified': SL/TP changed (POSITION_MODIFIED event)
+ * - 'accountUpdate': Full account state update (ACCOUNT_UPDATE event)
+ * - 'status': Connection status changes
+ * - 'error': Errors
+ * - 'snapshot': Legacy - emitted for backwards compatibility
  */
 export class ZmqBridge extends EventEmitter {
   private config: ZmqBridgeConfig;
@@ -173,6 +277,9 @@ export class ZmqBridge extends EventEmitter {
     reject: (reason: Error) => void;
     timeout: NodeJS.Timeout;
   } | null = null;
+  
+  // Cached account state (built from events)
+  private cachedAccountState: ZmqAccountData | null = null;
 
   constructor(config: Partial<ZmqBridgeConfig> = {}) {
     super();
@@ -180,7 +287,7 @@ export class ZmqBridge extends EventEmitter {
     this.status = {
       dataSocket: 'disconnected',
       commandSocket: 'disconnected',
-      snapshotsReceived: 0,
+      eventsReceived: 0,
       commandsSent: 0,
     };
   }
@@ -213,6 +320,11 @@ export class ZmqBridge extends EventEmitter {
       this.emitStatus();
       
       console.log('[ZmqBridge] Started successfully');
+      
+      // Detection is purely event-driven via PUB/SUB
+      // The EA publishes HEARTBEAT events periodically - these will populate account state
+      // STATUS commands are available on-demand but NOT used for detection or startup
+      
       return true;
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
@@ -284,6 +396,7 @@ export class ZmqBridge extends EventEmitter {
 
   /**
    * Start receiving messages from the SUB socket
+   * Handles event-driven messages from the EA
    */
   private async startReceiving(): Promise<void> {
     if (!this.subSocket) return;
@@ -294,20 +407,13 @@ export class ZmqBridge extends EventEmitter {
         
         try {
           const messageStr = msg.toString();
-          const snapshot = JSON.parse(messageStr) as ZmqSnapshot;
+          const event = JSON.parse(messageStr) as ZmqEvent;
           
-          this.status.snapshotsReceived++;
-          this.status.lastSnapshot = new Date();
+          this.status.eventsReceived++;
+          this.status.lastEvent = new Date();
           
-          // Handle different message types
-          if (snapshot.type === 'GOODBYE') {
-            console.log('[ZmqBridge] Received GOODBYE from EA');
-            this.emit('goodbye', snapshot);
-          } else if (snapshot.type === 'LICENSE_STATUS') {
-            this.emit('licenseStatus', snapshot);
-          } else {
-            this.emit('snapshot', snapshot);
-          }
+          // Handle event-driven message types
+          this.handleEvent(event);
         } catch (parseError) {
           console.warn('[ZmqBridge] Failed to parse message:', parseError);
         }
@@ -323,6 +429,279 @@ export class ZmqBridge extends EventEmitter {
         this.scheduleReconnect();
       }
     }
+  }
+  
+  /**
+   * Convert a legacy SNAPSHOT/GOODBYE message from the EA into event-driven format.
+   * The EA publishes account data at the top level with "type":"SNAPSHOT".
+   * The bridge expects "type":"CONNECTED"/"ACCOUNT_UPDATE" with data in a nested field.
+   */
+  private normalizeEAMessage(raw: any): ZmqEvent {
+    const messageType: string = raw.type || 'SNAPSHOT';
+    
+    // Already in event-driven format (has a `data` field and known event type)
+    if (raw.data !== undefined && ['CONNECTED', 'DISCONNECTED', 'HEARTBEAT', 
+        'POSITION_OPENED', 'POSITION_CLOSED', 'POSITION_MODIFIED', 'POSITION_REVERSED',
+        'DEAL_EXECUTED', 'ORDER_PLACED', 'ORDER_CANCELLED', 'ACCOUNT_UPDATE',
+        'PRICE_UPDATE', 'PAUSED', 'RESUMED'].includes(messageType)) {
+      return raw as ZmqEvent;
+    }
+    
+    // Legacy SNAPSHOT/GOODBYE format: account data is at top level
+    // Extract account data from top-level fields into a nested `data` field
+    const accountData: ZmqAccountData = {
+      accountId: raw.accountId,
+      accountName: raw.accountName,
+      broker: raw.broker || '',
+      server: raw.server,
+      balance: raw.balance ?? 0,
+      equity: raw.equity ?? 0,
+      margin: raw.margin ?? 0,
+      freeMargin: raw.freeMargin ?? 0,
+      marginLevel: raw.marginLevel ?? null,
+      floatingPnL: raw.floatingPnL ?? 0,
+      currency: raw.currency || 'USD',
+      leverage: raw.leverage ?? 0,
+      status: raw.status || 'Active',
+      isLicenseValid: raw.isLicenseValid ?? true,
+      isPaused: raw.isPaused ?? false,
+      lastError: raw.lastError ?? null,
+      eventDriven: raw.eventDriven ?? false,
+      positions: raw.positions || [],
+    };
+    
+    // Map legacy type to event type
+    let eventType: ZmqEventType;
+    if (messageType === 'GOODBYE') {
+      eventType = 'DISCONNECTED';
+    } else if (!this.cachedAccountState) {
+      // First SNAPSHOT = CONNECTED
+      eventType = 'CONNECTED';
+    } else {
+      // Subsequent SNAPSHOTs = ACCOUNT_UPDATE (contains full state including positions)
+      eventType = 'ACCOUNT_UPDATE';
+    }
+    
+    return {
+      type: eventType,
+      eventIndex: raw.snapshotIndex ?? raw.eventIndex ?? 0,
+      timestamp: raw.timestamp || new Date().toISOString(),
+      platform: 'MT5',
+      accountId: raw.accountId || '0',
+      data: accountData,
+    };
+  }
+
+  /**
+   * Handle an event from the EA
+   */
+  private handleEvent(rawEvent: ZmqEvent): void {
+    // Normalize legacy SNAPSHOT format to event-driven format
+    const event = this.normalizeEAMessage(rawEvent);
+    
+    // Emit generic event
+    this.emit('event', event);
+    
+    // Handle specific event types
+    switch (event.type) {
+      case 'CONNECTED':
+        console.log('[ZmqBridge] EA connected - received initial account state');
+        this.cachedAccountState = event.data as ZmqAccountData;
+        this.status.lastAccountState = this.cachedAccountState;
+        this.emit('connected', event);
+        // Also emit as snapshot for backwards compatibility
+        this.emit('snapshot', this.buildLegacySnapshot(event));
+        break;
+        
+      case 'DISCONNECTED':
+        console.log('[ZmqBridge] EA disconnecting');
+        this.emit('disconnected', event);
+        this.emit('goodbye', event);
+        break;
+        
+      case 'HEARTBEAT':
+        // Update cached metrics from heartbeat
+        this.updateFromHeartbeat(event.data as ZmqHeartbeatData);
+        this.emit('heartbeat', event);
+        break;
+        
+      case 'ACCOUNT_UPDATE':
+        console.log('[ZmqBridge] Account state update received');
+        this.cachedAccountState = event.data as ZmqAccountData;
+        this.status.lastAccountState = this.cachedAccountState;
+        this.emit('accountUpdate', event);
+        // Also emit as snapshot for backwards compatibility
+        this.emit('snapshot', this.buildLegacySnapshot(event));
+        break;
+        
+      case 'POSITION_OPENED':
+        console.log('[ZmqBridge] Position opened:', (event.data as ZmqPositionEventData).position);
+        this.emit('positionOpened', event);
+        break;
+        
+      case 'POSITION_CLOSED':
+        console.log('[ZmqBridge] Position closed:', (event.data as ZmqPositionEventData).position);
+        this.emit('positionClosed', event);
+        break;
+        
+      case 'POSITION_MODIFIED':
+        console.log('[ZmqBridge] Position modified:', (event.data as ZmqPositionEventData).position);
+        this.emit('positionModified', event);
+        break;
+        
+      case 'POSITION_REVERSED':
+        console.log('[ZmqBridge] Position reversed:', (event.data as ZmqPositionEventData).position);
+        this.emit('positionReversed', event);
+        break;
+        
+      case 'ORDER_PLACED':
+        this.emit('orderPlaced', event);
+        break;
+        
+      case 'ORDER_CANCELLED':
+        this.emit('orderCancelled', event);
+        break;
+        
+      case 'PRICE_UPDATE':
+        this.emit('priceUpdate', event);
+        break;
+        
+      case 'PAUSED':
+        console.log('[ZmqBridge] Trading paused');
+        this.emit('paused', event);
+        break;
+        
+      case 'RESUMED':
+        console.log('[ZmqBridge] Trading resumed');
+        this.emit('resumed', event);
+        break;
+        
+      default:
+        // Unknown event type - still emit for flexibility
+        console.log('[ZmqBridge] Unknown event type:', event.type);
+        break;
+    }
+  }
+  
+  /**
+   * Update cached account state from heartbeat (now includes positions for real-time updates)
+   */
+  private updateFromHeartbeat(heartbeat: ZmqHeartbeatData): void {
+    if (this.cachedAccountState) {
+      this.cachedAccountState.balance = heartbeat.balance;
+      this.cachedAccountState.equity = heartbeat.equity;
+      this.cachedAccountState.floatingPnL = heartbeat.profit;
+      this.cachedAccountState.isLicenseValid = heartbeat.isLicenseValid;
+      this.cachedAccountState.isPaused = heartbeat.isPaused;
+      
+      // Update margin info if provided
+      if (heartbeat.margin !== undefined) {
+        this.cachedAccountState.margin = heartbeat.margin;
+      }
+      if (heartbeat.freeMargin !== undefined) {
+        this.cachedAccountState.freeMargin = heartbeat.freeMargin;
+      }
+      
+      // Update positions if provided (for real-time position updates)
+      if (heartbeat.positions && heartbeat.positions.length >= 0) {
+        this.cachedAccountState.positions = heartbeat.positions;
+      }
+      
+      this.status.lastAccountState = this.cachedAccountState;
+    }
+  }
+  
+  /**
+   * Request initial account state from EA
+   * Called after connection to ensure we have account data even if we connected after EA init
+   */
+  private async requestInitialState(): Promise<void> {
+    try {
+      console.log('[ZmqBridge] Requesting initial account state...');
+      
+      // Brief delay to let sockets fully establish
+      await new Promise(resolve => setTimeout(resolve, 100));
+      
+      const response = await this.sendCommand({ action: 'STATUS' });
+      
+      if (response.success && response.data) {
+        console.log('[ZmqBridge] Received initial account state');
+        
+        // Parse the account data from the response
+        const accountData = response.data as ZmqAccountData;
+        
+        if (accountData && accountData.broker) {
+          this.cachedAccountState = accountData;
+          this.status.lastAccountState = accountData;
+          
+          // Get accountId from the account data (EA now includes it)
+          const accountId = accountData.accountId || '0';
+          
+          // Build a synthetic CONNECTED event and emit it
+          const syntheticEvent: ZmqEvent = {
+            type: 'CONNECTED',
+            eventIndex: 0,
+            timestamp: new Date().toISOString(),
+            platform: 'MT5',
+            accountId: accountId,
+            data: accountData,
+          };
+          
+          // Emit the connected event so agent-channel-reader can update its snapshot
+          this.emit('connected', syntheticEvent);
+          this.emit('event', syntheticEvent);
+          
+          // Also emit legacy snapshot for backwards compatibility
+          const legacySnapshot = this.buildLegacySnapshot(syntheticEvent);
+          this.emit('snapshot', legacySnapshot);
+          
+          console.log('[ZmqBridge] Initial state loaded - Account ID:', accountId, 'Broker:', accountData.broker);
+        }
+      } else {
+        console.log('[ZmqBridge] No initial state available from STATUS command');
+      }
+    } catch (error) {
+      console.warn('[ZmqBridge] Failed to request initial state:', error instanceof Error ? error.message : error);
+      // This is not fatal - events will still come through when things change
+    }
+  }
+  
+  /**
+   * Build a legacy snapshot from an event (backwards compatibility)
+   */
+  private buildLegacySnapshot(event: ZmqEvent): ZmqSnapshot {
+    const data = event.data as ZmqAccountData;
+    return {
+      type: event.type as any,
+      timestamp: event.timestamp,
+      platform: event.platform,
+      accountId: event.accountId,
+      broker: data.broker,
+      server: data.server,
+      balance: data.balance,
+      equity: data.equity,
+      margin: data.margin,
+      freeMargin: data.freeMargin,
+      marginLevel: data.marginLevel,
+      floatingPnL: data.floatingPnL,
+      currency: data.currency,
+      leverage: data.leverage,
+      status: data.status,
+      isLicenseValid: data.isLicenseValid,
+      isPaused: data.isPaused,
+      lastError: data.lastError,
+      eventDriven: true,
+      eventIndex: event.eventIndex,
+      positions: data.positions,
+      data: event.data,
+    };
+  }
+  
+  /**
+   * Get cached account state
+   */
+  getCachedAccountState(): ZmqAccountData | null {
+    return this.cachedAccountState;
   }
 
   /**

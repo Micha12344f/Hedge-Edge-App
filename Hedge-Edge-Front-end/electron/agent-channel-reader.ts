@@ -36,6 +36,12 @@ import {
   ZmqSnapshot,
   ZmqCommand,
   ZmqResponse,
+  ZmqEvent,
+  ZmqEventType,
+  ZmqAccountData,
+  ZmqPositionEventData,
+  ZmqHeartbeatData,
+  ZmqPosition,
   DEFAULT_ZMQ_CONFIG,
 } from './zmq-bridge.js';
 import {
@@ -52,6 +58,16 @@ import {
 // ============================================================================
 // Types
 // ============================================================================
+
+// Event types for the new event-driven architecture
+export interface AgentEvent {
+  type: ZmqEventType;
+  timestamp: string;
+  platform: 'MT5' | 'cTrader';
+  accountId: string;
+  eventIndex?: number;
+  data?: unknown;
+}
 
 export interface AgentSnapshot {
   timestamp: string;
@@ -474,6 +490,17 @@ export class AgentChannelReader extends EventEmitter {
   private static readonly DEFAULT_ZMQ_DATA_PORT = 51810;
   private static readonly DEFAULT_ZMQ_COMMAND_PORT = 51811;
   
+  // Multi-account port ranges to scan
+  // Each account uses a pair of ports: data port and command port (data + 1)
+  // Default ranges: 51810-51811 (account 1), 51820-51821 (account 2), etc.
+  private static readonly MULTI_ACCOUNT_PORT_RANGES: Array<{ dataPort: number; commandPort: number; name: string }> = [
+    { dataPort: 51810, commandPort: 51811, name: 'mt5-account-1' },
+    { dataPort: 51820, commandPort: 51821, name: 'mt5-account-2' },
+    { dataPort: 51830, commandPort: 51831, name: 'mt5-account-3' },
+    { dataPort: 51840, commandPort: 51841, name: 'mt5-account-4' },
+    { dataPort: 51850, commandPort: 51851, name: 'mt5-account-5' },
+  ];
+  
   constructor() {
     super();
     // Check ZMQ availability on construction
@@ -497,6 +524,167 @@ export class AgentChannelReader extends EventEmitter {
   }
   
   /**
+   * Get the list of port ranges to scan for multi-account support
+   */
+  static getMultiAccountPortRanges(): Array<{ dataPort: number; commandPort: number; name: string }> {
+    return AgentChannelReader.MULTI_ACCOUNT_PORT_RANGES;
+  }
+  
+  /**
+   * Scan all configured port ranges for MT5 terminals
+   * Connects to any terminal that responds on the known port ranges
+   * Detection is purely event-driven via PUB/SUB (heartbeats, CONNECTED events)
+   * @returns Array of terminal IDs that were successfully connected
+   */
+  async scanAndConnectAllMT5Terminals(): Promise<string[]> {
+    const connectedTerminals: string[] = [];
+    
+    // Phase 1: Try to connect to all ports in parallel (SUB + REQ sockets)
+    const connectionPromises = AgentChannelReader.MULTI_ACCOUNT_PORT_RANGES.map(async (portRange) => {
+      // Skip if already connected to this port range
+      const existingBridge = this.zmqBridges.get(portRange.name);
+      if (existingBridge && existingBridge.isConnected()) {
+        connectedTerminals.push(portRange.name);
+        return { portRange, connected: false, existing: true };
+      }
+      
+      // Try to connect to this port range
+      try {
+        const connected = await this.connectMT5(portRange.name, {
+          dataPort: portRange.dataPort,
+          commandPort: portRange.commandPort,
+        });
+        return { portRange, connected, existing: false };
+      } catch (error) {
+        return { portRange, connected: false, existing: false };
+      }
+    });
+    
+    const results = await Promise.all(connectionPromises);
+    
+    // Phase 2: Wait for PUB/SUB events (heartbeats arrive every 1-5s from the EA)
+    // We must wait long enough for at least one heartbeat cycle
+    const newConnections = results.filter(r => r.connected && !r.existing);
+    if (newConnections.length > 0) {
+      console.log(`[AgentChannelReader] Waiting for PUB/SUB events from ${newConnections.length} new connections...`);
+      await new Promise(resolve => setTimeout(resolve, 7000));
+    }
+    
+    // Phase 3: Check which connections received ANY PUB/SUB events
+    // Primary detection is event-driven. PING fallback for quiet EAs.
+    for (const result of results) {
+      if (result.existing) continue;
+      
+      if (result.connected) {
+        const bridge = this.zmqBridges.get(result.portRange.name);
+        if (bridge) {
+          const status = bridge.getStatus();
+          const hasEvents = status.eventsReceived > 0;
+          const hasAccountState = bridge.getCachedAccountState() !== null;
+          
+          if (hasEvents || hasAccountState) {
+            console.log(`[AgentChannelReader] ✅ EA detected on ${result.portRange.name} via PUB/SUB (events: ${status.eventsReceived})`);
+            connectedTerminals.push(result.portRange.name);
+          } else {
+            // No PUB events yet - try a lightweight PING to check if EA is alive
+            // PING is NOT a snapshot - just a yes/no alive check via REQ/REP
+            console.log(`[AgentChannelReader] No PUB events on ${result.portRange.name}, trying PING...`);
+            try {
+              const alive = await bridge.ping();
+              if (alive) {
+                console.log(`[AgentChannelReader] ✅ EA detected on ${result.portRange.name} via PING`);
+                connectedTerminals.push(result.portRange.name);
+                // Request initial account data in background (populates state for UI)
+                this.requestInitialStateFromBridge(bridge, result.portRange.name);
+              } else {
+                console.log(`[AgentChannelReader] No EA on ${result.portRange.name}, disconnecting`);
+                await this.disconnectMT5(result.portRange.name);
+              }
+            } catch {
+              console.log(`[AgentChannelReader] No EA on ${result.portRange.name} (PING timeout), disconnecting`);
+              await this.disconnectMT5(result.portRange.name);
+            }
+          }
+        }
+      }
+    }
+    
+    return connectedTerminals;
+  }
+  
+  /**
+   * Request initial account state from a confirmed-alive bridge
+   * Called after PING confirms EA is present but no PUB events yet
+   * This is a one-time fetch to populate the UI, NOT ongoing polling
+   */
+  private async requestInitialStateFromBridge(bridge: ZmqBridge, terminalId: string): Promise<void> {
+    try {
+      const response = await bridge.sendCommand({ action: 'STATUS' });
+      if (response.success && response.data) {
+        const accountData = response.data as any;
+        if (accountData && accountData.broker) {
+          // Build an AgentSnapshot from the response
+          const snapshot: AgentSnapshot = {
+            timestamp: new Date().toISOString(),
+            platform: 'MT5',
+            accountId: accountData.accountId || '0',
+            broker: accountData.broker,
+            server: accountData.server,
+            balance: accountData.balance ?? 0,
+            equity: accountData.equity ?? 0,
+            margin: accountData.margin ?? 0,
+            freeMargin: accountData.freeMargin ?? 0,
+            marginLevel: accountData.marginLevel ?? 0,
+            floatingPnL: accountData.floatingPnL ?? 0,
+            currency: accountData.currency || 'USD',
+            leverage: accountData.leverage ?? 0,
+            status: accountData.status || 'Active',
+            isLicenseValid: accountData.isLicenseValid ?? true,
+            isPaused: accountData.isPaused ?? false,
+            lastError: accountData.lastError ?? null,
+            positions: (accountData.positions || []).map((p: any) => ({
+              id: p.id,
+              symbol: p.symbol,
+              volume: p.volume,
+              volumeLots: p.volumeLots,
+              side: p.side,
+              entryPrice: p.entryPrice,
+              currentPrice: p.currentPrice,
+              stopLoss: p.stopLoss,
+              takeProfit: p.takeProfit,
+              profit: p.profit,
+              swap: p.swap,
+              commission: p.commission,
+              openTime: p.openTime,
+              comment: p.comment,
+            })),
+          };
+          this.lastSnapshots.set(terminalId, snapshot);
+          this.notifyListeners(terminalId, snapshot);
+          this.emit('accountUpdate', terminalId, snapshot);
+          console.log(`[AgentChannelReader] Initial state loaded for ${terminalId}: ${snapshot.accountId} @ ${snapshot.broker}`);
+        }
+      }
+    } catch (error) {
+      console.warn(`[AgentChannelReader] Failed to get initial state for ${terminalId}:`, error instanceof Error ? error.message : error);
+    }
+  }
+  
+  /**
+   * Disconnect from an MT5 terminal
+   */
+  async disconnectMT5(terminalId: string): Promise<void> {
+    const bridge = this.zmqBridges.get(terminalId);
+    if (bridge) {
+      await bridge.stop();
+      this.zmqBridges.delete(terminalId);
+      this.lastSnapshots.delete(terminalId);
+      this.terminalConfigs.delete(terminalId);
+      console.log(`[AgentChannelReader] Disconnected from ${terminalId}`);
+    }
+  }
+  
+  /**
    * Check if Named Pipes are available (cTrader cBot running)
    */
   async isCTraderAvailable(): Promise<boolean> {
@@ -504,8 +692,9 @@ export class AgentChannelReader extends EventEmitter {
   }
   
   /**
-   * PREFERRED: Connect to MT5 terminal via ZeroMQ
+   * PREFERRED: Connect to MT5 terminal via ZeroMQ (Event-Driven)
    * This is the primary method for MT5 communication.
+   * Uses event-driven architecture - NO polling or snapshots.
    * 
    * @param terminalId - Unique identifier for this terminal
    * @param options - ZMQ connection options (ports default to 51810/51811)
@@ -523,7 +712,7 @@ export class AgentChannelReader extends EventEmitter {
     const commandPort = options.commandPort || AgentChannelReader.DEFAULT_ZMQ_COMMAND_PORT;
     const host = options.host || '127.0.0.1';
     
-    console.log(`[AgentChannelReader] Connecting to MT5 via ZeroMQ...`);
+    console.log(`[AgentChannelReader] Connecting to MT5 via ZeroMQ (event-driven)...`);
     console.log(`  Data endpoint: tcp://${host}:${dataPort}`);
     console.log(`  Command endpoint: tcp://${host}:${commandPort}`);
     
@@ -549,25 +738,8 @@ export class AgentChannelReader extends EventEmitter {
     try {
       const bridge = createZmqBridgeForPorts(dataPort, commandPort, host);
       
-      // Set up event handlers
-      bridge.on('snapshot', (snapshot: ZmqSnapshot) => {
-        const agentSnapshot = this.convertZmqSnapshot(snapshot);
-        this.lastSnapshots.set(terminalId, agentSnapshot);
-        this.notifyListeners(terminalId, agentSnapshot);
-      });
-      
-      bridge.on('goodbye', () => {
-        console.log(`[AgentChannelReader] MT5 EA ${terminalId} disconnected (GOODBYE received)`);
-        this.emit('terminalDisconnected', terminalId, 'MT5');
-      });
-      
-      bridge.on('error', (error: Error) => {
-        console.error(`[AgentChannelReader] ZMQ error for ${terminalId}:`, error.message);
-      });
-      
-      bridge.on('status', (status: any) => {
-        console.log(`[AgentChannelReader] ZMQ status for ${terminalId}:`, status.dataSocket, status.commandSocket);
-      });
+      // Set up event-driven handlers
+      this.setupEventDrivenHandlers(bridge, terminalId);
       
       // Start the bridge
       const started = await bridge.start();
@@ -575,7 +747,7 @@ export class AgentChannelReader extends EventEmitter {
       if (started) {
         this.zmqBridges.set(terminalId, bridge);
         this.terminalConfigs.set(terminalId, config);
-        console.log(`[AgentChannelReader] ✅ Connected to MT5 ${terminalId} via ZeroMQ`);
+        console.log(`[AgentChannelReader] ✅ Connected to MT5 ${terminalId} via ZeroMQ (event-driven)`);
         return true;
       } else {
         console.error(`[AgentChannelReader] Failed to start ZMQ bridge for ${terminalId}`);
@@ -720,7 +892,203 @@ export class AgentChannelReader extends EventEmitter {
   }
   
   /**
+   * Set up event-driven handlers for the ZMQ bridge
+   * This replaces snapshot polling with real-time event handling
+   */
+  private setupEventDrivenHandlers(bridge: ZmqBridge, terminalId: string): void {
+    // Generic event handler - emits all events for subscribers
+    bridge.on('event', (event: ZmqEvent) => {
+      this.emit('event', terminalId, event);
+    });
+    
+    // Connection events
+    bridge.on('connected', (event: ZmqEvent) => {
+      // Update cached snapshot from initial account state
+      const snapshot = this.convertZmqEventToSnapshot(event);
+      this.lastSnapshots.set(terminalId, snapshot);
+      this.notifyListeners(terminalId, snapshot);
+      this.emit('terminalConnected', terminalId, 'MT5');
+    });
+    
+    bridge.on('disconnected', (event: ZmqEvent) => {
+      this.emit('terminalDisconnected', terminalId, 'MT5');
+    });
+    
+    bridge.on('goodbye', () => {
+      this.emit('terminalDisconnected', terminalId, 'MT5');
+    });
+    
+    // Heartbeat - real-time keepalive with metrics and positions
+    // This is now a primary way to get real-time equity/position updates
+    bridge.on('heartbeat', (event: ZmqEvent) => {
+      // Update cached snapshot from heartbeat data (now includes positions)
+      const heartbeatData = event.data as ZmqHeartbeatData;
+      if (heartbeatData) {
+        let existingSnapshot = this.lastSnapshots.get(terminalId);
+        
+        if (existingSnapshot) {
+          // Update existing snapshot with heartbeat data
+          existingSnapshot.balance = heartbeatData.balance;
+          existingSnapshot.equity = heartbeatData.equity;
+          existingSnapshot.floatingPnL = heartbeatData.profit;
+          existingSnapshot.isLicenseValid = heartbeatData.isLicenseValid;
+          existingSnapshot.isPaused = heartbeatData.isPaused;
+          
+          // Update margin info if provided
+          if (heartbeatData.margin !== undefined) {
+            existingSnapshot.margin = heartbeatData.margin;
+          }
+          if (heartbeatData.freeMargin !== undefined) {
+            existingSnapshot.freeMargin = heartbeatData.freeMargin;
+          }
+          
+          // Update positions if provided (for real-time position updates)
+          if (heartbeatData.positions && heartbeatData.positions.length >= 0) {
+            existingSnapshot.positions = heartbeatData.positions.map(p => ({
+              id: p.id,
+              symbol: p.symbol,
+              volume: p.volume,
+              volumeLots: p.volumeLots,
+              side: p.side,
+              entryPrice: p.entryPrice,
+              currentPrice: p.currentPrice,
+              stopLoss: p.stopLoss,
+              takeProfit: p.takeProfit,
+              profit: p.profit,
+              swap: p.swap,
+              commission: p.commission,
+              openTime: p.openTime,
+              comment: p.comment,
+            }));
+          }
+          
+          existingSnapshot.timestamp = event.timestamp;
+          this.lastSnapshots.set(terminalId, existingSnapshot);
+          this.notifyListeners(terminalId, existingSnapshot);
+          
+          // Emit accountUpdate so main.ts pushes to renderer
+          this.emit('accountUpdate', terminalId, existingSnapshot);
+        }
+      }
+      
+      this.emit('heartbeat', terminalId, event);
+    });
+    
+    // Account state updates
+    bridge.on('accountUpdate', (event: ZmqEvent) => {
+      const snapshot = this.convertZmqEventToSnapshot(event);
+      this.lastSnapshots.set(terminalId, snapshot);
+      this.notifyListeners(terminalId, snapshot);
+      // Emit event so main.ts can update connection state and push to renderer
+      this.emit('accountUpdate', terminalId, snapshot);
+    });
+    
+    // Legacy snapshot handler for backwards compatibility
+    bridge.on('snapshot', (snapshot: ZmqSnapshot) => {
+      const agentSnapshot = this.convertZmqSnapshot(snapshot);
+      this.lastSnapshots.set(terminalId, agentSnapshot);
+      this.notifyListeners(terminalId, agentSnapshot);
+      // Emit event so main.ts can update connection state and push to renderer
+      this.emit('accountUpdate', terminalId, agentSnapshot);
+    });
+    
+    // Position events - real-time trade notifications
+    bridge.on('positionOpened', (event: ZmqEvent) => {
+      this.emit('positionOpened', terminalId, event);
+    });
+    
+    bridge.on('positionClosed', (event: ZmqEvent) => {
+      this.emit('positionClosed', terminalId, event);
+    });
+    
+    bridge.on('positionModified', (event: ZmqEvent) => {
+      this.emit('positionModified', terminalId, event);
+    });
+    
+    bridge.on('positionReversed', (event: ZmqEvent) => {
+      this.emit('positionReversed', terminalId, event);
+    });
+    
+    // Order events
+    bridge.on('orderPlaced', (event: ZmqEvent) => {
+      this.emit('orderPlaced', terminalId, event);
+    });
+    
+    bridge.on('orderCancelled', (event: ZmqEvent) => {
+      this.emit('orderCancelled', terminalId, event);
+    });
+    
+    // Price updates (if enabled)
+    bridge.on('priceUpdate', (event: ZmqEvent) => {
+      this.emit('priceUpdate', terminalId, event);
+    });
+    
+    // Pause/resume events
+    bridge.on('paused', (event: ZmqEvent) => {
+      this.emit('paused', terminalId, event);
+    });
+    
+    bridge.on('resumed', (event: ZmqEvent) => {
+      this.emit('resumed', terminalId, event);
+    });
+    
+    // Error handling
+    bridge.on('error', (error: Error) => {
+      console.error(`[AgentChannelReader] ZMQ error for ${terminalId}:`, error.message);
+      this.emit('error', terminalId, error);
+    });
+    
+    bridge.on('status', (status: any) => {
+      console.log(`[AgentChannelReader] ZMQ status for ${terminalId}:`, status.dataSocket, status.commandSocket);
+      this.emit('status', terminalId, status);
+    });
+  }
+  
+  /**
+   * Convert ZMQ event (from event-driven mode) to AgentSnapshot
+   */
+  private convertZmqEventToSnapshot(event: ZmqEvent): AgentSnapshot {
+    const data = event.data as ZmqAccountData;
+    return {
+      timestamp: event.timestamp,
+      platform: event.platform as 'MT5' | 'cTrader',
+      accountId: event.accountId,
+      broker: data.broker,
+      server: data.server,
+      balance: data.balance,
+      equity: data.equity,
+      margin: data.margin,
+      freeMargin: data.freeMargin,
+      marginLevel: data.marginLevel || 0,
+      floatingPnL: data.floatingPnL,
+      currency: data.currency,
+      leverage: data.leverage,
+      status: data.status,
+      isLicenseValid: data.isLicenseValid,
+      isPaused: data.isPaused,
+      lastError: data.lastError,
+      positions: data.positions.map(p => ({
+        id: p.id,
+        symbol: p.symbol,
+        volume: p.volume,
+        volumeLots: p.volumeLots,
+        side: p.side,
+        entryPrice: p.entryPrice,
+        currentPrice: p.currentPrice,
+        stopLoss: p.stopLoss,
+        takeProfit: p.takeProfit,
+        profit: p.profit,
+        swap: p.swap,
+        commission: p.commission,
+        openTime: p.openTime,
+        comment: p.comment,
+      })),
+    };
+  }
+  
+  /**
    * Register an MT5 terminal with ZMQ support (ZeroMQ only - no file fallback)
+   * @deprecated Use connectMT5() instead
    */
   async registerMT5TerminalZmq(
     terminalId: string,
@@ -755,23 +1123,8 @@ export class AgentChannelReader extends EventEmitter {
     try {
       const bridge = createZmqBridgeForPorts(dataPort, commandPort, host);
       
-      // Set up event handlers
-      bridge.on('snapshot', (snapshot: ZmqSnapshot) => {
-        // Convert ZMQ snapshot to agent snapshot format
-        const agentSnapshot = this.convertZmqSnapshot(snapshot);
-        this.lastSnapshots.set(terminalId, agentSnapshot);
-        this.notifyListeners(terminalId, agentSnapshot);
-      });
-      
-      bridge.on('goodbye', () => {
-        console.log(`[AgentChannelReader] EA ${terminalId} disconnected`);
-        // Mark as disconnected
-        this.zmqBridges.delete(terminalId);
-      });
-      
-      bridge.on('error', (error: Error) => {
-        console.error(`[AgentChannelReader] ZMQ error for ${terminalId}:`, error);
-      });
+      // Use the event-driven handlers
+      this.setupEventDrivenHandlers(bridge, terminalId);
       
       // Try to start the bridge
       const started = await bridge.start();
@@ -1134,7 +1487,7 @@ export class AgentChannelReader extends EventEmitter {
   /**
    * Get connection statistics
    */
-  getStats(terminalId: string): { mode: ChannelMode; platform: Platform; snapshotsReceived: number; commandsSent: number; connected: boolean } | null {
+  getStats(terminalId: string): { mode: ChannelMode; platform: Platform; eventsReceived: number; commandsSent: number; connected: boolean } | null {
     const config = this.terminalConfigs.get(terminalId);
     if (!config) return null;
     
@@ -1145,7 +1498,7 @@ export class AgentChannelReader extends EventEmitter {
       return {
         mode: 'zmq',
         platform: 'MT5',
-        snapshotsReceived: status.snapshotsReceived,
+        eventsReceived: status.eventsReceived,
         commandsSent: status.commandsSent,
         connected: bridge.isConnected(),
       };
@@ -1158,7 +1511,7 @@ export class AgentChannelReader extends EventEmitter {
       return {
         mode: 'pipe',
         platform: 'cTrader',
-        snapshotsReceived: status.messagesReceived,
+        eventsReceived: status.messagesReceived,
         commandsSent: status.commandsSent,
         connected: pipeClient.isConnected(),
       };
@@ -1167,7 +1520,7 @@ export class AgentChannelReader extends EventEmitter {
     return {
       mode: 'file',
       platform: config.platform || 'MT5',
-      snapshotsReceived: 0, // Not tracked in file mode
+      eventsReceived: 0, // Not tracked in file mode
       commandsSent: 0,
       connected: false,
     };

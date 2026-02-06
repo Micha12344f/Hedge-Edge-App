@@ -14,11 +14,15 @@ import {
   ExternalLink
 } from 'lucide-react';
 
+import type { ConnectionStatus as CopierConnectionStatus } from '@/contexts/CopierGroupsContext';
+
 interface HedgeNodeProps {
   account: TradingAccount;
   isSelected?: boolean;
   isDragging?: boolean;
   isLinkSource?: boolean;
+  /** Copier connection status for status-based node coloring */
+  copierStatus?: CopierConnectionStatus;
   onClick?: () => void;
   onDetailsClick?: () => void;
   onMouseDown?: (e: React.MouseEvent) => void;
@@ -27,7 +31,7 @@ interface HedgeNodeProps {
 
 type ConnectionStatus = 'connected' | 'lagging' | 'risk';
 
-export const HedgeNode = ({ account, isSelected, isDragging, isLinkSource, onClick, onDetailsClick, onMouseDown, position }: HedgeNodeProps) => {
+export const HedgeNode = ({ account, isSelected, isDragging, isLinkSource, copierStatus = 'none', onClick, onDetailsClick, onMouseDown, position }: HedgeNodeProps) => {
   const profitTarget = Number(account.profit_target) || 0;
   const maxLoss = Number(account.max_loss) || 0;
   const maxDailyLoss = Number(account.max_daily_loss) || 0;
@@ -137,6 +141,18 @@ export const HedgeNode = ({ account, isSelected, isDragging, isLinkSource, onCli
   const StatusIcon = statusConfig[connectionStatus].icon;
   const TypeIcon = config.icon;
 
+  // Copier status border override
+  const copierBorderClass = copierStatus === 'active' ? 'border-green-500/60'
+    : copierStatus === 'paused' ? 'border-yellow-500/60'
+    : copierStatus === 'error' ? 'border-red-500/60'
+    : '';
+
+  // Copier status glow
+  const copierGlow = copierStatus === 'active' ? 'shadow-[0_0_20px_rgba(34,197,94,0.25)]'
+    : copierStatus === 'paused' ? 'shadow-[0_0_20px_rgba(234,179,8,0.25)]'
+    : copierStatus === 'error' ? 'shadow-[0_0_20px_rgba(239,68,68,0.35)]'
+    : '';
+
   // Render simplified version for hedge accounts
   if (account.phase === 'live') {
     return (
@@ -152,7 +168,8 @@ export const HedgeNode = ({ account, isSelected, isDragging, isLinkSource, onCli
         } : undefined}
         className={cn(
           'w-72 rounded-xl border-2 bg-card cursor-pointer select-none overflow-hidden',
-          config.border,
+          copierBorderClass || config.border,
+          copierGlow,
           isSelected && 'ring-2 ring-offset-2 ring-offset-background ring-primary',
           isLinkSource && 'ring-2 ring-primary ring-offset-2 ring-offset-background'
         )}
@@ -236,10 +253,11 @@ export const HedgeNode = ({ account, isSelected, isDragging, isLinkSource, onCli
       } : undefined}
       className={cn(
         'w-72 rounded-xl border-2 bg-card cursor-pointer select-none overflow-hidden',
-        config.border,
+        copierBorderClass || config.border,
+        copierGlow,
         isSelected && 'ring-2 ring-offset-2 ring-offset-background ring-primary',
         isLinkSource && 'ring-2 ring-primary ring-offset-2 ring-offset-background',
-        connectionStatus === 'risk' && 'border-red-500/60'
+        connectionStatus === 'risk' && !copierBorderClass && 'border-red-500/60'
       )}
     >
       {/* Header */}

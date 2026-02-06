@@ -85,9 +85,7 @@ const DashboardAnalytics = () => {
     ? [selectedAccount] 
     : activeAccounts; // Only active accounts for aggregate stats
   
-  const totalPnL = relevantAccounts.reduce((sum, acc) => sum + (Number(acc.pnl) || 0), 0);
   const totalInvestment = relevantAccounts.reduce((sum, acc) => sum + (Number(acc.account_size) || 0), 0);
-  const roi = totalInvestment > 0 ? (totalPnL / totalInvestment) * 100 : 0;
 
   // Calculate hedge discrepancy (only active accounts)
   const propAccounts = activeAccounts.filter(a => a.phase === 'funded' || a.phase === 'evaluation');
@@ -95,6 +93,88 @@ const DashboardAnalytics = () => {
   const propPnL = propAccounts.reduce((sum, acc) => sum + (Number(acc.pnl) || 0), 0);
   const hedgePnL = hedgeAccounts.reduce((sum, acc) => sum + (Number(acc.pnl) || 0), 0);
   const hedgeDiscrepancy = propPnL + hedgePnL; // Should be close to 0 if properly hedged
+
+  // Calculate total challenge fees across all accounts (active + archived)
+  // If an account has previous_account_id, it's linked to an archived account — count as ONE fee
+  const totalChallengeFees = useMemo(() => {
+    // Only count fees from "root" accounts (those NOT linked to a previous account)
+    // This ensures that a chain of archived -> new account only counts one fee
+    const allPropAccounts = accounts.filter(a => a.phase !== 'live');
+    return allPropAccounts
+      .filter(a => !a.previous_account_id) // Only root accounts (not continuations)
+      .reduce((sum, acc) => sum + (Number(acc.evaluation_fee) || 0), 0);
+  }, [accounts]);
+
+  // Calculate total received payouts from all accounts
+  const totalReceivedPayouts = useMemo(() => {
+    return payouts.filter(p => p.received).reduce((sum, p) => sum + p.amount, 0);
+  }, [payouts]);
+
+  // Per-account challenge fee (with archive linkage: walk back to root, count fee once)
+  const selectedAccountChallengeFee = useMemo(() => {
+    if (!selectedAccount || selectedAccount.phase === 'live') return 0;
+    // Walk back to the root account in the chain
+    let current = selectedAccount;
+    while (current.previous_account_id) {
+      const prev = accounts.find(a => a.id === current.previous_account_id);
+      if (prev) current = prev;
+      else break;
+    }
+    return Number(current.evaluation_fee) || 0;
+  }, [selectedAccount, accounts]);
+
+  // Per-account received payouts
+  const selectedAccountPayouts = useMemo(() => {
+    if (!selectedAccount) return 0;
+    return payouts
+      .filter(p => p.received && p.accountId === selectedAccount.id)
+      .reduce((sum, p) => sum + p.amount, 0);
+  }, [selectedAccount, payouts]);
+
+  // Per-account proportional hedge P/L (this account's share of total hedge P/L)
+  const selectedAccountProportionalHedgePnL = useMemo(() => {
+    if (!selectedAccount || selectedAccount.phase === 'live') return 0;
+    const totalPropSize = propAccounts.reduce((sum, a) => sum + (Number(a.account_size) || 0), 0);
+    const proportion = totalPropSize > 0 ? (Number(selectedAccount.account_size) || 0) / totalPropSize : 0;
+    return hedgePnL * proportion;
+  }, [selectedAccount, propAccounts, hedgePnL]);
+
+  // Per-account hedge discrepancy: account's own P/L + proportional hedge P/L
+  const selectedAccountHedgeDiscrepancy = useMemo(() => {
+    if (!selectedAccount || selectedAccount.phase === 'live') return 0;
+    const accountPnL = Number(selectedAccount.pnl) || 0;
+    return accountPnL + selectedAccountProportionalHedgePnL;
+  }, [selectedAccount, selectedAccountProportionalHedgePnL]);
+
+  // Total P/L:
+  // All Accounts: Payouts - (|Hedge P/L| + Challenge Fees + Hedge Discrepancy)
+  // Funded account: Account Payouts - (|Proportional Hedge Loss| + Challenge Fee + Hedge Discrepancy)
+  // Evaluation account: not shown
+  const totalPnL = selectedAccountId === 'all'
+    ? totalReceivedPayouts - (Math.abs(hedgePnL) + totalChallengeFees + hedgeDiscrepancy)
+    : (selectedAccount?.phase === 'funded'
+      ? selectedAccountPayouts - (Math.abs(selectedAccountProportionalHedgePnL) + selectedAccountChallengeFee + selectedAccountHedgeDiscrepancy)
+      : 0);
+
+  // $ to Target for evaluation accounts: Target $ - current P/L
+  const dollarsToTarget = useMemo(() => {
+    if (!selectedAccount || selectedAccount.phase !== 'evaluation') return 0;
+    const profitTarget = (Number(selectedAccount.profit_target) || 0) / 100 * (Number(selectedAccount.account_size) || 0);
+    const currentPnLVal = Number(selectedAccount.pnl) || 0;
+    return profitTarget - currentPnLVal;
+  }, [selectedAccount]);
+
+  // ROI calculation
+  // All Accounts: Payouts / |Hedge P/L + Challenge Fees + Hedge Discrepancy|
+  // Funded account: Account Payouts / |proportional Hedge P/L + account challenge fee + account hedge discrepancy|
+  // Evaluation account: replaced with $ to Target (handled in rendering)
+  const totalCosts = Math.abs(hedgePnL) + totalChallengeFees + hedgeDiscrepancy;
+  const selectedAccountCosts = Math.abs(selectedAccountProportionalHedgePnL) + selectedAccountChallengeFee + selectedAccountHedgeDiscrepancy;
+  const roi = selectedAccountId === 'all'
+    ? (totalCosts !== 0 ? (totalReceivedPayouts / Math.abs(totalCosts)) * 100 : 0)
+    : (selectedAccount?.phase === 'funded'
+      ? (selectedAccountCosts !== 0 ? (selectedAccountPayouts / Math.abs(selectedAccountCosts)) * 100 : 0)
+      : 0);
 
   // Calculate totals for the chart header - funded and evaluation account balances (active only)
   const fundedAccounts = activeAccounts.filter(a => a.phase === 'funded');
@@ -283,7 +363,7 @@ const DashboardAnalytics = () => {
     <PageBackground>
       <div className={`p-6 pt-16 space-y-6 ${isSelectedArchived ? 'grayscale opacity-60' : ''}`}>
         <div>
-          <h1 className="text-2xl font-bold text-foreground">
+          <h1 className="text-2xl font-bold text-foreground flex items-center gap-2">
             <GradientText 
               colors={['hsl(120, 100%, 54%)', 'hsl(45, 100%, 56%)', 'hsl(120, 100%, 54%)']} 
               animationSpeed={4}
@@ -291,13 +371,19 @@ const DashboardAnalytics = () => {
             >
               Analytics
             </GradientText>
+            <Badge variant="secondary" className="text-xs">Beta</Badge>
           </h1>
           <p className="text-muted-foreground">Tracking your overall hedging performance</p>
         </div>
 
-        <div className="grid gap-4 grid-cols-1 sm:grid-cols-2 lg:grid-cols-5">
-          {/* Total P/L */}
-          <div className="flex-1 flex flex-col justify-between p-4 rounded-lg bg-card border border-border/50">
+        <div className={`grid gap-4 grid-cols-1 sm:grid-cols-2 ${selectedAccount?.phase === 'evaluation' ? 'lg:grid-cols-4' : 'lg:grid-cols-5'}`}>
+          {/* Total P/L - hidden for evaluation accounts */}
+          {selectedAccount?.phase !== 'evaluation' && (
+          <div className={`flex-1 flex flex-col justify-between p-4 rounded-lg bg-card border ${
+            selectedAccount?.phase === 'funded' ? 'border-green-500/50 shadow-[0_0_15px_rgba(34,197,94,0.15)]' :
+            selectedAccount?.phase === 'evaluation' ? 'border-yellow-500/50 shadow-[0_0_15px_rgba(234,179,8,0.15)]' :
+            'border-border/50'
+          }`}>
             <div>
               <h3 className="text-sm font-medium text-muted-foreground mb-2">Total P/L</h3>
               <div className="flex flex-col">
@@ -309,9 +395,14 @@ const DashboardAnalytics = () => {
               </div>
             </div>
           </div>
+          )}
 
           {/* Hedge P/L */}
-          <div className="flex-1 flex flex-col justify-between p-4 rounded-lg bg-card border border-border/50">
+          <div className={`flex-1 flex flex-col justify-between p-4 rounded-lg bg-card border ${
+            selectedAccount?.phase === 'funded' ? 'border-green-500/50 shadow-[0_0_15px_rgba(34,197,94,0.15)]' :
+            selectedAccount?.phase === 'evaluation' ? 'border-yellow-500/50 shadow-[0_0_15px_rgba(234,179,8,0.15)]' :
+            'border-border/50'
+          }`}>
             <div>
               <h3 className="text-sm font-medium text-muted-foreground mb-2">Hedge P/L</h3>
               <div className="flex flex-col">
@@ -324,36 +415,64 @@ const DashboardAnalytics = () => {
             </div>
           </div>
 
-          {/* Prop P/L */}
-          <div className="flex-1 flex flex-col justify-between p-4 rounded-lg bg-card border border-border/50">
+          {/* Prop balance or Payouts (when All Accounts selected) */}
+          <div className={`flex-1 flex flex-col justify-between p-4 rounded-lg bg-card border ${
+            selectedAccount?.phase === 'funded' ? 'border-green-500/50 shadow-[0_0_15px_rgba(34,197,94,0.15)]' :
+            selectedAccount?.phase === 'evaluation' ? 'border-yellow-500/50 shadow-[0_0_15px_rgba(234,179,8,0.15)]' :
+            'border-border/50'
+          }`}>
             <div>
-              <h3 className="text-sm font-medium text-muted-foreground mb-2">Prop P/L</h3>
+              <h3 className="text-sm font-medium text-muted-foreground mb-2">
+                {selectedAccountId === 'all' ? 'Payouts' : 'Prop balance'}
+              </h3>
               <div className="flex flex-col">
                 <div className="flex items-baseline gap-2">
-                  <span className={`text-xl font-semibold ${propPnL >= 0 ? 'text-primary' : 'text-destructive'}`}>
-                    {formatCurrency(propPnL)}
-                  </span>
+                  {selectedAccountId === 'all' ? (
+                    <span className={`text-xl font-semibold ${payouts.filter(p => p.received).reduce((sum, p) => sum + p.amount, 0) >= 0 ? 'text-primary' : 'text-destructive'}`}>
+                      {formatCurrency(payouts.filter(p => p.received).reduce((sum, p) => sum + p.amount, 0))}
+                    </span>
+                  ) : (
+                    <span className={`text-xl font-semibold ${(Number(selectedAccount?.pnl) || 0) >= 0 ? 'text-primary' : 'text-destructive'}`}>
+                      {formatCurrency(Number(selectedAccount?.pnl) || 0)}
+                    </span>
+                  )}
                 </div>
               </div>
             </div>
           </div>
 
-          {/* ROI */}
-          <div className="flex-1 flex flex-col justify-between p-4 rounded-lg bg-card border border-border/50">
+          {/* ROI / $ to Target */}
+          <div className={`flex-1 flex flex-col justify-between p-4 rounded-lg bg-card border ${
+            selectedAccount?.phase === 'funded' ? 'border-green-500/50 shadow-[0_0_15px_rgba(34,197,94,0.15)]' :
+            selectedAccount?.phase === 'evaluation' ? 'border-yellow-500/50 shadow-[0_0_15px_rgba(234,179,8,0.15)]' :
+            'border-border/50'
+          }`}>
             <div>
-              <h3 className="text-sm font-medium text-muted-foreground mb-2">ROI</h3>
+              <h3 className="text-sm font-medium text-muted-foreground mb-2">
+                {selectedAccount?.phase === 'evaluation' ? '$ to Target' : 'ROI'}
+              </h3>
               <div className="flex flex-col">
                 <div className="flex items-baseline gap-2">
-                  <span className={`text-xl font-semibold ${roi >= 0 ? 'text-primary' : 'text-destructive'}`}>
-                    {roi.toFixed(2)}%
-                  </span>
+                  {selectedAccount?.phase === 'evaluation' ? (
+                    <span className={`text-xl font-semibold ${dollarsToTarget <= 0 ? 'text-primary' : 'text-yellow-400'}`}>
+                      {dollarsToTarget <= 0 ? 'Target Reached!' : formatCurrency(dollarsToTarget)}
+                    </span>
+                  ) : (
+                    <span className={`text-xl font-semibold ${roi >= 0 ? 'text-primary' : 'text-destructive'}`}>
+                      {roi.toFixed(2)}%
+                    </span>
+                  )}
                 </div>
               </div>
             </div>
           </div>
 
           {/* Hedge Discrepancy */}
-          <div className="flex-1 flex flex-col justify-between p-4 rounded-lg bg-card border border-border/50">
+          <div className={`flex-1 flex flex-col justify-between p-4 rounded-lg bg-card border ${
+            selectedAccount?.phase === 'funded' ? 'border-green-500/50 shadow-[0_0_15px_rgba(34,197,94,0.15)]' :
+            selectedAccount?.phase === 'evaluation' ? 'border-yellow-500/50 shadow-[0_0_15px_rgba(234,179,8,0.15)]' :
+            'border-border/50'
+          }`}>
             <div>
               <h3 className="text-sm font-medium text-muted-foreground mb-2">Hedge Discrepancy</h3>
               <div className="flex flex-col">
@@ -371,7 +490,11 @@ const DashboardAnalytics = () => {
         <div className="grid grid-cols-7 gap-4">
           {/* Main Chart - 5 columns */}
           <div className="col-span-7 lg:col-span-5">
-            <Card className="border-border/50 bg-card/80 backdrop-blur-sm h-[530px]">
+            <Card className={`bg-card/80 backdrop-blur-sm h-[530px] ${
+              selectedAccount?.phase === 'funded' ? 'border-green-500/50 shadow-[0_0_15px_rgba(34,197,94,0.15)]' :
+              selectedAccount?.phase === 'evaluation' ? 'border-yellow-500/50 shadow-[0_0_15px_rgba(234,179,8,0.15)]' :
+              'border-border/50'
+            }`}>
               <CardContent className="px-6 py-8 h-full flex flex-col">
                 {/* Chart Header with Account Selector */}
                 <div className="flex items-center justify-between mb-4">
@@ -386,7 +509,9 @@ const DashboardAnalytics = () => {
                             ) : null;
                           })()}
                           <div>
-                            <h3 className="text-sm font-medium text-muted-foreground">{selectedAccount.prop_firm || 'Account'}</h3>
+                            <h3 className={`text-sm font-semibold ${selectedAccount.phase === 'funded' ? 'text-green-400' : selectedAccount.phase === 'evaluation' ? 'text-yellow-400' : 'text-muted-foreground'}`}>
+                              {selectedAccount.phase === 'funded' ? 'Funded' : selectedAccount.phase === 'evaluation' ? 'Evaluation' : 'Hedge'}
+                            </h3>
                             <span className="text-2xl font-semibold text-foreground">{selectedAccount.account_name}</span>
                           </div>
                         </div>
@@ -744,7 +869,11 @@ const DashboardAnalytics = () => {
 
           {/* Payout Panel - 2 columns */}
           <div className="col-span-7 lg:col-span-2">
-            <Card className="border-border/50 bg-card/80 backdrop-blur-sm h-[530px]">
+            <Card className={`bg-card/80 backdrop-blur-sm h-[530px] ${
+              selectedAccount?.phase === 'funded' ? 'border-green-500/50 shadow-[0_0_15px_rgba(34,197,94,0.15)]' :
+              selectedAccount?.phase === 'evaluation' ? 'border-yellow-500/50 shadow-[0_0_15px_rgba(234,179,8,0.15)]' :
+              'border-border/50'
+            }`}>
               <CardContent className="p-4 h-full flex flex-col">
                 <div className="flex items-center justify-between mb-4">
                   <h3 className="text-lg font-medium text-foreground">Payouts</h3>

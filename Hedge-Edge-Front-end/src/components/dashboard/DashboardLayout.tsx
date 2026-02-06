@@ -2,6 +2,7 @@ import { Outlet } from 'react-router-dom';
 import { DashboardSidebar } from './DashboardSidebar';
 import { AnimatedBackground } from '@/components/ui/animated-background';
 import { SidebarProvider } from '@/contexts/SidebarContext';
+import { CopierGroupsProvider } from '@/contexts/CopierGroupsContext';
 import { useKeyboardShortcuts } from '@/hooks/useKeyboardShortcuts';
 
 // Wrapper component to use hooks
@@ -22,9 +23,11 @@ const DashboardContent = () => {
 export const DashboardLayout = () => {
   return (
     <SidebarProvider>
-      <AnimatedBackground>
-        <DashboardContent />
-      </AnimatedBackground>
+      <CopierGroupsProvider>
+        <AnimatedBackground>
+          <DashboardContent />
+        </AnimatedBackground>
+      </CopierGroupsProvider>
     </SidebarProvider>
   );
 };

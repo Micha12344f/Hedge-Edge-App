@@ -6,6 +6,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
 import { Separator } from '@/components/ui/separator';
+import { Badge } from '@/components/ui/badge';
 import { User, Bell, Shield, Palette, Key, Download, Cpu } from 'lucide-react';
 import { LicenseKeySection } from '@/components/dashboard/LicenseKeySection';
 import { InstallationManagerModal } from '@/components/dashboard/InstallationManagerModal';
@@ -19,7 +20,10 @@ const Settings = () => {
   return (
     <div className="p-6 space-y-6 max-w-4xl">
       <div>
-        <h1 className="text-2xl font-bold text-foreground">Settings</h1>
+        <h1 className="text-2xl font-bold text-foreground flex items-center gap-2">
+          Settings
+          <Badge variant="secondary" className="text-xs">Beta</Badge>
+        </h1>
         <p className="text-muted-foreground">Manage your account preferences</p>
       </div>
 

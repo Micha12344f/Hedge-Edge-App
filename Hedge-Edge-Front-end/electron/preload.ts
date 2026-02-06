@@ -212,6 +212,67 @@ const tradingAPI = {
     }
     return ipcRenderer.invoke('trading:closeOrder', String(platform), sanitizeForIPC(request), sanitizeCredentials(credentials));
   },
+  
+  // -------------------------------------------------------------------------
+  // Event-Driven Trading Feed (Real-time Events)
+  // -------------------------------------------------------------------------
+  
+  /**
+   * Subscribe to trading events for a terminal
+   * Returns immediately - events are pushed via the onEvent listener
+   */
+  subscribeEvents: (terminalId: string): Promise<any> => {
+    return ipcRenderer.invoke('trading:subscribeEvents', terminalId);
+  },
+  
+  /**
+   * Get cached account state (use instead of polling getSnapshot)
+   */
+  getCachedState: (terminalId: string): Promise<any> => {
+    return ipcRenderer.invoke('trading:getCachedState', terminalId);
+  },
+  
+  /**
+   * Listen for trading events (position opened/closed, heartbeat, etc.)
+   * Returns an unsubscribe function
+   * 
+   * Event types:
+   * - positionOpened: New position was opened
+   * - positionClosed: Position was closed
+   * - positionModified: Position SL/TP was modified
+   * - positionReversed: Position was reversed
+   * - orderPlaced: New pending order placed
+   * - orderCancelled: Pending order cancelled
+   * - connected: Terminal connected
+   * - disconnected: Terminal disconnected
+   * - heartbeat: Periodic keepalive with basic metrics
+   * - priceUpdate: Symbol price changed (if enabled)
+   * - paused: Trading paused
+   * - resumed: Trading resumed
+   * - event: Generic event (all events)
+   * - error: Error occurred
+   */
+  onEvent: (callback: (eventData: {
+    event: string;
+    terminalId: string;
+    data: unknown;
+    timestamp: string;
+  }) => void): (() => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, eventData: unknown) => {
+      try {
+        callback(eventData as { event: string; terminalId: string; data: unknown; timestamp: string });
+      } catch (err) {
+        console.error('[Preload] Error in trading event handler:', err);
+      }
+    };
+    
+    ipcRenderer.on('trading:event', handler);
+    
+    // Return unsubscribe function
+    return () => {
+      ipcRenderer.removeListener('trading:event', handler);
+    };
+  },
 };
 
 // ============================================================================
@@ -574,38 +635,33 @@ const connectionsAPI = {
   },
 
   /**
-   * Subscribe to connection snapshot updates (polling-based)
+   * Subscribe to connection updates (EVENT-DRIVEN - NO POLLING)
    * Returns an unsubscribe function
+   * 
+   * Updates are pushed from main process via 'connections:update' events
+   * when ZeroMQ receives data from EAs
    */
   onSnapshotUpdate: (
     callback: (snapshots: ConnectionSnapshotMap) => void,
-    intervalMs = 3000
+    _intervalMs = 3000 // Ignored - kept for backwards compatibility
   ): (() => void) => {
-    let active = true;
+    // Get initial state once
+    ipcRenderer.invoke('connections:list').then((snapshots) => {
+      callback(snapshots);
+    }).catch((error) => {
+      console.error('Failed to get initial connection state:', error);
+    });
 
-    const poll = async () => {
-      if (!active) return;
-
-      try {
-        const snapshots = await ipcRenderer.invoke('connections:list');
-        if (active) {
-          callback(snapshots);
-        }
-      } catch (error) {
-        console.error('Failed to get connection snapshots:', error);
-      }
-
-      if (active) {
-        setTimeout(poll, intervalMs);
-      }
+    // Listen for updates pushed from main process (event-driven)
+    const handler = (_event: Electron.IpcRendererEvent, snapshots: ConnectionSnapshotMap) => {
+      callback(snapshots);
     };
-
-    // Start polling
-    poll();
+    
+    ipcRenderer.on('connections:update', handler);
 
     // Return unsubscribe function
     return () => {
-      active = false;
+      ipcRenderer.removeListener('connections:update', handler);
     };
   },
 };

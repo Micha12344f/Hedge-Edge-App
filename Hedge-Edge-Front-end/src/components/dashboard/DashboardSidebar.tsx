@@ -7,7 +7,6 @@ import { Badge } from '@/components/ui/badge';
 import {
   LayoutDashboard,
   BarChart3,
-  Calculator,
   Settings,
   LogOut,
   ChevronLeft,
@@ -30,7 +29,6 @@ const navItems = [
   { icon: Copy, label: 'Trade Copier', path: '/app/copier' },
   { icon: Wallet, label: 'Hedge Map', path: '/app/accounts' },
   { icon: BarChart3, label: 'Analytics', path: '/app/analytics' },
-  { icon: Calculator, label: 'Calculator', path: '/app/calculator' },
 ];
 
 const bottomNavItems = [

@@ -147,6 +147,7 @@ const Help = () => {
         <h1 className="text-2xl font-bold text-foreground flex items-center gap-2">
           Help & Support
           <BookOpen className="w-5 h-5 text-primary" />
+          <Badge variant="secondary" className="text-xs">Beta</Badge>
         </h1>
         <p className="text-muted-foreground">Everything you need to master Hedge Edge</p>
       </div>

@@ -26,8 +26,9 @@ import {
   Link2,
   GitBranch,
   X,
-  Settings2
+  Settings2,
 } from 'lucide-react';
+import type { ConnectionStatus } from '@/contexts/CopierGroupsContext';
 
 export interface HedgeRelationship {
   id: string;
@@ -55,6 +56,8 @@ interface DraggableHedgeMapProps {
   onPositionsChange?: (positions: NodePosition[]) => void;
   onAccountClick?: (account: TradingAccount) => void;
   autoAlignOnMount?: boolean;
+  /** Get the copier connection status for a given source→target pair */
+  getConnectionStatus?: (sourceId: string, targetId: string) => ConnectionStatus;
 }
 
 // Local storage key for positions
@@ -179,6 +182,7 @@ export const DraggableHedgeMap = ({
   onUpdateRelationship,
   onAccountClick,
   autoAlignOnMount = true,
+  getConnectionStatus: getConnectionStatusProp,
 }: DraggableHedgeMapProps) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const transformRef = useRef<HTMLDivElement>(null);
@@ -651,6 +655,24 @@ export const DraggableHedgeMap = ({
             setLinkSource(null);
             return;
           }
+
+          // Funded/Evaluation accounts can only connect to ONE hedge account
+          const propAccount = sourceIsHedge ? targetAccount : sourceAccount;
+          if (propAccount.phase === 'evaluation' || propAccount.phase === 'funded') {
+            const alreadyLinked = relationships.some(
+              r => r.sourceId === propAccount.id || r.targetId === propAccount.id
+            );
+            if (alreadyLinked) {
+              toast({
+                title: 'Already connected ⛔',
+                description: `${propAccount.account_name} is already linked to a hedge account. Remove the existing connection first.`,
+                variant: 'destructive',
+              });
+              setIsLinking(false);
+              setLinkSource(null);
+              return;
+            }
+          }
           
           // Create inverse link directly (no config needed)
           if (onCreateRelationship) {
@@ -828,14 +850,45 @@ export const DraggableHedgeMap = ({
 
   const routers = getRouters();
 
-  // Get line color based on relationship type
-  const getLineColor = (logic: HedgeRelationship['logic']) => {
-    switch (logic) {
-      case 'mirror': return '#22c55e'; // green
-      case 'partial': return '#eab308'; // yellow
-      case 'inverse': return '#a855f7'; // purple
+  // Get line color based on copier connection status (active/paused/error)
+  const getStatusColor = (status: ConnectionStatus): string => {
+    switch (status) {
+      case 'active': return '#22c55e';  // green - live connection
+      case 'paused': return '#eab308';  // yellow - paused/dormant
+      case 'error':  return '#ef4444';  // red - faulty
+      case 'none':
+      default:       return '#6b7280';  // gray - not configured
+    }
+  };
+
+  // Get line color: use copier status if available, otherwise fall back to logic type
+  const getLineColor = (rel: HedgeRelationship): string => {
+    if (getConnectionStatusProp) {
+      const status = getConnectionStatusProp(rel.sourceId, rel.targetId);
+      return getStatusColor(status);
+    }
+    // Fallback: color by logic type
+    switch (rel.logic) {
+      case 'mirror': return '#22c55e';
+      case 'partial': return '#eab308';
+      case 'inverse': return '#a855f7';
       default: return '#22c55e';
     }
+  };
+
+  // Get the connection status for a relationship (for node border coloring)
+  const getRelConnectionStatus = (accountId: string): ConnectionStatus => {
+    if (!getConnectionStatusProp) return 'none';
+    // Check all relationships involving this account
+    for (const rel of relationships) {
+      if (rel.sourceId === accountId || rel.targetId === accountId) {
+        const status = getConnectionStatusProp(rel.sourceId, rel.targetId);
+        if (status === 'error') return 'error';
+        if (status === 'active') return 'active';
+        if (status === 'paused') return 'paused';
+      }
+    }
+    return 'none';
   };
 
   // Render connection lines with edge attachment
@@ -869,7 +922,7 @@ export const DraggableHedgeMap = ({
         if (!sourcePos || !targetPos) return;
         
         const isSelected = selectedLink === rel.id;
-        const color = getLineColor(rel.logic);
+        const color = getLineColor(rel);
         const strokeWidth = isSelected ? 5 : 3;
         const glowWidth = isSelected ? 16 : 10;
         
@@ -945,6 +998,27 @@ export const DraggableHedgeMap = ({
     const isAnyNodeDragging = draggingNode !== null;
     
     return routers.map((router, index) => {
+      // Determine router status from connected relationships
+      let routerStatus: ConnectionStatus = 'none';
+      if (getConnectionStatusProp) {
+        const statuses = router.connectedIds.map(id =>
+          getConnectionStatusProp(router.hedgeId, id)
+        );
+        if (statuses.some(s => s === 'error')) routerStatus = 'error';
+        else if (statuses.some(s => s === 'active')) routerStatus = 'active';
+        else if (statuses.some(s => s === 'paused')) routerStatus = 'paused';
+      }
+
+      const routerGradient = routerStatus === 'active' ? 'from-green-400 to-green-600'
+        : routerStatus === 'paused' ? 'from-yellow-400 to-yellow-600'
+        : routerStatus === 'error' ? 'from-red-400 to-red-600'
+        : 'from-emerald-400 to-green-600';
+
+      const routerShadow = routerStatus === 'active' ? 'shadow-green-500/20'
+        : routerStatus === 'paused' ? 'shadow-yellow-500/20'
+        : routerStatus === 'error' ? 'shadow-red-500/20'
+        : 'shadow-emerald-500/20';
+
       return (
         <div
           key={`router-${router.hedgeId}`}
@@ -958,7 +1032,11 @@ export const DraggableHedgeMap = ({
           }}
         >
           <div className="relative">
-            <div className="w-14 h-14 rounded-full bg-gradient-to-br from-emerald-400 to-green-600 flex items-center justify-center shadow-lg shadow-emerald-500/20">
+            <div className={cn(
+              'w-14 h-14 rounded-full bg-gradient-to-br flex items-center justify-center shadow-lg',
+              routerGradient,
+              routerShadow
+            )}>
               <div className="w-7 h-7 rounded-full bg-black/20 border-2 border-white/30 flex items-center justify-center">
                 <GitBranch className="w-3.5 h-3.5 text-white" />
               </div>
@@ -999,18 +1077,36 @@ export const DraggableHedgeMap = ({
       </div>
 
       {/* Legend */}
-      <div className="absolute bottom-4 left-4 z-20 flex items-center gap-3 px-3 py-1.5 rounded-full bg-card border border-border/50 text-xs">
-        <div className="flex items-center gap-1.5">
-          <div className="w-2.5 h-2.5 rounded-full bg-yellow-500" />
-          <span className="text-muted-foreground">Evaluation</span>
+      <div className="absolute bottom-4 left-4 z-20 flex flex-col gap-1.5 px-3 py-2 rounded-lg bg-card border border-border/50 text-xs">
+        {/* Account types */}
+        <div className="flex items-center gap-3">
+          <div className="flex items-center gap-1.5">
+            <div className="w-2.5 h-2.5 rounded-full bg-yellow-500" />
+            <span className="text-muted-foreground">Evaluation</span>
+          </div>
+          <div className="flex items-center gap-1.5">
+            <div className="w-2.5 h-2.5 rounded-full bg-blue-500" />
+            <span className="text-muted-foreground">Hedge</span>
+          </div>
+          <div className="flex items-center gap-1.5">
+            <div className="w-2.5 h-2.5 rounded-full bg-emerald-500" />
+            <span className="text-muted-foreground">Funded</span>
+          </div>
         </div>
-        <div className="flex items-center gap-1.5">
-          <div className="w-2.5 h-2.5 rounded-full bg-blue-500" />
-          <span className="text-muted-foreground">Hedge</span>
-        </div>
-        <div className="flex items-center gap-1.5">
-          <div className="w-2.5 h-2.5 rounded-full bg-emerald-500" />
-          <span className="text-muted-foreground">Funded</span>
+        {/* Connection statuses */}
+        <div className="flex items-center gap-3 pt-1 border-t border-border/30">
+          <div className="flex items-center gap-1.5">
+            <div className="w-5 h-0.5 rounded bg-green-500" />
+            <span className="text-muted-foreground">Live</span>
+          </div>
+          <div className="flex items-center gap-1.5">
+            <div className="w-5 h-0.5 rounded bg-yellow-500" />
+            <span className="text-muted-foreground">Paused</span>
+          </div>
+          <div className="flex items-center gap-1.5">
+            <div className="w-5 h-0.5 rounded bg-red-500" />
+            <span className="text-muted-foreground">Faulty</span>
+          </div>
         </div>
       </div>
 
@@ -1196,6 +1292,7 @@ export const DraggableHedgeMap = ({
                       isSelected={isSelected}
                       isDragging={isDragging}
                       isLinkSource={isLinkSource}
+                      copierStatus={getRelConnectionStatus(account.id)}
                       onMouseDown={(e) => handleNodeMouseDown(account.id, e)}
                       onDetailsClick={() => {
                         if (onAccountClick) {
@@ -1209,6 +1306,7 @@ export const DraggableHedgeMap = ({
                       isSelected={isSelected}
                       isDragging={isDragging}
                       isLinkSource={isLinkSource}
+                      copierStatus={getRelConnectionStatus(account.id)}
                       onMouseDown={(e) => handleNodeMouseDown(account.id, e)}
                       onDetailsClick={() => {
                         if (onAccountClick) {

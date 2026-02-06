@@ -18,7 +18,6 @@ interface KeyboardShortcut {
  * - Ctrl+2: Go to Accounts
  * - Ctrl+3: Go to Analytics
  * - Ctrl+4: Go to Trade Copier
- * - Ctrl+5: Go to Calculator
  * - Ctrl+,: Go to Settings
  * - Ctrl+/: Go to Help
  * - Ctrl+N: New Account (when on Overview/Accounts)
@@ -34,7 +33,6 @@ export function useKeyboardShortcuts() {
     { key: '2', ctrl: true, action: () => navigate('/app/accounts'), description: 'Go to Accounts' },
     { key: '3', ctrl: true, action: () => navigate('/app/analytics'), description: 'Go to Analytics' },
     { key: '4', ctrl: true, action: () => navigate('/app/copier'), description: 'Go to Trade Copier' },
-    { key: '5', ctrl: true, action: () => navigate('/app/calculator'), description: 'Go to Calculator' },
     { key: ',', ctrl: true, action: () => navigate('/app/settings'), description: 'Go to Settings' },
     { key: '/', ctrl: true, action: () => navigate('/app/help'), description: 'Go to Help' },
   ];
@@ -76,7 +74,6 @@ export function getKeyboardShortcuts() {
     { keys: ['Ctrl', '2'], description: 'Go to Accounts' },
     { keys: ['Ctrl', '3'], description: 'Go to Analytics' },
     { keys: ['Ctrl', '4'], description: 'Go to Trade Copier' },
-    { keys: ['Ctrl', '5'], description: 'Go to Calculator' },
     { keys: ['Ctrl', ','], description: 'Go to Settings' },
     { keys: ['Ctrl', '/'], description: 'Go to Help' },
     { keys: ['Escape'], description: 'Close modal/dialog' },
