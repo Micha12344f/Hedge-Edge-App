@@ -3,33 +3,42 @@
 ## Workspace Structure
 
 ```
-Hedge-Edge-Front-End/
-├── agents/                 # Trading platform agents (user-facing)
-│   ├── mt4/               # MetaTrader 4 Expert Advisors
-│   ├── mt5/               # MetaTrader 5 Expert Advisors + DLLs
-│   │   ├── lib/           # Pre-built DLLs (libzmq, libsodium)
-│   │   ├── *.mq5          # EA source files
-│   │   ├── *.mqh          # MQL5 header/include files
-│   │   └── *.cpp/.h/.def  # DLL source files
-│   └── ctrader/           # cTrader cBots
-│       └── *.cs           # cBot source files (C#)
+Hedge-Edge-App/
+├── Hedge-Edge-Front-end/      # Desktop application (Electron + React)
+│   ├── electron/              # Electron main process
+│   ├── src/                   # React frontend
+│   ├── build/                 # Build resources (icons, entitlements)
+│   ├── testing/               # Front-end test suites
+│   │   └── ui/                # UI automation tests
+│   └── supabase/              # Database migrations
 │
-├── app/                    # Desktop application (Electron + React)
-│   ├── electron/          # Electron main process
-│   ├── src/               # React frontend
-│   ├── build/             # Build resources (icons, entitlements)
-│   └── supabase/          # Database migrations
+├── Hedge-Edge-Back-end/       # Python API servers + Trading agents
+│   ├── license_api_server.py  # Local license API server
+│   ├── license_api_production.py  # Production license API
+│   ├── mt5_api_server.py      # Local MT5 bridge API
+│   ├── agents/                # Trading platform agents (user-facing)
+│   │   ├── mt4/               # MetaTrader 4 Expert Advisors
+│   │   ├── mt5/               # MetaTrader 5 Expert Advisors + DLLs
+│   │   │   ├── lib/           # Pre-built DLLs (libzmq, libsodium)
+│   │   │   ├── *.mq5          # EA source files
+│   │   │   ├── *.mqh          # MQL5 header/include files
+│   │   │   └── *.cpp/.h/.def  # DLL source files
+│   │   └── ctrader/           # cTrader cBots
+│   │       └── *.cs           # cBot source files (C#)
+│   ├── testing/               # Back-end test suites
+│   │   └── api/               # API integration tests
+│   └── scripts/               # Back-end build scripts
+│       └── agent_build_helper.py
 │
-├── backend/               # Python API servers
-│   ├── mt5_api_server.py  # Local MT5 bridge API
-│   ├── mt5_vps_server.py  # VPS deployment server
-│   └── vps-deployment/    # VPS setup scripts
+├── testing/                   # Cross-cutting tests
+│   └── integration/           # End-to-end integration tests
 │
-├── bin/                   # Deprecated/archived code
+├── scripts/                   # Cross-project utilities
+│   └── run_all_tests.py       # Master test runner
 │
-├── docs/                  # Documentation
-│
-└── session-logs/          # Development session logs
+├── docs/                      # Documentation
+├── tasks/                     # Task management
+└── Hedge-Edge-app.code-workspace
 ```
 
 ## Component Communication
@@ -67,19 +76,19 @@ License Validation:
 
 ## Technology Stack
 
-### Desktop App (app/)
+### Desktop App (Hedge-Edge-Front-end/)
 - **Framework**: Electron + Vite
 - **Frontend**: React 18 + TypeScript
 - **UI**: Tailwind CSS + shadcn/ui
 - **State**: React Context + Custom Hooks
 - **IPC**: Electron IPC + ZeroMQ (zeromq.js)
 
-### Trading Agents (agents/)
+### Trading Agents (Hedge-Edge-Back-end/agents/)
 - **MT5**: MQL5 + Native DLLs (C++)
 - **MT4**: MQL4 + Native DLLs (C++)
 - **cTrader**: C# cAlgo
 
-### Backend (backend/)
+### Backend (Hedge-Edge-Back-end/)
 - **Runtime**: Python 3.10+
 - **MT5 Bridge**: MetaTrader5 Python package
 - **API**: FastAPI / Flask

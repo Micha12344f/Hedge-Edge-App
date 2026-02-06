@@ -16,6 +16,9 @@ from datetime import datetime
 from pathlib import Path
 
 BIN_DIR = Path(__file__).parent
+ROOT_DIR = BIN_DIR.parent
+BACKEND_DIR = ROOT_DIR / "Hedge-Edge-Back-end"
+FRONTEND_DIR = ROOT_DIR / "Hedge-Edge-Front-end"
 RESULTS_DIR = BIN_DIR / "test_results"
 RESULTS_DIR.mkdir(exist_ok=True)
 
@@ -59,10 +62,10 @@ def start_license_server():
     
     # Start server
     process = subprocess.Popen(
-        [sys.executable, str(BIN_DIR / "license_api_server.py")],
+        [sys.executable, str(BACKEND_DIR / "license_api_server.py")],
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
-        cwd=str(BIN_DIR)
+        cwd=str(BACKEND_DIR)
     )
     
     # Wait for server to start
@@ -83,7 +86,7 @@ def run_api_tests():
     """Run API integration tests"""
     print_banner("API INTEGRATION TESTS")
     
-    success, output = run_command([sys.executable, str(BIN_DIR / "api_test_suite.py")])
+    success, output = run_command([sys.executable, str(BACKEND_DIR / "testing" / "api" / "api_test_suite.py")])
     print(output)
     
     return success
@@ -97,7 +100,7 @@ def run_ui_tests():
         import pyautogui
         print("PyAutoGUI available - running UI tests...")
         success, output = run_command(
-            [sys.executable, str(BIN_DIR / "ui_test_suite.py"), "--quick"],
+            [sys.executable, str(FRONTEND_DIR / "testing" / "ui" / "ui_test_suite.py"), "--quick"],
             timeout=120
         )
         print(output)

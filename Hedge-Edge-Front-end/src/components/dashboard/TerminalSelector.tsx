@@ -238,7 +238,7 @@ export function TerminalSelector({
       )}
 
       {/* Terminal list */}
-      <div className="space-y-2 max-h-[240px] overflow-y-auto pr-1">
+      <div className="space-y-2 max-h-[240px] overflow-y-auto overflow-x-hidden pr-1">
         {terminals.map((terminal) => {
           const isSelected = selectedId === terminal.id;
           const isLaunching = launching === terminal.id;

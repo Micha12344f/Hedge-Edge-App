@@ -141,7 +141,28 @@ const ACCOUNT_SIZES = [
 ];
 
 // Platform logos - using Google's favicon service for reliability
-const PLATFORMS: { id: Platform; name: string; logo: string; color: string }[] = [
+export const PLATFORMS: { id: string; name: string; logo: string; color: string }[] = [
+  { 
+    id: 'MT4', 
+    name: 'MetaTrader 4', 
+    logo: 'https://www.google.com/s2/favicons?domain=metatrader4.com&sz=64',
+    color: 'hover:border-blue-500/50 hover:bg-blue-500/5' 
+  },
+  { 
+    id: 'MT5', 
+    name: 'MetaTrader 5', 
+    logo: 'https://www.google.com/s2/favicons?domain=metatrader5.com&sz=64',
+    color: 'hover:border-indigo-500/50 hover:bg-indigo-500/5' 
+  },
+  { 
+    id: 'cTrader', 
+    name: 'cTrader', 
+    logo: 'https://www.google.com/s2/favicons?domain=ctrader.com&sz=64',
+    color: 'hover:border-cyan-500/50 hover:bg-cyan-500/5' 
+  },
+];
+
+const PLATFORMS_INTERNAL: { id: Platform; name: string; logo: string; color: string }[] = [
   { 
     id: 'MT4', 
     name: 'MetaTrader 4', 
@@ -649,7 +670,7 @@ export const AddAccountModal = ({
               </div>
             )}
 
-            <div className="space-y-2 max-h-[280px] overflow-y-auto">
+            <div className="space-y-2 max-h-[280px] overflow-y-auto overflow-x-hidden">
               {filteredTerminals.map((terminal) => {
                 const isSelected = selectedTerminal?.id === terminal.id;
                 const isLaunching = launching === terminal.id;
@@ -779,7 +800,7 @@ export const AddAccountModal = ({
         </div>
 
         {/* Prop firm grid */}
-        <div className="grid grid-cols-2 gap-2 max-h-[300px] overflow-y-auto pr-1">
+        <div className="grid grid-cols-2 gap-2 max-h-[300px] overflow-y-auto overflow-x-hidden pr-1">
             {filteredFirms.map((firm) => {
               const isSelected = formData.prop_firm === firm.name;
               return (
@@ -897,7 +918,7 @@ export const AddAccountModal = ({
             </div>
 
             {archivedAccounts.length > 0 ? (
-              <div className="space-y-1.5 max-h-[120px] overflow-y-auto">
+              <div className="space-y-1.5 max-h-[120px] overflow-y-auto overflow-x-hidden">
                 {archivedAccounts.map((account) => {
                   const isSelected = formData.previous_account_id === account.id;
                   const firmLogo = PROP_FIRMS.find(f => f.name === account.prop_firm)?.logo;
@@ -1134,7 +1155,7 @@ export const AddAccountModal = ({
           <p className="text-xs text-muted-foreground uppercase tracking-wider font-medium">
             Available Accounts
           </p>
-          <div className="space-y-2 max-h-[200px] overflow-y-auto pr-1">
+          <div className="space-y-2 max-h-[200px] overflow-y-auto overflow-x-hidden pr-1">
             {availableDetectedAccounts.map((account, idx) => (
               <button
                 key={`${account.login}-${account.server}`}
@@ -1253,7 +1274,7 @@ export const AddAccountModal = ({
           </DialogDescription>
         </DialogHeader>
 
-        <div className="flex-1 overflow-y-auto min-h-0">
+        <div className="flex-1 overflow-y-auto overflow-x-hidden min-h-0">
           {step === 'account-type' && renderAccountTypeStep()}
           {step === 'platform' && renderPlatformStep()}
           {step === 'terminal' && renderTerminalStep()}

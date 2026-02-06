@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useCallback } from 'react';
+import { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import { TradingAccount } from '@/hooks/useTradingAccounts';
 import { HedgeNode } from './HedgeNode';
 import { Button } from '@/components/ui/button';
@@ -146,25 +146,55 @@ export const HedgeMap = ({
     }
   };
 
+  // Use ref for real-time pan updates to avoid React re-renders during drag
+  const panRef = useRef(pan);
+  const transformRef = useRef<HTMLDivElement>(null);
+  const svgTransformRef = useRef<SVGSVGElement>(null);
+
+  const updateTransform = useCallback(() => {
+    const transform = `translate(${containerSize.width / 2 + panRef.current.x}px, ${containerSize.height / 2 + panRef.current.y}px) scale(${zoom})`;
+    if (transformRef.current) {
+      transformRef.current.style.transform = transform;
+    }
+    if (svgTransformRef.current) {
+      svgTransformRef.current.style.transform = transform;
+    }
+  }, [containerSize.width, containerSize.height, zoom]);
+
   const handleMouseMove = useCallback((e: React.MouseEvent) => {
     if (isDragging) {
-      setPan({
+      panRef.current = {
         x: e.clientX - dragStart.x,
         y: e.clientY - dragStart.y,
-      });
+      };
+      // Update transform directly via ref - no React re-render
+      updateTransform();
     }
-  }, [isDragging, dragStart]);
+  }, [isDragging, dragStart, updateTransform]);
 
   const handleMouseUp = () => {
     setIsDragging(false);
+    // Sync ref value back to state when drag ends
+    setPan(panRef.current);
   };
 
+  // Keep panRef in sync when pan state changes
+  useEffect(() => {
+    panRef.current = pan;
+  }, [pan]);
+
+  // Update transform when zoom or container size changes
+  useEffect(() => {
+    updateTransform();
+  }, [zoom, containerSize, updateTransform]);
+
   // Zoom handlers
-  const handleZoomIn = () => setZoom(z => Math.min(z + 0.1, 2));
-  const handleZoomOut = () => setZoom(z => Math.max(z - 0.1, 0.5));
+  const handleZoomIn = () => setZoom(z => Math.min(z + 0.15, 2));
+  const handleZoomOut = () => setZoom(z => Math.max(z - 0.15, 0));
   const handleResetView = () => {
     setZoom(1);
     setPan({ x: 0, y: 0 });
+    panRef.current = { x: 0, y: 0 };
   };
 
   // Node interaction handlers
@@ -187,19 +217,22 @@ export const HedgeMap = ({
     }
   };
 
-  const getNodePosition = (id: string) => {
+  // Memoize node position lookup
+  const getNodePosition = useCallback((id: string) => {
     return nodePositions.find(p => p.id === id);
-  };
+  }, [nodePositions]);
 
-  // Draw edges between linked accounts - bidirectional arrows
-  const renderEdges = () => {
+  // Memoize edges to avoid recalculating on every render
+  const edges = useMemo(() => {
     const nodeWidth = 288;
     const nodeHeight = 280;
     const arrowOffset = 20; // Gap between the two lines
     
+    const getPos = (id: string) => nodePositions.find(p => p.id === id);
+    
     return relationships.map((rel) => {
-      const source = getNodePosition(rel.sourceId);
-      const target = getNodePosition(rel.targetId);
+      const source = getPos(rel.sourceId);
+      const target = getPos(rel.targetId);
       
       if (!source || !target) return null;
 
@@ -305,15 +338,15 @@ export const HedgeMap = ({
         </g>
       );
     });
-  };
+  }, [relationships, nodePositions]);
 
   const selectedAccount = accounts.find(a => a.id === selectedNode);
 
   return (
-    <div className="relative h-full w-full overflow-hidden bg-gradient-to-br from-background via-background to-muted/20 rounded-xl border border-border/30">
+    <div className="relative h-full w-full overflow-hidden bg-background rounded-xl border border-border/30">
       {/* Controls */}
       <div className="absolute top-4 left-4 z-20 flex flex-col gap-2">
-        <div className="flex items-center gap-2 p-2 rounded-lg bg-card/80 backdrop-blur-md border border-border/30 shadow-lg">
+        <div className="flex items-center gap-2 p-2 rounded-lg bg-card border border-border/30 shadow-sm">
           <Button variant="ghost" size="icon" onClick={handleZoomIn} className="h-8 w-8">
             <ZoomIn className="h-4 w-4" />
           </Button>
@@ -330,7 +363,7 @@ export const HedgeMap = ({
         </div>
 
         {/* Legend */}
-        <div className="p-3 rounded-lg bg-card/80 backdrop-blur-md border border-border/30 shadow-lg space-y-2">
+        <div className="p-3 rounded-lg bg-card border border-border/30 shadow-sm space-y-2">
           <p className="text-xs font-medium text-foreground">Account Types</p>
           <div className="flex flex-col gap-1.5">
             <div className="flex items-center gap-2">
@@ -413,28 +446,20 @@ export const HedgeMap = ({
       {/* Canvas */}
       <div
         ref={containerRef}
-        className="map-canvas absolute inset-0 cursor-grab active:cursor-grabbing"
+        className="map-canvas absolute inset-0 cursor-grab active:cursor-grabbing bg-muted/5"
         onMouseDown={handleMouseDown}
         onMouseMove={handleMouseMove}
         onMouseUp={handleMouseUp}
         onMouseLeave={handleMouseUp}
       >
-        {/* Grid Background */}
-        <svg className="absolute inset-0 w-full h-full pointer-events-none opacity-20">
-          <defs>
-            <pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse">
-              <path d="M 40 0 L 0 0 0 40" fill="none" stroke="currentColor" strokeWidth="0.5" className="text-border" />
-            </pattern>
-          </defs>
-          <rect width="100%" height="100%" fill="url(#grid)" />
-        </svg>
-
         {/* Edges SVG Layer */}
         <svg 
+          ref={svgTransformRef}
           className="absolute inset-0 w-full h-full pointer-events-none overflow-visible"
           style={{
             transform: `translate(${containerSize.width / 2 + pan.x}px, ${containerSize.height / 2 + pan.y}px) scale(${zoom})`,
             transformOrigin: '0 0',
+            willChange: 'transform',
           }}
         >
           {/* Arrow markers for bidirectional lines */}
@@ -462,15 +487,17 @@ export const HedgeMap = ({
               <path d="M2,2 L10,6 L2,10 L4,6 Z" fill="currentColor" className="text-current" />
             </marker>
           </defs>
-          {renderEdges()}
+          {edges}
         </svg>
 
         {/* Nodes Container */}
         <div
+          ref={transformRef}
           className="absolute inset-0 overflow-visible"
           style={{
             transform: `translate(${containerSize.width / 2 + pan.x}px, ${containerSize.height / 2 + pan.y}px) scale(${zoom})`,
             transformOrigin: '0 0',
+            willChange: 'transform',
           }}
         >
           {accounts.length > 0 && accounts.map((account) => {
@@ -507,7 +534,6 @@ export const HedgeMap = ({
             </div>
           </div>
         )}
-        </div>
       </div>
 
       {/* Selected Account Details Panel */}

@@ -148,17 +148,13 @@ export const HedgeNode = ({ account, isSelected, isDragging, isLinkSource, onCli
           left: position.x, 
           top: position.y,
           transform: 'translate(-50%, -50%)',
-          filter: isDragging ? 'drop-shadow(0 20px 30px rgba(0,0,0,0.4))' : undefined,
+          willChange: 'transform',
         } : undefined}
         className={cn(
-          'w-72 rounded-xl border-2 bg-card/90 backdrop-blur-md cursor-grab active:cursor-grabbing transition-all duration-300 select-none overflow-hidden',
+          'w-72 rounded-xl border-2 bg-card cursor-pointer select-none overflow-hidden',
           config.border,
-          config.glow,
-          config.hoverGlow,
-          isDragging && 'scale-105 z-50',
-          !isDragging && 'hover:scale-[1.02]',
-          isSelected && 'ring-2 ring-offset-2 ring-offset-background ring-white/50',
-          isLinkSource && 'ring-2 ring-primary ring-offset-2 ring-offset-background animate-pulse'
+          isSelected && 'ring-2 ring-offset-2 ring-offset-background ring-primary',
+          isLinkSource && 'ring-2 ring-primary ring-offset-2 ring-offset-background'
         )}
       >
         <div className="px-4 py-3">
@@ -236,18 +232,14 @@ export const HedgeNode = ({ account, isSelected, isDragging, isLinkSource, onCli
         left: position.x, 
         top: position.y,
         transform: 'translate(-50%, -50%)',
-        filter: isDragging ? 'drop-shadow(0 20px 30px rgba(0,0,0,0.4))' : undefined,
+        willChange: 'transform',
       } : undefined}
       className={cn(
-        'w-72 rounded-xl border-2 bg-card/90 backdrop-blur-md cursor-grab active:cursor-grabbing transition-all duration-300 select-none overflow-hidden',
+        'w-72 rounded-xl border-2 bg-card cursor-pointer select-none overflow-hidden',
         config.border,
-        config.glow,
-        config.hoverGlow,
-        isDragging && 'scale-105 z-50',
-        !isDragging && 'hover:scale-[1.02]',
-        isSelected && 'ring-2 ring-offset-2 ring-offset-background ring-white/50',
-        isLinkSource && 'ring-2 ring-primary ring-offset-2 ring-offset-background animate-pulse',
-        connectionStatus === 'risk' && 'border-red-500/60 shadow-[0_0_20px_rgba(239,68,68,0.25)]'
+        isSelected && 'ring-2 ring-offset-2 ring-offset-background ring-primary',
+        isLinkSource && 'ring-2 ring-primary ring-offset-2 ring-offset-background',
+        connectionStatus === 'risk' && 'border-red-500/60'
       )}
     >
       {/* Header */}

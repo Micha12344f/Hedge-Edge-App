@@ -1,10 +1,15 @@
-﻿import { useState } from 'react';
+﻿import { useState, useMemo } from 'react';
 import { useTradingAccounts } from '@/hooks/useTradingAccounts';
 import { PROP_FIRMS } from '@/components/dashboard/AddAccountModal';
 import { Card, CardContent } from '@/components/ui/card';
 import { PageBackground } from '@/components/ui/page-background';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Separator } from '@/components/ui/separator';
+import { GradientText } from '@/components/ui/gradient-text';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Badge } from '@/components/ui/badge';
+import { Plus, DollarSign, Check, X, Trash2 } from 'lucide-react';
 import {
   Select,
   SelectContent,
@@ -30,10 +35,39 @@ import {
 const BAR_COLOR = 'hsla(120, 70%, 35%, 0.5)'; // Darker green with 50% opacity
 const BAR_STROKE = 'hsl(120, 70%, 40%)'; // Darker green for border
 
+// Payout entry interface
+interface PayoutEntry {
+  id: string;
+  accountId: string;
+  accountName: string;
+  amount: number;
+  date: string;
+  received: boolean;
+  denied: boolean;
+}
+
+// Local storage key for payouts
+const PAYOUTS_KEY = 'hedge_edge_payouts';
+
+const getStoredPayouts = (): PayoutEntry[] => {
+  try {
+    const stored = localStorage.getItem(PAYOUTS_KEY);
+    return stored ? JSON.parse(stored) : [];
+  } catch {
+    return [];
+  }
+};
+
+const savePayouts = (payouts: PayoutEntry[]) => {
+  localStorage.setItem(PAYOUTS_KEY, JSON.stringify(payouts));
+};
+
 const DashboardAnalytics = () => {
   const { accounts, loading } = useTradingAccounts();
-  const [performanceTab, setPerformanceTab] = useState('instrument');
   const [selectedAccountId, setSelectedAccountId] = useState<string>('all');
+  const [payouts, setPayouts] = useState<PayoutEntry[]>(getStoredPayouts);
+  const [isAddingPayout, setIsAddingPayout] = useState(false);
+  const [newPayoutAmount, setNewPayoutAmount] = useState('');
 
   // Separate active and archived accounts - archived accounts don't need live data
   const activeAccounts = accounts.filter(a => !a.is_archived);
@@ -69,6 +103,7 @@ const DashboardAnalytics = () => {
   const totalEvaluation = evaluationAccounts.reduce((sum, acc) => sum + (Number(acc.current_balance) || Number(acc.account_size) || 0), 0);
 
   // Get unique prop firms from connected accounts (excluding hedge and archived accounts)
+  // Use account_size (starting/original size) not current_balance for the bar chart
   const propFirmData = activeAccounts
     .filter(account => account.phase !== 'live') // Exclude hedge accounts
     .reduce((acc, account) => {
@@ -78,7 +113,7 @@ const DashboardAnalytics = () => {
         const firm = PROP_FIRMS.find(f => f.name === firmName);
         acc[firmName] = { name: firmName, balance: 0, count: 0, logo: firm?.logo || null };
       }
-      acc[firmName].balance += Number(account.current_balance) || Number(account.account_size) || 0;
+      acc[firmName].balance += Number(account.account_size) || 0;
       acc[firmName].count += 1;
       return acc;
     }, {} as Record<string, { name: string; balance: number; count: number; logo: string | null }>);
@@ -95,10 +130,58 @@ const DashboardAnalytics = () => {
     ? (Number(selectedAccount.current_balance) || Number(selectedAccount.account_size) || 0) - startingBalance
     : 0;
   
-  // Generate chart data for selected account (single account view) - using P&L
-  const areaChartData = selectedAccount 
-    ? [{ trades: 0, pnl: currentPnL, name: selectedAccount.account_name }]
-    : [{ trades: 0, pnl: 0, name: 'Sample' }];
+  // Generate mock trade history that leads to current P&L
+  const generateMockTradeHistory = (finalPnL: number, accountName: string) => {
+    if (finalPnL === 0) {
+      return [{ trades: 0, pnl: 0, name: accountName }];
+    }
+    
+    // Generate between 8-15 trades to show progression
+    const numTrades = Math.floor(Math.random() * 8) + 8;
+    const trades: { trades: number; pnl: number; name: string }[] = [
+      { trades: 0, pnl: 0, name: accountName } // Start at 0
+    ];
+    
+    // Create a somewhat realistic progression to final P&L with some volatility
+    let runningPnL = 0;
+    const avgMovePerTrade = finalPnL / numTrades;
+    const volatility = Math.abs(finalPnL) * 0.3; // 30% volatility
+    
+    for (let i = 1; i <= numTrades; i++) {
+      // Add some randomness but trend towards final value
+      const remainingTrades = numTrades - i;
+      const neededMove = (finalPnL - runningPnL) / (remainingTrades + 1);
+      
+      // Add volatility for earlier trades, less for later ones
+      const volatilityFactor = (remainingTrades / numTrades) * volatility;
+      const randomVariation = (Math.random() - 0.5) * 2 * volatilityFactor;
+      
+      runningPnL += neededMove + randomVariation;
+      
+      // Ensure final trade lands exactly on target
+      if (i === numTrades) {
+        runningPnL = finalPnL;
+      }
+      
+      trades.push({
+        trades: i,
+        pnl: Math.round(runningPnL),
+        name: accountName
+      });
+    }
+    
+    return trades;
+  };
+  
+  // Generate chart data for selected account (single account view) - using P&L with trade history
+  // Memoize to prevent regeneration on every render
+  const areaChartData = useMemo(() => {
+    if (!selectedAccount) {
+      return [{ trades: 0, pnl: 0, name: 'Sample' }];
+    }
+    return generateMockTradeHistory(currentPnL, selectedAccount.account_name);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedAccount?.id, currentPnL]);
 
   // Calculate max trades for X-axis domain
   const maxTrades = Math.max(...areaChartData.map(d => d.trades), 0);
@@ -133,7 +216,22 @@ const DashboardAnalytics = () => {
       ticks.push(Math.round(tick));
     }
     
-    return ticks.sort((a, b) => a - b);
+    // Add current P&L as a tick if it's not too close to existing ticks
+    if (currentPnL !== 0) {
+      const minSpacing = Math.abs(profitTargetPnL) * 0.15; // 15% of target as minimum spacing
+      const isTooClose = ticks.some(tick => Math.abs(tick - currentPnL) < minSpacing);
+      if (!isTooClose) {
+        ticks.push(Math.round(currentPnL));
+      }
+    }
+    
+    // Sort and filter ticks that are too close together
+    const sortedTicks = ticks.sort((a, b) => a - b);
+    const minTickSpacing = Math.abs(profitTargetPnL - maxLossPnL) * 0.08; // 8% of range
+    
+    return sortedTicks.filter((tick, i, arr) => 
+      i === 0 || Math.abs(tick - arr[i - 1]) >= minTickSpacing
+    );
   };
 
   // Calculate Y-axis domain for individual account
@@ -163,18 +261,19 @@ const DashboardAnalytics = () => {
     return formatCurrency(value);
   };
 
-  // Custom dot component for the area chart
+  // Custom dot component for the area chart - color based on final P/L
   const CustomDot = (props: { cx?: number; cy?: number }) => {
     const { cx, cy } = props;
     if (cx === undefined || cy === undefined) return null;
+    const isNegative = currentPnL < 0;
     return (
       <circle
         cx={cx}
         cy={cy}
         r={5}
-        stroke="hsl(var(--primary))"
+        stroke={isNegative ? '#ef4444' : 'hsl(var(--primary))'}
         strokeWidth={2}
-        fill="url(#dotGradient)"
+        fill={isNegative ? '#ef4444' : 'hsl(var(--primary))'}
         fillOpacity={0.8}
       />
     );
@@ -184,28 +283,19 @@ const DashboardAnalytics = () => {
     <PageBackground>
       <div className={`p-6 pt-16 space-y-6 ${isSelectedArchived ? 'grayscale opacity-60' : ''}`}>
         <div>
-          <h1 className="text-2xl font-bold text-foreground">Analytics</h1>
+          <h1 className="text-2xl font-bold text-foreground">
+            <GradientText 
+              colors={['hsl(120, 100%, 54%)', 'hsl(45, 100%, 56%)', 'hsl(120, 100%, 54%)']} 
+              animationSpeed={4}
+              className="text-2xl font-bold"
+            >
+              Analytics
+            </GradientText>
+          </h1>
           <p className="text-muted-foreground">Tracking your overall hedging performance</p>
         </div>
 
         <div className="grid gap-4 grid-cols-1 sm:grid-cols-2 lg:grid-cols-5">
-          {/* Daily P/L */}
-          <div className="flex-1 flex flex-col justify-between p-4 rounded-lg bg-card border border-border/50">
-            <div>
-              <h3 className="text-sm font-medium text-muted-foreground mb-2">Daily P/L</h3>
-              <div className="flex flex-col">
-                <div className="flex items-baseline gap-2">
-                  <span className={`text-xl font-semibold ${totalPnL >= 0 ? 'text-primary' : 'text-destructive'}`}>
-                    {formatCurrency(0)}
-                  </span>
-                  <span className={`text-sm font-medium ${totalPnL >= 0 ? 'text-primary' : 'text-destructive'}`}>
-                    (+0.00%)
-                  </span>
-                </div>
-              </div>
-            </div>
-          </div>
-
           {/* Total P/L */}
           <div className="flex-1 flex flex-col justify-between p-4 rounded-lg bg-card border border-border/50">
             <div>
@@ -215,8 +305,33 @@ const DashboardAnalytics = () => {
                   <span className={`text-xl font-semibold ${totalPnL >= 0 ? 'text-primary' : 'text-destructive'}`}>
                     {formatCurrency(totalPnL)}
                   </span>
-                  <span className={`text-sm font-medium ${roi >= 0 ? 'text-primary' : 'text-destructive'}`}>
-                    ({roi >= 0 ? '+' : ''}{roi.toFixed(2)}%)
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Hedge P/L */}
+          <div className="flex-1 flex flex-col justify-between p-4 rounded-lg bg-card border border-border/50">
+            <div>
+              <h3 className="text-sm font-medium text-muted-foreground mb-2">Hedge P/L</h3>
+              <div className="flex flex-col">
+                <div className="flex items-baseline gap-2">
+                  <span className={`text-xl font-semibold ${hedgePnL >= 0 ? 'text-primary' : 'text-destructive'}`}>
+                    {formatCurrency(hedgePnL)}
+                  </span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Prop P/L */}
+          <div className="flex-1 flex flex-col justify-between p-4 rounded-lg bg-card border border-border/50">
+            <div>
+              <h3 className="text-sm font-medium text-muted-foreground mb-2">Prop P/L</h3>
+              <div className="flex flex-col">
+                <div className="flex items-baseline gap-2">
+                  <span className={`text-xl font-semibold ${propPnL >= 0 ? 'text-primary' : 'text-destructive'}`}>
+                    {formatCurrency(propPnL)}
                   </span>
                 </div>
               </div>
@@ -229,7 +344,9 @@ const DashboardAnalytics = () => {
               <h3 className="text-sm font-medium text-muted-foreground mb-2">ROI</h3>
               <div className="flex flex-col">
                 <div className="flex items-baseline gap-2">
-                  <span className={`text-xl font-semibold ${roi >= 0 ? 'text-primary' : 'text-destructive'}`}>{roi.toFixed(2)}%</span>
+                  <span className={`text-xl font-semibold ${roi >= 0 ? 'text-primary' : 'text-destructive'}`}>
+                    {roi.toFixed(2)}%
+                  </span>
                 </div>
               </div>
             </div>
@@ -241,32 +358,9 @@ const DashboardAnalytics = () => {
               <h3 className="text-sm font-medium text-muted-foreground mb-2">Hedge Discrepancy</h3>
               <div className="flex flex-col">
                 <div className="flex items-baseline gap-2">
-                  <span className={`text-xl font-semibold ${Math.abs(hedgeDiscrepancy) < 100 ? 'text-primary' : 'text-secondary'}`}>{formatCurrency(hedgeDiscrepancy)}</span>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          {/* Hedge Win/Loss & Prop Win/Loss */}
-          <div className="flex-1 flex flex-col justify-center items-center p-4 rounded-lg bg-card border border-border/50">
-            <div className="text-center">
-              {/* Hedge Win/Loss */}
-              <div className="mb-3">
-                <span className="text-sm text-muted-foreground">Hedge Win/Loss</span>
-                <div className="flex items-center justify-center gap-2 mt-1">
-                  <span className="text-sm text-primary">0.00%</span>
-                  <span className="text-sm text-muted-foreground">/</span>
-                  <span className="text-sm text-destructive">0.00%</span>
-                </div>
-              </div>
-              
-              {/* Prop Win/Loss */}
-              <div>
-                <span className="text-sm text-muted-foreground">Prop Win/Loss</span>
-                <div className="flex items-center justify-center gap-2 mt-1">
-                  <span className="text-sm text-primary">0.00%</span>
-                  <span className="text-sm text-muted-foreground">/</span>
-                  <span className="text-sm text-destructive">0.00%</span>
+                  <span className={`text-xl font-semibold ${Math.abs(hedgeDiscrepancy) < 100 ? 'text-primary' : 'text-secondary'}`}>
+                    {formatCurrency(hedgeDiscrepancy)}
+                  </span>
                 </div>
               </div>
             </div>
@@ -282,15 +376,41 @@ const DashboardAnalytics = () => {
                 {/* Chart Header with Account Selector */}
                 <div className="flex items-center justify-between mb-4">
                   <div className="flex items-center gap-16">
-                    <div>
-                      <h3 className="text-sm font-medium text-muted-foreground">Total Funded</h3>
-                      <span className="text-2xl font-semibold text-foreground">{formatCurrency(totalFunded)}</span>
-                    </div>
-                    <Separator orientation="vertical" className="h-12" />
-                    <div>
-                      <h3 className="text-sm font-medium text-muted-foreground">Total Evaluation</h3>
-                      <span className="text-2xl font-semibold text-foreground">{formatCurrency(totalEvaluation)}</span>
-                    </div>
+                    {selectedAccount ? (
+                      <>
+                        <div className="flex items-center gap-3">
+                          {(() => {
+                            const firm = PROP_FIRMS.find(f => f.name === selectedAccount.prop_firm);
+                            return firm?.logo ? (
+                              <img src={firm.logo} alt={firm.name} className="w-10 h-10 rounded-lg object-cover" />
+                            ) : null;
+                          })()}
+                          <div>
+                            <h3 className="text-sm font-medium text-muted-foreground">{selectedAccount.prop_firm || 'Account'}</h3>
+                            <span className="text-2xl font-semibold text-foreground">{selectedAccount.account_name}</span>
+                          </div>
+                        </div>
+                        <Separator orientation="vertical" className="h-12" />
+                        <div>
+                          <h3 className="text-sm font-medium text-muted-foreground">Balance</h3>
+                          <span className="text-2xl font-semibold text-foreground">
+                            {formatCurrency(Number(selectedAccount.current_balance) || Number(selectedAccount.account_size) || 0)}
+                          </span>
+                        </div>
+                      </>
+                    ) : (
+                      <>
+                        <div>
+                          <h3 className="text-sm font-medium text-muted-foreground">Total Funded</h3>
+                          <span className="text-2xl font-semibold text-foreground">{formatCurrency(totalFunded)}</span>
+                        </div>
+                        <Separator orientation="vertical" className="h-12" />
+                        <div>
+                          <h3 className="text-sm font-medium text-muted-foreground">Total Evaluation</h3>
+                          <span className="text-2xl font-semibold text-foreground">{formatCurrency(totalEvaluation)}</span>
+                        </div>
+                      </>
+                    )}
                   </div>
                   
                   {/* Account Selector Dropdown */}
@@ -302,25 +422,41 @@ const DashboardAnalytics = () => {
                       <SelectItem value="all">All Accounts</SelectItem>
                       {activeAccounts
                         .filter((account) => account.phase !== 'live')
-                        .map((account) => (
-                          <SelectItem key={account.id} value={account.id}>
-                            {account.account_name}
-                          </SelectItem>
-                        ))}
+                        .map((account) => {
+                          const firm = PROP_FIRMS.find(f => f.name === account.prop_firm);
+                          return (
+                            <SelectItem key={account.id} value={account.id}>
+                              <div className="flex items-center gap-2">
+                                {firm?.logo && (
+                                  <img src={firm.logo} alt={firm.name} className="w-4 h-4 rounded object-cover" />
+                                )}
+                                <span>{account.account_name}</span>
+                              </div>
+                            </SelectItem>
+                          );
+                        })}
                       {archivedAccounts.length > 0 && (
                         <>
                           <div className="px-2 py-1.5 text-xs text-muted-foreground border-t border-border/30 mt-1 pt-2">
                             Archived (Last Recorded)
                           </div>
-                          {archivedAccounts.map((account) => (
-                            <SelectItem 
-                              key={account.id} 
-                              value={account.id}
-                              className="text-muted-foreground"
-                            >
-                              {account.account_name} (Archived)
-                            </SelectItem>
-                          ))}
+                          {archivedAccounts.map((account) => {
+                            const firm = PROP_FIRMS.find(f => f.name === account.prop_firm);
+                            return (
+                              <SelectItem 
+                                key={account.id} 
+                                value={account.id}
+                                className="text-muted-foreground"
+                              >
+                                <div className="flex items-center gap-2">
+                                  {firm?.logo && (
+                                    <img src={firm.logo} alt={firm.name} className="w-4 h-4 rounded object-cover opacity-50" />
+                                  )}
+                                  <span>{account.account_name} (Archived)</span>
+                                </div>
+                              </SelectItem>
+                            );
+                          })}
                         </>
                       )}
                     </SelectContent>
@@ -402,7 +538,7 @@ const DashboardAnalytics = () => {
                           tick={{ fill: 'hsl(var(--muted-foreground))', fontSize: 12 }}
                           width={80}
                           label={{ 
-                            value: 'Balance', 
+                            value: 'Account Size', 
                             angle: -90, 
                             position: 'insideLeft',
                             offset: 0,
@@ -422,7 +558,7 @@ const DashboardAnalytics = () => {
                                   <p className="text-sm flex items-center gap-2 mt-1">
                                     <span className="w-2 h-2 rounded-full" style={{ backgroundColor: BAR_STROKE }}></span>
                                     <span className="text-foreground">
-                                      Balance: {formatCurrency(data.balance)}
+                                      Account Size: {formatCurrency(data.balance)}
                                     </span>
                                   </p>
                                   <p className="text-muted-foreground text-xs mt-1">
@@ -449,9 +585,13 @@ const DashboardAnalytics = () => {
                         margin={{ top: 10, right: 10, bottom: 30, left: 10 }}
                       >
                         <defs>
-                          <linearGradient id="areaGradient" x1="0" y1="0" x2="0" y2="1">
-                            <stop offset="0%" stopColor="hsl(var(--primary))" stopOpacity={1} />
+                          <linearGradient id="areaGradientPositive" x1="0" y1="0" x2="0" y2="1">
+                            <stop offset="0%" stopColor="hsl(var(--primary))" stopOpacity={0.3} />
                             <stop offset="100%" stopColor="hsl(var(--background))" stopOpacity={0} />
+                          </linearGradient>
+                          <linearGradient id="areaGradientNegative" x1="0" y1="0" x2="0" y2="1">
+                            <stop offset="0%" stopColor="hsl(var(--background))" stopOpacity={0} />
+                            <stop offset="100%" stopColor="#ef4444" stopOpacity={0.3} />
                           </linearGradient>
                           <linearGradient id="dotGradient" x1="0" y1="0" x2="0" y2="1">
                             <stop offset="0%" stopColor="hsl(var(--primary))" stopOpacity={1} />
@@ -471,13 +611,13 @@ const DashboardAnalytics = () => {
                           allowDecimals={false}
                           axisLine={{ stroke: 'hsl(var(--border))' }}
                           tickLine={{ stroke: 'hsl(var(--border))' }}
-                          tick={{ fill: 'hsl(var(--muted-foreground))', fontSize: 12 }}
+                          tick={{ fill: '#ffffff', fontSize: 12 }}
                           ticks={maxTrades === 0 ? [0] : undefined}
                           label={{ 
                             value: 'Number of Trades', 
                             position: 'bottom', 
                             offset: 15,
-                            fill: 'hsl(var(--muted-foreground))',
+                            fill: '#ffffff',
                             fontSize: 12
                           }}
                         />
@@ -489,14 +629,14 @@ const DashboardAnalytics = () => {
                           tickFormatter={formatYAxis}
                           axisLine={false}
                           tickLine={false}
-                          tick={{ fill: 'hsl(var(--muted-foreground))', fontSize: 12 }}
+                          tick={{ fill: '#ffffff', fontSize: 12 }}
                           width={80}
                           label={{ 
                             value: 'P&L', 
                             angle: -90, 
                             position: 'insideLeft',
                             offset: 0,
-                            fill: 'hsl(var(--muted-foreground))',
+                            fill: '#ffffff',
                             fontSize: 12,
                             style: { textAnchor: 'middle' }
                           }}
@@ -526,7 +666,7 @@ const DashboardAnalytics = () => {
                             strokeWidth={1.5}
                             label={{ 
                               value: `Daily Limit: ${formatCurrency(dailyMaxLossPnL)}`, 
-                              position: 'insideBottomLeft',
+                              position: 'insideTopLeft',
                               fill: '#eab308',
                               fontSize: 11,
                               fontWeight: 500
@@ -542,8 +682,24 @@ const DashboardAnalytics = () => {
                             strokeWidth={1.5}
                             label={{ 
                               value: `Max Loss: ${formatCurrency(maxLossPnL)}`, 
-                              position: 'insideBottomLeft',
+                              position: 'insideTopRight',
                               fill: '#ef4444',
+                              fontSize: 11,
+                              fontWeight: 500
+                            }}
+                          />
+                        )}
+                        {/* Current Balance Reference Line - light grey dotted */}
+                        {selectedAccount && (
+                          <ReferenceLine 
+                            y={currentPnL} 
+                            stroke="#9ca3af" 
+                            strokeDasharray="3 3" 
+                            strokeWidth={1}
+                            label={{ 
+                              value: `Current: ${formatCurrency(currentPnL)}`, 
+                              position: currentPnL < 0 ? 'insideTopRight' : 'insideBottomRight',
+                              fill: '#9ca3af',
                               fontSize: 11,
                               fontWeight: 500
                             }}
@@ -570,12 +726,13 @@ const DashboardAnalytics = () => {
                         <Area 
                           type="monotone"
                           dataKey="pnl" 
-                          stroke="hsl(var(--primary))"
+                          stroke={currentPnL >= 0 ? 'hsl(var(--primary))' : '#ef4444'}
                           strokeWidth={2}
-                          fill="url(#areaGradient)"
-                          fillOpacity={0.6}
+                          strokeOpacity={0.8}
+                          fill={currentPnL >= 0 ? 'url(#areaGradientPositive)' : 'url(#areaGradientNegative)'}
+                          fillOpacity={1}
                           dot={<CustomDot />}
-                          activeDot={{ r: 6, stroke: 'hsl(var(--primary))', strokeWidth: 2, fill: 'hsl(var(--primary))' }}
+                          activeDot={{ r: 6, stroke: currentPnL >= 0 ? 'hsl(var(--primary))' : '#ef4444', strokeWidth: 2, fill: currentPnL >= 0 ? 'hsl(var(--primary))' : '#ef4444' }}
                         />
                       </AreaChart>
                     )}
@@ -585,46 +742,183 @@ const DashboardAnalytics = () => {
             </Card>
           </div>
 
-          {/* Performance Panel - 2 columns */}
+          {/* Payout Panel - 2 columns */}
           <div className="col-span-7 lg:col-span-2">
             <Card className="border-border/50 bg-card/80 backdrop-blur-sm h-[530px]">
-              <CardContent className="p-4 h-full">
-                <div className="mb-6">
-                  <h3 className="text-lg font-medium text-foreground">Performance</h3>
-                  <Tabs value={performanceTab} onValueChange={setPerformanceTab} className="mt-2">
-                    <TabsList className="bg-muted/50 text-xs rounded-md w-full">
-                      <TabsTrigger value="instrument" className="flex-1 text-xs">By Instrument</TabsTrigger>
-                      <TabsTrigger value="weekday" className="flex-1 text-xs">By Weekday</TabsTrigger>
-                      <TabsTrigger value="average" className="flex-1 text-xs">Avg Win/Loss</TabsTrigger>
-                    </TabsList>
+              <CardContent className="p-4 h-full flex flex-col">
+                <div className="flex items-center justify-between mb-4">
+                  <h3 className="text-lg font-medium text-foreground">Payouts</h3>
+                  {selectedAccount && !isAddingPayout && (
+                    <Button 
+                      size="sm" 
+                      variant="outline" 
+                      onClick={() => setIsAddingPayout(true)}
+                      className="h-8 gap-1"
+                    >
+                      <Plus className="h-3.5 w-3.5" />
+                      Add
+                    </Button>
+                  )}
+                </div>
 
-                    <TabsContent value="instrument" className="mt-4">
-                      <div className="flex items-center justify-center h-60">
-                        <div className="text-center text-muted-foreground">
-                          <p className="text-sm">No instrument data yet</p>
-                          <p className="text-xs mt-1">Add trades to see performance by instrument</p>
+                {/* Add Payout Form */}
+                {isAddingPayout && selectedAccount && (
+                  <div className="mb-4 p-3 rounded-lg bg-muted/30 border border-border/50">
+                    <Label className="text-xs text-muted-foreground">Payout Amount</Label>
+                    <div className="flex items-center gap-2 mt-1">
+                      <div className="relative flex-1">
+                        <DollarSign className="absolute left-2 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                        <Input
+                          type="text"
+                          inputMode="decimal"
+                          placeholder="0.00"
+                          value={newPayoutAmount}
+                          onChange={(e) => {
+                            // Only allow numbers and decimal point
+                            const value = e.target.value.replace(/[^0-9.]/g, '');
+                            setNewPayoutAmount(value);
+                          }}
+                          className="pl-8 h-9"
+                        />
+                      </div>
+                      <Button 
+                        size="sm" 
+                        className="h-9"
+                        onClick={() => {
+                          if (newPayoutAmount && selectedAccount) {
+                            const newPayout: PayoutEntry = {
+                              id: Date.now().toString(),
+                              accountId: selectedAccount.id,
+                              accountName: selectedAccount.account_name,
+                              amount: parseFloat(newPayoutAmount),
+                              date: new Date().toISOString().split('T')[0],
+                              received: false,
+                              denied: false,
+                            };
+                            const updated = [...payouts, newPayout];
+                            setPayouts(updated);
+                            savePayouts(updated);
+                            setNewPayoutAmount('');
+                            setIsAddingPayout(false);
+                          }
+                        }}
+                      >
+                        <Check className="h-4 w-4" />
+                      </Button>
+                      <Button 
+                        size="sm" 
+                        variant="ghost"
+                        className="h-9"
+                        onClick={() => {
+                          setNewPayoutAmount('');
+                          setIsAddingPayout(false);
+                        }}
+                      >
+                        <X className="h-4 w-4" />
+                      </Button>
+                    </div>
+                  </div>
+                )}
+
+                {/* Payout Summary */}
+                <div className="grid grid-cols-2 gap-3 mb-4">
+                  <div className="p-3 rounded-lg bg-muted/30 border border-border/50">
+                    <p className="text-xs text-muted-foreground">Requested Payouts</p>
+                    <p className="text-lg font-semibold text-primary">
+                      {formatCurrency(payouts.filter(p => selectedAccountId === 'all' || p.accountId === selectedAccountId).reduce((sum, p) => sum + p.amount, 0))}
+                    </p>
+                  </div>
+                  <div className="p-3 rounded-lg bg-muted/30 border border-border/50">
+                    <p className="text-xs text-muted-foreground">Received</p>
+                    <p className="text-lg font-semibold text-foreground">
+                      {formatCurrency(payouts.filter(p => p.received && (selectedAccountId === 'all' || p.accountId === selectedAccountId)).reduce((sum, p) => sum + p.amount, 0))}
+                    </p>
+                  </div>
+                </div>
+
+                {/* Payout List */}
+                <div className="flex-1 overflow-y-auto space-y-2">
+                  {payouts
+                    .filter(p => selectedAccountId === 'all' || p.accountId === selectedAccountId)
+                    .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
+                    .map((payout) => (
+                      <div 
+                        key={payout.id} 
+                        className="flex items-center justify-between p-3 rounded-lg bg-muted/20 border border-border/30 hover:border-border/50 transition-colors"
+                      >
+                        <div className="flex-1">
+                          <div className="flex items-center gap-2">
+                            <span className="font-medium text-sm">{formatCurrency(payout.amount)}</span>
+                            <Badge 
+                              variant={payout.received ? 'default' : payout.denied ? 'destructive' : 'secondary'}
+                              className={`text-[10px] ${payout.received ? 'bg-primary/20 text-primary' : payout.denied ? 'bg-destructive/20 text-destructive' : ''}`}
+                            >
+                              {payout.received ? 'Received' : payout.denied ? 'Denied' : 'Pending'}
+                            </Badge>
+                          </div>
+                          <p className="text-xs text-muted-foreground mt-0.5">
+                            {payout.accountName} • {payout.date}
+                          </p>
+                        </div>
+                        <div className="flex items-center gap-1">
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            className="h-7 w-7 p-0"
+                            onClick={() => {
+                              const updated = payouts.map(p => 
+                                p.id === payout.id ? { ...p, received: !p.received, denied: false } : p
+                              );
+                              setPayouts(updated);
+                              savePayouts(updated);
+                            }}
+                          >
+                            <Check className={`h-3.5 w-3.5 ${payout.received ? 'text-primary' : 'text-muted-foreground'}`} />
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            className="h-7 w-7 p-0"
+                            onClick={() => {
+                              const updated = payouts.map(p => 
+                                p.id === payout.id ? { ...p, denied: !p.denied, received: false } : p
+                              );
+                              setPayouts(updated);
+                              savePayouts(updated);
+                            }}
+                          >
+                            <X className={`h-3.5 w-3.5 ${payout.denied ? 'text-destructive' : 'text-muted-foreground'}`} />
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            className="h-7 w-7 p-0 text-muted-foreground hover:text-destructive"
+                            onClick={() => {
+                              const updated = payouts.filter(p => p.id !== payout.id);
+                              setPayouts(updated);
+                              savePayouts(updated);
+                            }}
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </Button>
                         </div>
                       </div>
-                    </TabsContent>
-
-                    <TabsContent value="weekday" className="mt-4">
-                      <div className="flex items-center justify-center h-60">
-                        <div className="text-center text-muted-foreground">
-                          <p className="text-sm">No weekday data yet</p>
-                          <p className="text-xs mt-1">Add trades to see performance by weekday</p>
-                        </div>
+                    ))}
+                  
+                  {payouts.filter(p => selectedAccountId === 'all' || p.accountId === selectedAccountId).length === 0 && (
+                    <div className="flex items-center justify-center h-40">
+                      <div className="text-center text-muted-foreground">
+                        <DollarSign className="h-8 w-8 mx-auto mb-2 opacity-30" />
+                        <p className="text-sm">No payouts yet</p>
+                        <p className="text-xs mt-1">
+                          {selectedAccount 
+                            ? 'Add a payout to track your earnings'
+                            : 'Select an account to add payouts'
+                          }
+                        </p>
                       </div>
-                    </TabsContent>
-
-                    <TabsContent value="average" className="mt-4">
-                      <div className="flex items-center justify-center h-60">
-                        <div className="text-center text-muted-foreground">
-                          <p className="text-sm">No win/loss data yet</p>
-                          <p className="text-xs mt-1">Add trades to see average win/loss</p>
-                        </div>
-                      </div>
-                    </TabsContent>
-                  </Tabs>
+                    </div>
+                  )}
                 </div>
               </CardContent>
             </Card>

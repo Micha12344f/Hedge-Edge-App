@@ -29,35 +29,38 @@ Hedge-Edge-App/
 │   │   └── agent-supervisor.ts    # Agent process management
 │   ├── src/                  # React UI components
 │   │   ├── contexts/LicenseContext.tsx  # License state management
+│   │   ├── components/Counter.tsx       # Animated counter component
 │   │   └── components/license/          # License UI components
+│   ├── testing/              # Front-end test suites
+│   │   └── ui/               # UI automation tests (PyAutoGUI, screenshots)
 │   ├── build/                # App icons and resources
 │   └── package.json
-├── agents/                   # Trading platform agents
-│   ├── mt5/                  # MetaTrader 5 Expert Advisor
-│   │   ├── HedgeEdgeLicense.mq5   # Main EA with ZeroMQ
-│   │   ├── HedgeEdgeLicense.cpp   # License validation DLL (64-bit)
-│   │   ├── Sodium.mqh             # Crypto library bindings
-│   │   └── ZMQ.mqh                # ZeroMQ bindings
-│   ├── mt4/                  # MetaTrader 4 Expert Advisor
-│   │   ├── HedgeEdgeLicense.mq4   # Main EA with File IPC
-│   │   └── HedgeEdgeLicense.dll   # License validation DLL (32-bit)
-│   └── ctrader/              # cTrader cBot
-│       └── HedgeEdgeLicense.cs    # C# cBot with Named Pipes
-├── backend/                  # Python API servers
+├── Hedge-Edge-Back-end/      # Python API servers + Trading agents
 │   ├── license_api_server.py      # Local license API server
 │   ├── license_api_production.py  # Production API (api.hedge-edge.com)
 │   ├── mt5_api_server.py          # Local MT5 API server
-│   ├── mt5_vps_server.py          # VPS deployment version
-│   └── vps-deployment/            # VPS setup scripts
-├── testing/                  # Test suites
+│   ├── agents/               # Trading platform agents
+│   │   ├── mt5/              # MetaTrader 5 Expert Advisor
+│   │   │   ├── HedgeEdgeLicense.mq5   # Main EA with ZeroMQ
+│   │   │   ├── HedgeEdgeLicense.cpp   # License validation DLL (64-bit)
+│   │   │   ├── Sodium.mqh             # Crypto library bindings
+│   │   │   └── ZMQ.mqh                # ZeroMQ bindings
+│   │   ├── mt4/              # MetaTrader 4 Expert Advisor
+│   │   │   └── HedgeEdgeLicense.mq4   # Main EA with File IPC
+│   │   └── ctrader/          # cTrader cBot
+│   │       └── HedgeEdgeLicense.cs    # C# cBot with Named Pipes
+│   ├── testing/              # Back-end test suites
+│   │   └── api/              # API integration tests
+│   ├── scripts/              # Back-end build scripts
+│   │   └── agent_build_helper.py  # MT5/cTrader agent compilation
+│   └── Dockerfile
+├── testing/                  # Cross-cutting test suites
 │   └── integration/
-│       └── qa001_integration_suite.py  # Comprehensive integration tests
+│       └── qa001_integration_suite.py  # End-to-end integration tests
+├── scripts/                  # Cross-project utilities
+│   └── run_all_tests.py      # Master test runner (all suites)
 ├── tasks/                    # Task management (JSON specs)
-│   └── agent-deployment/     # Agent deployment phase tasks
-├── bin/                      # Build scripts and utilities
-│   ├── agent_build_helper.py # MT5 DLL compilation
-│   └── api_test_suite.py     # API testing utilities
-├── session-logs/             # Development session logs
+├── docs/                     # Architecture & session documentation
 └── Hedge-Edge-app.code-workspace
 ```
 
@@ -90,7 +93,7 @@ cp .env.desktop.example .env
 ### 3. Set Up Python Backend
 
 ```bash
-cd backend
+cd Hedge-Edge-Back-end
 python -m venv venv
 venv\Scripts\activate        # Windows
 # source venv/bin/activate   # macOS/Linux
@@ -102,7 +105,7 @@ pip install -r requirements.txt
 
 **Terminal 1 – Start License API Server:**
 ```bash
-cd backend
+cd Hedge-Edge-Back-end
 python license_api_server.py
 ```
 
@@ -187,7 +190,7 @@ Output: `dist/Hedge-Edge-{version}.dmg`
 ### MT5 DLL Compilation
 
 ```bash
-cd agents/mt5
+cd Hedge-Edge-Back-end/agents/mt5
 # Requires Visual Studio Build Tools
 cl /LD /O2 HedgeEdgeLicense.cpp /Fe:HedgeEdgeLicense.dll /link /DEF:HedgeEdgeLicense.def
 ```
@@ -254,11 +257,11 @@ npm run vite:dev          # Start Vite dev server (port 8081)
 npm run electron:dev      # Start Electron in dev mode
 npm run electron:compile  # Compile TypeScript for Electron
 
-# Backend development
+# Backend development (from Hedge-Edge-Back-end/)
 python license_api_server.py     # Start local license API
 python mt5_api_server.py         # Start MT5 agent server
 
-# Testing
+# Testing (from testing/integration/)
 python qa001_integration_suite.py --verbose --mock  # Run integration tests
 
 # Production builds
@@ -273,7 +276,7 @@ npm run electron:build:mac   # Build macOS app
 - License components in `src/components/license/`
 - Trading hooks in `src/hooks/`
 - IPC handlers registered in `electron/preload.ts`
-- Agent code in `agents/{platform}/`
+- Agent code in `Hedge-Edge-Back-end/agents/{platform}/`
 - Task specifications in `tasks/`
 
 ## Testing

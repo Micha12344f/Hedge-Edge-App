@@ -23,12 +23,13 @@ import {
 } from 'lucide-react';
 import { useConnectionsFeed } from '@/hooks/useConnectionsFeed';
 import { useLicenseStatus } from '@/hooks/useLicenseStatus';
+import { GradientText } from '@/components/ui/gradient-text';
 
 const navItems = [
   { icon: LayoutDashboard, label: 'Overview', path: '/app/overview' },
+  { icon: Copy, label: 'Trade Copier', path: '/app/copier' },
   { icon: Wallet, label: 'Hedge Map', path: '/app/accounts' },
   { icon: BarChart3, label: 'Analytics', path: '/app/analytics' },
-  { icon: Copy, label: 'Trade Copier', path: '/app/copier' },
   { icon: Calculator, label: 'Calculator', path: '/app/calculator' },
 ];
 
@@ -72,7 +73,13 @@ export const DashboardSidebar = () => {
         {!collapsed && (
           <div className="flex items-center gap-1 animate-fade-in-up">
             <TrendingUp className="w-6 h-6 text-primary" strokeWidth={3} />
-            <span className="text-lg font-bold text-primary">HedgeEdge</span>
+            <GradientText 
+              colors={['hsl(120, 100%, 54%)', 'hsl(45, 100%, 56%)', 'hsl(120, 100%, 54%)']} 
+              animationSpeed={5}
+              className="text-lg font-bold"
+            >
+              HedgeEdge
+            </GradientText>
           </div>
         )}
         <Button

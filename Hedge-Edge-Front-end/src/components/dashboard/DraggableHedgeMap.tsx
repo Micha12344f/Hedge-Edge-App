@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useCallback } from 'react';
+import { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import { TradingAccount } from '@/hooks/useTradingAccounts';
 import { HedgeNode } from './HedgeNode';
 import { MapNode } from './MapNode';
@@ -181,19 +181,24 @@ export const DraggableHedgeMap = ({
   autoAlignOnMount = true,
 }: DraggableHedgeMapProps) => {
   const containerRef = useRef<HTMLDivElement>(null);
+  const transformRef = useRef<HTMLDivElement>(null);
+  const svgRef = useRef<SVGSVGElement>(null);
   const hasAutoAligned = useRef(false);
   const autoAlignRef = useRef<(() => void) | null>(null);
   const { toast } = useToast();
   const { collapsed, setCollapsed } = useSidebar();
   const [zoom, setZoom] = useState(getStoredZoom);
   const [pan, setPan] = useState(getStoredPan);
+  const panRef = useRef(pan);
+  const zoomRef = useRef(zoom);
+  const panStartRef = useRef({ x: 0, y: 0 });
   const [isPanning, setIsPanning] = useState(false);
-  const [panStart, setPanStart] = useState({ x: 0, y: 0 });
   const [selectedNode, setSelectedNode] = useState<string | null>(null);
   const [selectedLink, setSelectedLink] = useState<string | null>(null);
   const [isLinking, setIsLinking] = useState(false);
   const [linkSource, setLinkSource] = useState<string | null>(null);
   const [nodePositions, setNodePositions] = useState<NodePosition[]>(getStoredPositions);
+  const nodePositionsRef = useRef(nodePositions);
   const [draggingNode, setDraggingNode] = useState<string | null>(null);
   const [dragOffset, setDragOffset] = useState({ x: 0, y: 0 });
   const [containerSize, setContainerSize] = useState({ width: 0, height: 0 });
@@ -203,6 +208,19 @@ export const DraggableHedgeMap = ({
     offsetPercentage: 100,
   });
   const [editingLink, setEditingLink] = useState<HedgeRelationship | null>(null);
+
+  // Keep refs in sync with state
+  useEffect(() => { panRef.current = pan; }, [pan]);
+  useEffect(() => { zoomRef.current = zoom; }, [zoom]);
+  useEffect(() => { nodePositionsRef.current = nodePositions; }, [nodePositions]);
+
+  // Direct DOM update for smooth transforms (bypasses React re-renders)
+  const updateTransform = useCallback(() => {
+    // The element is already positioned at left: containerSize.width/2, top: containerSize.height/2
+    // So we only need to apply the pan offset and scale
+    const transform = `translate(${panRef.current.x}px, ${panRef.current.y}px) scale(${zoomRef.current})`;
+    if (transformRef.current) transformRef.current.style.transform = transform;
+  }, []);
 
   // Track container size
   useEffect(() => {
@@ -448,13 +466,13 @@ export const DraggableHedgeMap = ({
     const paddedWidth = contentWidth + 150;
     const paddedHeight = contentHeight + 150;
     
-    // Calculate zoom to fit, don't exceed 1.0 to avoid overlap
+    // Calculate zoom to fit all nodes in view
     const zoomX = containerSize.width / paddedWidth;
     const zoomY = containerSize.height / paddedHeight;
-    const fitZoom = Math.min(zoomX, zoomY, 0.85);
+    const fitZoom = Math.min(zoomX, zoomY);
     
-    // Clamp zoom - never go above 0.85 to ensure spacing
-    const newZoom = Math.max(0.25, Math.min(fitZoom, 0.85));
+    // Clamp zoom - no minimum, allow zooming out as much as needed to show all nodes
+    const newZoom = Math.min(fitZoom, 1);
     setZoom(newZoom);
     saveZoom(newZoom);
   };
@@ -478,15 +496,15 @@ export const DraggableHedgeMap = ({
     const centerY = (minY + maxY) / 2;
     
     // Add padding
-    const paddedWidth = contentWidth + 80;
-    const paddedHeight = contentHeight + 80;
+    const paddedWidth = contentWidth + 100;
+    const paddedHeight = contentHeight + 100;
     
     const zoomX = containerSize.width / paddedWidth;
     const zoomY = containerSize.height / paddedHeight;
-    const fitZoom = Math.min(zoomX, zoomY, 1.5); // Allow slight zoom in for few nodes
+    const fitZoom = Math.min(zoomX, zoomY);
     
-    // Clamp and apply
-    const finalZoom = Math.max(0.25, Math.min(fitZoom * 0.9, 1.2));
+    // Clamp - no minimum, allow zooming out as needed to show all nodes
+    const finalZoom = Math.min(fitZoom, 1);
     const newPan = { x: -centerX * finalZoom, y: -centerY * finalZoom };
     setZoom(finalZoom);
     setPan(newPan);
@@ -498,7 +516,8 @@ export const DraggableHedgeMap = ({
   const handleCanvasMouseDown = (e: React.MouseEvent) => {
     if (e.target === e.currentTarget || (e.target as HTMLElement).classList.contains('canvas-bg')) {
       setIsPanning(true);
-      setPanStart({ x: e.clientX - pan.x, y: e.clientY - pan.y });
+      // Use panRef.current to ensure we're using the latest pan value
+      panStartRef.current = { x: e.clientX - panRef.current.x, y: e.clientY - panRef.current.y };
       setSelectedNode(null);
       setSelectedLink(null);
       
@@ -516,14 +535,16 @@ export const DraggableHedgeMap = ({
 
   const handleMouseMove = useCallback((e: React.MouseEvent) => {
     if (isPanning) {
-      setPan({ x: e.clientX - panStart.x, y: e.clientY - panStart.y });
+      // Update ref directly for smooth panning (no React re-render)
+      panRef.current = { x: e.clientX - panStartRef.current.x, y: e.clientY - panStartRef.current.y };
+      updateTransform();
     } else if (draggingNode) {
       const rect = containerRef.current?.getBoundingClientRect();
       if (rect) {
         const centerX = containerSize.width / 2;
         const centerY = containerSize.height / 2;
-        let newX = (e.clientX - rect.left - centerX - pan.x) / zoom - dragOffset.x;
-        let newY = (e.clientY - rect.top - centerY - pan.y) / zoom - dragOffset.y;
+        let newX = (e.clientX - rect.left - centerX - panRef.current.x) / zoomRef.current - dragOffset.x;
+        let newY = (e.clientY - rect.top - centerY - panRef.current.y) / zoomRef.current - dragOffset.y;
         
         // Snap to grid
         newX = snapToGrid(newX);
@@ -534,19 +555,30 @@ export const DraggableHedgeMap = ({
         newX = Math.max(-maxBound, Math.min(maxBound, newX));
         newY = Math.max(-maxBound, Math.min(maxBound, newY));
         
-        setNodePositions(prev => 
-          prev.map(p => p.id === draggingNode ? { ...p, x: newX, y: newY } : p)
+        // Update the specific node's position directly in DOM for smoothness
+        const nodeEl = document.querySelector(`[data-node-id="${draggingNode}"]`) as HTMLElement;
+        if (nodeEl) {
+          nodeEl.style.left = `${newX}px`;
+          nodeEl.style.top = `${newY}px`;
+        }
+        // Also update ref for when we sync back to state
+        nodePositionsRef.current = nodePositionsRef.current.map(p => 
+          p.id === draggingNode ? { ...p, x: newX, y: newY } : p
         );
       }
     }
-  }, [isPanning, panStart, draggingNode, dragOffset, zoom, pan, containerSize]);
+  }, [isPanning, draggingNode, dragOffset, containerSize, updateTransform]);
 
   const handleMouseUp = () => {
     if (draggingNode) {
-      savePositions(nodePositions);
+      // Sync ref back to state and save
+      setNodePositions(nodePositionsRef.current);
+      savePositions(nodePositionsRef.current);
     }
     if (isPanning) {
-      savePan(pan);
+      // Sync pan ref back to state
+      setPan(panRef.current);
+      savePan(panRef.current);
     }
     setIsPanning(false);
     setDraggingNode(null);
@@ -694,7 +726,7 @@ export const DraggableHedgeMap = ({
     return newZoom;
   });
   const handleZoomOut = () => setZoom(z => {
-    const newZoom = Math.max(z - 0.05, 0.3);
+    const newZoom = Math.max(z - 0.05, 0);
     saveZoom(newZoom);
     return newZoom;
   });
@@ -713,7 +745,7 @@ export const DraggableHedgeMap = ({
       // Use 5% steps (0.05) regardless of scroll amount
       const step = e.deltaY < 0 ? 0.05 : -0.05;
       setZoom(z => {
-        const newZoom = Math.max(0.3, Math.min(z + step, 2));
+        const newZoom = Math.max(0, Math.min(z + step, 2));
         saveZoom(newZoom);
         return newZoom;
       });
@@ -877,7 +909,7 @@ export const DraggableHedgeMap = ({
               <path d={pathFromRouter} fill="none" stroke={color} strokeWidth={glowWidth} strokeLinecap="round" opacity={isSelected ? 0.3 : 0.1} />
               <path d={pathFromRouter} fill="none" stroke={color} strokeWidth={strokeWidth} strokeLinecap="round" strokeDasharray="6,10" />
               {isSelected && (
-                <circle cx={(router.position.x + linkedEdge.x) / 2} cy={(router.position.y + linkedEdge.y) / 2} r="8" fill={color} className="animate-pulse" />
+                <circle cx={(router.position.x + linkedEdge.x) / 2} cy={(router.position.y + linkedEdge.y) / 2} r="8" fill={color} />
               )}
             </g>
           );
@@ -897,7 +929,7 @@ export const DraggableHedgeMap = ({
               <path d={path} fill="none" stroke={color} strokeWidth={glowWidth} strokeLinecap="round" opacity={isSelected ? 0.3 : 0.1} />
               <path d={path} fill="none" stroke={color} strokeWidth={strokeWidth} strokeLinecap="round" strokeDasharray="6,10" />
               {isSelected && (
-                <circle cx={(sourceEdge.x + targetEdge.x) / 2} cy={(sourceEdge.y + targetEdge.y) / 2} r="8" fill={color} className="animate-pulse" />
+                <circle cx={(sourceEdge.x + targetEdge.x) / 2} cy={(sourceEdge.y + targetEdge.y) / 2} r="8" fill={color} />
               )}
             </g>
           );
@@ -946,7 +978,7 @@ export const DraggableHedgeMap = ({
     <div className="relative h-full w-full overflow-hidden bg-background rounded-xl border border-border/50">
       {/* Controls */}
       <div className="absolute top-4 left-4 z-20 flex items-center gap-2">
-        <div className="flex items-center gap-1 p-1 rounded-lg bg-card/95 backdrop-blur border border-border/50 shadow-sm">
+        <div className="flex items-center gap-1 p-1 rounded-lg bg-card border border-border/50 shadow-sm">
           <Button variant="ghost" size="icon" onClick={handleZoomOut} className="h-8 w-8" title="Zoom out">
             <ZoomOut className="h-4 w-4" />
           </Button>
@@ -967,7 +999,7 @@ export const DraggableHedgeMap = ({
       </div>
 
       {/* Legend */}
-      <div className="absolute bottom-4 left-4 z-20 flex items-center gap-3 px-3 py-1.5 rounded-full bg-card/95 backdrop-blur border border-border/50 text-xs">
+      <div className="absolute bottom-4 left-4 z-20 flex items-center gap-3 px-3 py-1.5 rounded-full bg-card border border-border/50 text-xs">
         <div className="flex items-center gap-1.5">
           <div className="w-2.5 h-2.5 rounded-full bg-yellow-500" />
           <span className="text-muted-foreground">Evaluation</span>
@@ -1078,24 +1110,16 @@ export const DraggableHedgeMap = ({
         onMouseLeave={handleMouseUp}
         onWheel={handleWheel}
       >
-        {/* Subtle grid background */}
-        <svg className="absolute inset-0 w-full h-full pointer-events-none opacity-[0.03]">
-          <defs>
-            <pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse">
-              <path d="M 40 0 L 0 0 0 40" fill="none" stroke="currentColor" strokeWidth="1" />
-            </pattern>
-          </defs>
-          <rect width="100%" height="100%" fill="url(#grid)" />
-        </svg>
-
         {/* Transform container */}
         <div
+          ref={transformRef}
           className="absolute"
           style={{
             left: containerSize.width / 2,
             top: containerSize.height / 2,
             transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})`,
             transformOrigin: '0 0',
+            willChange: 'transform',
           }}
         >
           {/* Connections SVG - transitions sync with node movements */}
@@ -1155,6 +1179,7 @@ export const DraggableHedgeMap = ({
               return (
                 <div
                   key={account.id}
+                  data-node-id={account.id}
                   className="absolute"
                   style={{
                     left: pos.x,
@@ -1162,6 +1187,7 @@ export const DraggableHedgeMap = ({
                     transform: 'translate(-50%, -50%)',
                     zIndex: isDragging ? 1000 : isSelected ? 500 : isLinkSource ? 400 : baseZIndex,
                     transition: isAnyNodeDragging ? 'none' : `left 0.4s cubic-bezier(0.4, 0, 0.2, 1) ${index * 30}ms, top 0.4s cubic-bezier(0.4, 0, 0.2, 1) ${index * 30}ms`,
+                    willChange: isDragging ? 'left, top' : 'auto',
                   }}
                 >
                   {isCircularNode ? (

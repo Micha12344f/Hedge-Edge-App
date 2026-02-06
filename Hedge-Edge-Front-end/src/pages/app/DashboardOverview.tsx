@@ -9,6 +9,10 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
+import { GradientText } from '@/components/ui/gradient-text';
+import { AnimatedCurrency } from '@/components/ui/animated-counter';
+import { ShinyText } from '@/components/ui/shiny-text';
+import { SpotlightCard } from '@/components/ui/spotlight-card';
 import { 
   Plus, 
   TrendingUp, 
@@ -107,8 +111,9 @@ const DashboardOverview = () => {
   const propBalance = propAccounts.reduce((sum, acc) => sum + (Number(acc.current_balance) || Number(acc.account_size) || 0), 0);
   const totalPnL = activeAccounts.reduce((sum, acc) => sum + (Number(acc.pnl) || 0), 0);
   const totalAccountValue = activeAccounts.reduce((sum, acc) => sum + (Number(acc.account_size) || 0), 0);
-  const avgPnLPercent = activeAccounts.length > 0 
-    ? activeAccounts.reduce((sum, acc) => sum + (Number(acc.pnl_percent) || 0), 0) / activeAccounts.length 
+  // Calculate weighted average return based on account sizes (more accurate than simple average)
+  const avgPnLPercent = totalAccountValue > 0 
+    ? (totalPnL / totalAccountValue) * 100 
     : 0;
 
   const evaluationCount = activeAccounts.filter(a => a.phase === 'evaluation').length;
@@ -129,31 +134,39 @@ const DashboardOverview = () => {
     {
       title: 'Prop Balance',
       icon: Wallet,
-      value: formatCurrency(propBalance),
+      value: propBalance,
+      type: 'currency' as const,
       className: 'text-foreground',
       iconClassName: 'text-muted-foreground',
       tooltip: 'Total balance across all prop firm accounts (Evaluation + Funded)',
+      colorByValue: false,
     },
     {
       title: 'Total P&L',
       icon: totalPnL >= 0 ? TrendingUp : TrendingDown,
-      value: formatCurrency(totalPnL),
+      value: totalPnL,
+      type: 'currency' as const,
       className: totalPnL >= 0 ? 'text-primary' : 'text-destructive',
       iconClassName: totalPnL >= 0 ? 'text-primary' : 'text-destructive',
       tooltip: 'Combined profit/loss across all accounts',
+      colorByValue: true,
+      shiny: totalPnL > 0,
     },
     {
       title: 'Avg. Return',
       icon: BarChart3,
-      value: `${avgPnLPercent.toFixed(2)}%`,
+      value: avgPnLPercent,
+      type: 'percent' as const,
       className: avgPnLPercent >= 0 ? 'text-primary' : 'text-destructive',
       iconClassName: 'text-muted-foreground',
       tooltip: 'Average percentage return across all accounts',
+      colorByValue: true,
     },
     {
       title: 'Active Accounts',
       icon: Target,
-      value: accounts.length.toString(),
+      value: accounts.length,
+      type: 'number' as const,
       subtitle: `(${evaluationCount} eval, ${fundedCount} funded, ${hedgeCount} hedge)`,
       className: 'text-foreground',
       iconClassName: 'text-muted-foreground',
@@ -167,7 +180,13 @@ const DashboardOverview = () => {
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 animate-fade-in-up">
         <div>
           <h1 className="text-2xl font-bold text-foreground flex items-center gap-2">
-            Overview
+            <GradientText 
+              colors={['hsl(120, 100%, 54%)', 'hsl(45, 100%, 56%)', 'hsl(120, 100%, 54%)']} 
+              animationSpeed={4}
+              className="text-2xl font-bold"
+            >
+              Overview
+            </GradientText>
             <Sparkles className="w-5 h-5 text-secondary animate-pulse" />
           </h1>
           <p className="text-muted-foreground">Manage all your trading accounts in one place</p>
@@ -197,36 +216,65 @@ const DashboardOverview = () => {
       <TooltipProvider>
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 stagger-children">
           {statsCards.map((stat, index) => (
-            <Card 
+            <SpotlightCard 
               key={stat.title}
-              className="border-border/30 bg-gradient-to-br from-card/80 to-card/40 backdrop-blur-sm hover:border-primary/30 group cursor-default"
+              className="rounded-xl"
+              spotlightColor="hsl(var(--primary) / 0.1)"
             >
-              <CardHeader className="flex flex-row items-center justify-between pb-2">
-                <CardTitle className="text-sm font-medium text-muted-foreground">{stat.title}</CardTitle>
-                <Tooltip>
-                  <TooltipTrigger>
-                    <stat.icon className={`h-4 w-4 transition-all duration-300 group-hover:scale-110 ${stat.iconClassName}`} />
-                  </TooltipTrigger>
-                  <TooltipContent>
-                    <p>{stat.tooltip}</p>
-                  </TooltipContent>
-                </Tooltip>
-              </CardHeader>
-              <CardContent>
-                {loading ? (
-                  <Skeleton className="h-8 w-24 animate-shimmer" />
-                ) : (
-                  <div className="flex items-baseline gap-2">
-                    <p className={`text-2xl font-bold transition-colors ${stat.className}`}>{stat.value}</p>
-                    {stat.subtitle && (
-                      <p className="text-sm text-muted-foreground">
-                        {stat.subtitle}
-                      </p>
-                    )}
-                  </div>
-                )}
-              </CardContent>
-            </Card>
+              <Card 
+                className="border-border/30 bg-gradient-to-br from-card/80 to-card/40 backdrop-blur-sm hover:border-primary/30 group cursor-default"
+              >
+                <CardHeader className="flex flex-row items-center justify-between pb-2">
+                  <CardTitle className="text-sm font-medium text-muted-foreground">{stat.title}</CardTitle>
+                  <Tooltip>
+                    <TooltipTrigger>
+                      <stat.icon className={`h-4 w-4 transition-all duration-300 group-hover:scale-110 ${stat.iconClassName}`} />
+                    </TooltipTrigger>
+                    <TooltipContent>
+                      <p>{stat.tooltip}</p>
+                    </TooltipContent>
+                  </Tooltip>
+                </CardHeader>
+                <CardContent>
+                  {loading ? (
+                    <Skeleton className="h-8 w-24 animate-shimmer" />
+                  ) : (
+                    <div className="flex items-baseline gap-2">
+                      {stat.type === 'currency' ? (
+                        stat.shiny && stat.value > 0 ? (
+                          <ShinyText 
+                            text={formatCurrency(stat.value)}
+                            className={`text-2xl font-bold ${stat.className}`}
+                            color="hsl(var(--primary))"
+                            shineColor="hsl(var(--secondary))"
+                            speed={3}
+                          />
+                        ) : (
+                          <AnimatedCurrency 
+                            value={stat.value} 
+                            fontSize={24}
+                            colorByValue={stat.colorByValue}
+                          />
+                        )
+                      ) : stat.type === 'percent' ? (
+                        <span className={`text-2xl font-bold transition-colors ${stat.className}`}>
+                          {stat.value >= 0 ? '+' : ''}{stat.value.toFixed(2)}%
+                        </span>
+                      ) : (
+                        <span className={`text-2xl font-bold transition-colors ${stat.className}`}>
+                          {stat.value}
+                        </span>
+                      )}
+                      {stat.subtitle && (
+                        <p className="text-sm text-muted-foreground">
+                          {stat.subtitle}
+                        </p>
+                      )}
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+            </SpotlightCard>
           ))}
         </div>
       </TooltipProvider>
@@ -366,10 +414,11 @@ const DashboardOverview = () => {
               ) : (
                 <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
                   {filteredAccounts.map((account, index) => (
-                    <div
+                    <SpotlightCard
                       key={account.id}
-                      className="animate-fade-in-up"
+                      className="animate-fade-in-up rounded-xl"
                       style={{ animationDelay: `${index * 75}ms` }}
+                      spotlightColor={account.phase === 'funded' ? 'hsl(var(--primary) / 0.12)' : account.phase === 'evaluation' ? 'hsl(var(--secondary) / 0.12)' : 'hsl(210, 100%, 50% / 0.12)'}
                     >
                       <AccountCard
                         account={account}
@@ -379,7 +428,7 @@ const DashboardOverview = () => {
                         onClick={handleAccountClick}
                         connectionSnapshot={getAccountSnapshot(account)}
                       />
-                    </div>
+                    </SpotlightCard>
                   ))}
                 </div>
               )}

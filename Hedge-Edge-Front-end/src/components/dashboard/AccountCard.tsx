@@ -15,6 +15,7 @@ import { cn } from '@/lib/utils';
 import type { ConnectionSnapshot, ConnectionStatus, LicenseStatus } from '@/types/connections';
 import { getStatusBadgeClass, formatConnectionStatus } from '@/lib/desktop';
 import { Archive, ArchiveRestore } from 'lucide-react';
+import { PROP_FIRMS, PLATFORMS } from './AddAccountModal';
 
 interface AccountCardProps {
   account: TradingAccount;
@@ -133,6 +134,12 @@ export const AccountCard = ({
         <CardHeader className="flex flex-row items-start justify-between pb-2">
           <div className="space-y-1">
             <div className="flex items-center gap-2">
+              {(() => {
+                const firm = PROP_FIRMS.find(f => f.name === account.prop_firm);
+                return firm ? (
+                  <img src={firm.logo} alt="" className="w-4 h-4 rounded-sm opacity-60" />
+                ) : null;
+              })()}
               <h3 className="font-medium text-muted-foreground">{account.account_name}</h3>
               <Badge variant="outline" className="text-xs bg-muted/30 text-muted-foreground border-muted-foreground/20">
                 Archived
@@ -190,6 +197,20 @@ export const AccountCard = ({
       <CardHeader className="flex flex-row items-start justify-between pb-2">
         <div className="space-y-1">
           <div className="flex items-center gap-2">
+            {(() => {
+              // For hedge accounts, show platform logo; for prop accounts, show prop firm logo
+              if (isHedgeAccount) {
+                const platform = PLATFORMS.find(p => p.id === account.platform);
+                return platform ? (
+                  <img src={platform.logo} alt="" className="w-4 h-4 rounded-sm" />
+                ) : null;
+              } else {
+                const firm = PROP_FIRMS.find(f => f.name === account.prop_firm);
+                return firm ? (
+                  <img src={firm.logo} alt="" className="w-4 h-4 rounded-sm" />
+                ) : null;
+              }
+            })()}
             <h3 className="font-semibold text-foreground group-hover:text-primary transition-colors">{account.account_name}</h3>
             <Badge variant="outline" className={cn('text-xs transition-all group-hover:scale-105', config.badge)}>
               {config.label}
@@ -424,38 +445,6 @@ export const AccountCard = ({
                 </div>
               </div>
             </div>
-
-            {/* Progress bars */}
-            {(profitTarget > 0 || maxLoss > 0) && (
-              <div className="space-y-3">
-                {profitTarget > 0 && (
-                  <div className="space-y-1">
-                    <div className="flex justify-between text-xs">
-                      <span className="text-muted-foreground">Profit Target</span>
-                      <span className="text-foreground font-medium">{pnlPercent.toFixed(1)}% / {profitTarget}%</span>
-                    </div>
-                    <div className="relative">
-                      <Progress value={progressPercent} className="h-2 bg-muted/50" />
-                      {progressPercent >= 100 && (
-                        <div className="absolute inset-0 bg-primary/20 rounded-full animate-pulse" />
-                      )}
-                    </div>
-                  </div>
-                )}
-                {maxLoss > 0 && (
-                  <div className="space-y-1">
-                    <div className="flex justify-between text-xs">
-                      <span className="text-muted-foreground">Drawdown Remaining</span>
-                      <span className="text-foreground font-medium">{drawdownRemaining.toFixed(1)}%</span>
-                    </div>
-                    <Progress 
-                      value={(drawdownRemaining / maxLoss) * 100} 
-                      className="h-2 bg-muted/50 [&>div]:bg-gradient-to-r [&>div]:from-destructive [&>div]:to-destructive/70" 
-                    />
-                  </div>
-                )}
-              </div>
-            )}
 
             {/* Trading Days */}
             {account.min_trading_days && account.min_trading_days > 0 && (

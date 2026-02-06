@@ -14,7 +14,7 @@
 		},
 		{
 			"name": "    🧪 UI Testing",
-			"path": "testing/ui"
+			"path": "Hedge-Edge-Front-end/testing/ui"
 		},
 		{
 			"name": "━━━━━━━━━━ ⚙️ BACK-END ━━━━━━━━━━",
@@ -22,15 +22,19 @@
 		},
 		{
 			"name": "    🔌 API Server (Python/FastAPI)",
-			"path": "backend"
+			"path": "Hedge-Edge-Back-end"
 		},
 		{
 			"name": "    🤖 Trading Agents (MT4/MT5/cTrader)",
-			"path": "agents"
+			"path": "Hedge-Edge-Back-end/agents"
 		},
 		{
 			"name": "    🧪 API Testing",
-			"path": "testing/api"
+			"path": "Hedge-Edge-Back-end/testing/api"
+		},
+		{
+			"name": "    🔧 Agent Build Scripts",
+			"path": "Hedge-Edge-Back-end/scripts"
 		},
 		{
 			"name": "    🔗 Integration Testing",
@@ -45,8 +49,8 @@
 			"path": "tasks"
 		},
 		{
-			"name": "    🔧 Build Scripts",
-			"path": "bin"
+			"name": "    🔧 Cross-Project Scripts",
+			"path": "scripts"
 		}
 	],
 	"settings": {
@@ -92,8 +96,8 @@
 				"name": "⚙️ BE: License API Server",
 				"type": "python",
 				"request": "launch",
-				"program": "${workspaceFolder}/backend/license_api_server.py",
-				"cwd": "${workspaceFolder}/backend",
+				"program": "${workspaceFolder}/Hedge-Edge-Back-end/license_api_server.py",
+				"cwd": "${workspaceFolder}/Hedge-Edge-Back-end",
 				"console": "integratedTerminal"
 			},
 			{
@@ -150,7 +154,7 @@
 				"type": "shell",
 				"command": "python license_api_server.py",
 				"options": {
-					"cwd": "${workspaceFolder}/backend"
+					"cwd": "${workspaceFolder}/Hedge-Edge-Back-end"
 				},
 				"group": "build",
 				"isBackground": true

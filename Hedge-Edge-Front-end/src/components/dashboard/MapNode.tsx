@@ -1,6 +1,6 @@
 import { TradingAccount } from '@/hooks/useTradingAccounts';
 import { cn } from '@/lib/utils';
-import { PROP_FIRMS } from './AddAccountModal';
+import { PROP_FIRMS, PLATFORMS } from './AddAccountModal';
 import { 
   Zap, 
   Target,
@@ -66,9 +66,14 @@ export const MapNode = ({ account, isSelected, isDragging, isLinkSource, onMouse
   const config = typeConfig[account.phase];
   const Icon = config.icon;
 
-  // Get prop firm logo from PROP_FIRMS array
-  const getPropFirmLogo = () => {
-    if (account.prop_firm) {
+  // Get logo - platform logo for hedge accounts, prop firm logo for others
+  const getLogo = () => {
+    if (account.phase === 'live') {
+      // Hedge account - use platform logo
+      const platform = PLATFORMS.find(p => p.id === account.platform);
+      return platform?.logo || null;
+    } else if (account.prop_firm) {
+      // Prop account - use prop firm logo
       const firm = PROP_FIRMS.find(f => f.name === account.prop_firm);
       return firm?.logo || null;
     }
@@ -81,7 +86,7 @@ export const MapNode = ({ account, isSelected, isDragging, isLinkSource, onMouse
     return name?.substring(0, 2).toUpperCase() || 'AC';
   };
 
-  const propFirmLogo = getPropFirmLogo();
+  const logo = getLogo();
 
   const formatCurrency = (value: number) => {
     if (Math.abs(value) >= 1000) {
@@ -95,19 +100,19 @@ export const MapNode = ({ account, isSelected, isDragging, isLinkSource, onMouse
       onMouseDown={onMouseDown}
       onClick={onClick}
       className={cn(
-        'relative cursor-grab active:cursor-grabbing transition-all duration-200 group',
+        'relative cursor-grab active:cursor-grabbing group',
         isDragging && 'scale-110 z-50',
         isSelected && 'z-40',
         isLinkSource && 'z-45'
       )}
       style={{
-        filter: isDragging ? 'drop-shadow(0 25px 40px rgba(0,0,0,0.4))' : undefined,
+        willChange: isDragging ? 'transform' : 'auto',
       }}
     >
       {/* Outer glow ring for selected/link source state */}
       <div
         className={cn(
-          'absolute inset-0 rounded-full transition-all duration-300 -z-10',
+          'absolute inset-0 rounded-full -z-10',
           (isSelected || isLinkSource) && 'scale-125 opacity-100',
           !isSelected && !isLinkSource && 'scale-100 opacity-0'
         )}
@@ -125,23 +130,22 @@ export const MapNode = ({ account, isSelected, isDragging, isLinkSource, onMouse
       {/* Main circular node */}
       <div
         className={cn(
-          'w-24 h-24 rounded-full relative transition-all duration-300 border-2',
+          'w-24 h-24 rounded-full relative border-2',
           config.border,
           isSelected && `ring-4 ${config.ringColor} ring-offset-2 ring-offset-background`,
-          isLinkSource && 'ring-4 ring-purple-500/60 ring-offset-2 ring-offset-background animate-pulse',
-          'group-hover:scale-105'
+          isLinkSource && 'ring-4 ring-purple-500/60 ring-offset-2 ring-offset-background'
         )}
         style={{
           boxShadow: isSelected || isLinkSource ? config.glowSelected : config.glow,
           background: `linear-gradient(135deg, ${account.phase === 'evaluation' ? 'rgba(234, 179, 8, 0.15)' : account.phase === 'funded' ? 'rgba(16, 185, 129, 0.15)' : 'rgba(59, 130, 246, 0.15)'} 0%, rgba(0,0,0,0.4) 100%)`,
         }}
       >
-        {/* Prop firm logo or initials */}
-        <div className="absolute inset-1.5 rounded-full bg-background/80 backdrop-blur-sm flex items-center justify-center overflow-hidden">
-          {propFirmLogo ? (
+        {/* Platform/Prop firm logo or initials */}
+        <div className="absolute inset-1.5 rounded-full bg-background/90 flex items-center justify-center overflow-hidden">
+          {logo ? (
             <img
-              src={propFirmLogo}
-              alt={account.prop_firm || ''}
+              src={logo}
+              alt={account.prop_firm || account.platform || ''}
               className="w-12 h-12 object-contain rounded-full"
               referrerPolicy="no-referrer"
               onError={(e) => {
@@ -153,7 +157,7 @@ export const MapNode = ({ account, isSelected, isDragging, isLinkSource, onMouse
           <span className={cn(
             'text-lg font-bold',
             account.phase === 'evaluation' ? 'text-yellow-500' : account.phase === 'funded' ? 'text-emerald-500' : 'text-blue-500',
-            propFirmLogo && 'hidden'
+            logo && 'hidden'
           )}>
             {getInitials()}
           </span>
@@ -176,22 +180,19 @@ export const MapNode = ({ account, isSelected, isDragging, isLinkSource, onMouse
         {/* Connection indicator - shows active state */}
         <div className={cn(
           'absolute -top-1 -right-1 w-4 h-4 rounded-full border-2 border-background',
-          'bg-emerald-400 animate-pulse'
+          'bg-emerald-400'
         )} />
       </div>
 
       {/* Info card below node */}
       <div 
         className={cn(
-          'absolute top-full left-1/2 -translate-x-1/2 mt-3 text-center transition-all duration-200',
-          'px-3 py-2 rounded-lg backdrop-blur-md border',
+          'absolute top-full left-1/2 -translate-x-1/2 mt-3 text-center',
+          'px-3 py-2 rounded-lg border',
           config.bgColor,
           config.border,
           'min-w-[140px] max-w-[160px]'
         )}
-        style={{
-          boxShadow: '0 4px 20px rgba(0,0,0,0.2)',
-        }}
       >
         <p className="text-xs font-semibold text-foreground truncate">
           {account.account_name}
