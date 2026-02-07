@@ -287,6 +287,21 @@ void OnTradeTransaction(const MqlTradeTransaction& trans,
 //+------------------------------------------------------------------+
 bool InitializeDLL()
 {
+   //--- First check if the DLL file actually exists to avoid runtime crash
+   string dllPath = TerminalInfoString(TERMINAL_DATA_PATH) + "\\MQL5\\Libraries\\HedgeEdgeLicense.dll";
+   if(!FileIsExist("..\\Libraries\\HedgeEdgeLicense.dll"))
+   {
+      long handle = FileOpen("..\\Libraries\\HedgeEdgeLicense.dll", FILE_READ|FILE_BIN);
+      if(handle == INVALID_HANDLE)
+      {
+         Print("HedgeEdgeLicense.dll not found in MQL5/Libraries/ - skipping DLL init");
+         Print("  Expected path: ", dllPath);
+         g_lastError = "HedgeEdgeLicense.dll not found";
+         return false;
+      }
+      FileClose(handle);
+   }
+   
    int result = InitializeLibrary();
    
    if(result == 0)

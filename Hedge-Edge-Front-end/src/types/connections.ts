@@ -283,6 +283,9 @@ export interface UseConnectionsFeedReturn {
   /** Refresh all connected accounts */
   refreshAll: () => Promise<void>;
   
+  /** Manual refresh all from ZMQ cache (no network calls) - for Refresh button */
+  manualRefreshAll: () => Promise<{ success: boolean; error?: string }>;
+  
   /** Check if an account is connected */
   isConnected: (accountId: string) => boolean;
   

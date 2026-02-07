@@ -12,6 +12,11 @@
 //--- Include ZMQ wrapper (uses MQL5/Include/ standard path)
 #include <ZMQ.mqh>
 
+//--- Windows API for DLL load detection
+#import "kernel32.dll"
+   int GetModuleHandleW(string lpModuleName);
+#import
+
 //--- DLL imports for license validation
 #import "HedgeEdgeLicense.dll"
    int  ValidateLicense(string key, string account, string broker, string deviceId, 
@@ -310,6 +315,15 @@ bool InitializeZMQ()
    Print("Initializing ZeroMQ...");
    Print("  ZMQ Version: ", ZmqVersion());
    
+   //--- If a previous EA instance crashed, its ZMQ sockets may still be alive
+   //--- in the MT5 process. Force cleanup of any existing context first.
+   if(g_zmqInitialized)
+   {
+      Print("  Cleaning up previous ZMQ session...");
+      ShutdownZMQ();
+      Sleep(500); // Give OS time to release ports
+   }
+   
    //--- Create context
    if(!g_zmqContext.Initialize())
    {
@@ -321,6 +335,7 @@ bool InitializeZMQ()
    if(!g_publisher.Initialize(g_zmqContext, InpZmqDataEndpoint))
    {
       Print("ERROR: Failed to create PUB socket on ", InpZmqDataEndpoint);
+      Print("  HINT: If port is stuck from a crashed EA, restart the MT5 terminal");
       g_zmqContext.Shutdown();
       return false;
    }
@@ -614,6 +629,20 @@ string BuildSnapshotJson(string messageType)
 //+------------------------------------------------------------------+
 bool InitializeDLL()
 {
+   //--- Use kernel32 GetModuleHandleW to reliably detect if MT5 loaded the DLL
+   //--- FileIsExist/FileOpen don't work with ..\Libraries\ due to MQL5 sandbox
+   int moduleHandle = GetModuleHandleW("HedgeEdgeLicense");
+   if(moduleHandle == 0)
+   {
+      string dllPath = TerminalInfoString(TERMINAL_DATA_PATH) + "\\MQL5\\Libraries\\HedgeEdgeLicense.dll";
+      Print("HedgeEdgeLicense.dll not loaded by MT5 - skipping DLL init");
+      Print("  Expected path: ", dllPath);
+      Print("  Ensure the DLL is placed in the MQL5/Libraries/ folder");
+      g_lastError = "HedgeEdgeLicense.dll not loaded";
+      return false;
+   }
+   
+   Print("HedgeEdgeLicense.dll detected (module handle: ", moduleHandle, ")");
    int result = InitializeLibrary();
    
    if(result == 0)

@@ -163,10 +163,18 @@ export function useConnectionsFeed(options?: UseConnectionsFeedOptions): UseConn
   }, [apiAvailable, config.autoStart, config.pollingInterval, log]);
 
   /**
-   * Get snapshot for a specific account
+   * Get snapshot for a specific account.
+   * Looks up by exact key first, then falls back to matching by mt5Login
+   * (connection keys are "mt5-<login>" but callers may pass raw login).
    */
   const getSnapshot = useCallback((accountId: string): ConnectionSnapshot | null => {
-    return snapshots[accountId] || null;
+    // Direct key match (e.g., "mt5-11789976")
+    if (snapshots[accountId]) return snapshots[accountId];
+    // Fallback: search by mt5Login field (e.g., caller passes "11789976")
+    for (const snap of Object.values(snapshots)) {
+      if ((snap.session as any)?.mt5Login === accountId) return snap;
+    }
+    return null;
   }, [snapshots]);
 
   /**
@@ -250,20 +258,37 @@ export function useConnectionsFeed(options?: UseConnectionsFeedOptions): UseConn
   }, [apiAvailable, log]);
 
   /**
+   * Manual refresh all accounts from ZMQ cache (no network calls)
+   * Used by Refresh button - reads cached data from main process
+   */
+  const manualRefreshAll = useCallback(async (): Promise<{ success: boolean; error?: string }> => {
+    if (!apiAvailable) return { success: false, error: 'API not available' };
+
+    log('Manual refresh all from ZMQ cache');
+    
+    try {
+      return await connectionSupervisor.manualRefreshAll();
+    } catch (err) {
+      console.error('[useConnectionsFeed] Manual refresh all failed:', err);
+      return { success: false, error: err instanceof Error ? err.message : 'Refresh failed' };
+    }
+  }, [apiAvailable, log]);
+
+  /**
    * Check if an account is connected
    */
   const isConnected = useCallback((accountId: string): boolean => {
-    const snapshot = snapshots[accountId];
+    const snapshot = getSnapshot(accountId);
     return snapshot?.session.status === 'connected';
-  }, [snapshots]);
+  }, [getSnapshot]);
 
   /**
    * Get connection status for an account
    */
   const getStatus = useCallback((accountId: string): ConnectionStatus => {
-    const snapshot = snapshots[accountId];
+    const snapshot = getSnapshot(accountId);
     return snapshot?.session.status || 'disconnected';
-  }, [snapshots]);
+  }, [getSnapshot]);
 
   return {
     snapshots,
@@ -274,6 +299,7 @@ export function useConnectionsFeed(options?: UseConnectionsFeedOptions): UseConn
     disconnect,
     refresh,
     refreshAll,
+    manualRefreshAll,
     isConnected,
     getStatus,
   };

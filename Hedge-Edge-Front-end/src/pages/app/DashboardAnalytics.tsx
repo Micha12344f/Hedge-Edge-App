@@ -1,5 +1,6 @@
 ﻿import { useState, useMemo } from 'react';
 import { useTradingAccounts } from '@/hooks/useTradingAccounts';
+import { useTradeHistory, buildChartData } from '@/hooks/useTradeHistory';
 import { PROP_FIRMS } from '@/components/dashboard/AddAccountModal';
 import { Card, CardContent } from '@/components/ui/card';
 import { PageBackground } from '@/components/ui/page-background';
@@ -9,7 +10,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
-import { Plus, DollarSign, Check, X, Trash2 } from 'lucide-react';
+import { Plus, DollarSign, Check, X, Trash2, Lock, RefreshCw } from 'lucide-react';
 import {
   Select,
   SelectContent,
@@ -63,11 +64,24 @@ const savePayouts = (payouts: PayoutEntry[]) => {
 };
 
 const DashboardAnalytics = () => {
-  const { accounts, loading } = useTradingAccounts();
+  const { accounts, loading, fetchAccounts } = useTradingAccounts();
   const [selectedAccountId, setSelectedAccountId] = useState<string>('all');
   const [payouts, setPayouts] = useState<PayoutEntry[]>(getStoredPayouts);
   const [isAddingPayout, setIsAddingPayout] = useState(false);
   const [newPayoutAmount, setNewPayoutAmount] = useState('');
+  const [isRefreshingChart, setIsRefreshingChart] = useState(false);
+
+  // Build login → account id map for trade event routing
+  const loginToAccountId = useMemo(() => {
+    const map: Record<string, string> = {};
+    for (const a of accounts) {
+      if (a.login) map[a.login] = a.id;
+    }
+    return map;
+  }, [accounts]);
+
+  // Track closed trades in real-time via IPC events
+  const { getTradesForAccount } = useTradeHistory({ loginToAccountId });
 
   // Separate active and archived accounts - archived accounts don't need live data
   const activeAccounts = accounts.filter(a => !a.is_archived);
@@ -210,58 +224,15 @@ const DashboardAnalytics = () => {
     ? (Number(selectedAccount.current_balance) || Number(selectedAccount.account_size) || 0) - startingBalance
     : 0;
   
-  // Generate mock trade history that leads to current P&L
-  const generateMockTradeHistory = (finalPnL: number, accountName: string) => {
-    if (finalPnL === 0) {
-      return [{ trades: 0, pnl: 0, name: accountName }];
-    }
-    
-    // Generate between 8-15 trades to show progression
-    const numTrades = Math.floor(Math.random() * 8) + 8;
-    const trades: { trades: number; pnl: number; name: string }[] = [
-      { trades: 0, pnl: 0, name: accountName } // Start at 0
-    ];
-    
-    // Create a somewhat realistic progression to final P&L with some volatility
-    let runningPnL = 0;
-    const avgMovePerTrade = finalPnL / numTrades;
-    const volatility = Math.abs(finalPnL) * 0.3; // 30% volatility
-    
-    for (let i = 1; i <= numTrades; i++) {
-      // Add some randomness but trend towards final value
-      const remainingTrades = numTrades - i;
-      const neededMove = (finalPnL - runningPnL) / (remainingTrades + 1);
-      
-      // Add volatility for earlier trades, less for later ones
-      const volatilityFactor = (remainingTrades / numTrades) * volatility;
-      const randomVariation = (Math.random() - 0.5) * 2 * volatilityFactor;
-      
-      runningPnL += neededMove + randomVariation;
-      
-      // Ensure final trade lands exactly on target
-      if (i === numTrades) {
-        runningPnL = finalPnL;
-      }
-      
-      trades.push({
-        trades: i,
-        pnl: Math.round(runningPnL),
-        name: accountName
-      });
-    }
-    
-    return trades;
-  };
-  
-  // Generate chart data for selected account (single account view) - using P&L with trade history
-  // Memoize to prevent regeneration on every render
+  // Build chart data from real tracked trade history
+  // Falls back to a minimal 2-point chart (0 → current P&L) when no history exists
   const areaChartData = useMemo(() => {
     if (!selectedAccount) {
       return [{ trades: 0, pnl: 0, name: 'Sample' }];
     }
-    return generateMockTradeHistory(currentPnL, selectedAccount.account_name);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedAccount?.id, currentPnL]);
+    const trades = getTradesForAccount(selectedAccount.id);
+    return buildChartData(trades, currentPnL, selectedAccount.account_name);
+  }, [selectedAccount?.id, currentPnL, getTradesForAccount]);
 
   // Calculate max trades for X-axis domain
   const maxTrades = Math.max(...areaChartData.map(d => d.trades), 0);
@@ -539,6 +510,7 @@ const DashboardAnalytics = () => {
                   </div>
                   
                   {/* Account Selector Dropdown */}
+                  <div className="flex items-center gap-2">
                   <Select value={selectedAccountId} onValueChange={setSelectedAccountId}>
                     <SelectTrigger className="w-[200px] bg-card border-border/50">
                       <SelectValue placeholder="Select account" />
@@ -586,6 +558,24 @@ const DashboardAnalytics = () => {
                       )}
                     </SelectContent>
                   </Select>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-8 w-8 text-muted-foreground hover:text-foreground"
+                    disabled={isRefreshingChart}
+                    onClick={async () => {
+                      setIsRefreshingChart(true);
+                      try {
+                        await fetchAccounts();
+                      } finally {
+                        setTimeout(() => setIsRefreshingChart(false), 600);
+                      }
+                    }}
+                    title="Refresh chart data"
+                  >
+                    <RefreshCw className={`h-3.5 w-3.5 ${isRefreshingChart ? 'animate-spin' : ''}`} />
+                  </Button>
+                  </div>
                 </div>
 
                 {/* Archived account notice */}
@@ -874,10 +864,18 @@ const DashboardAnalytics = () => {
               selectedAccount?.phase === 'evaluation' ? 'border-yellow-500/50 shadow-[0_0_15px_rgba(234,179,8,0.15)]' :
               'border-border/50'
             }`}>
-              <CardContent className="p-4 h-full flex flex-col">
-                <div className="flex items-center justify-between mb-4">
+              <CardContent className="p-4 h-full flex flex-col relative">
+                {/* Evaluation account overlay */}
+                {selectedAccount?.phase === 'evaluation' && (
+                  <div className="absolute inset-0 z-10 flex flex-col items-center justify-center rounded-lg bg-card/80 backdrop-blur-[2px]">
+                    <Lock className="h-10 w-10 text-yellow-500/60 mb-3" />
+                    <p className="text-sm font-medium text-yellow-500/80">Coming soon hedger ;)</p>
+                    <p className="text-xs text-muted-foreground mt-1">Evaluation accounts can't receive payouts</p>
+                  </div>
+                )}
+                <div className={`flex items-center justify-between mb-4 ${selectedAccount?.phase === 'evaluation' ? 'opacity-20' : ''}`}>
                   <h3 className="text-lg font-medium text-foreground">Payouts</h3>
-                  {selectedAccount && !isAddingPayout && (
+                  {selectedAccount && selectedAccount.phase !== 'evaluation' && !isAddingPayout && (
                     <Button 
                       size="sm" 
                       variant="outline" 
@@ -950,7 +948,7 @@ const DashboardAnalytics = () => {
                 )}
 
                 {/* Payout Summary */}
-                <div className="grid grid-cols-2 gap-3 mb-4">
+                <div className={`grid grid-cols-2 gap-3 mb-4 ${selectedAccount?.phase === 'evaluation' ? 'opacity-20' : ''}`}>
                   <div className="p-3 rounded-lg bg-muted/30 border border-border/50">
                     <p className="text-xs text-muted-foreground">Requested Payouts</p>
                     <p className="text-lg font-semibold text-primary">
@@ -966,7 +964,7 @@ const DashboardAnalytics = () => {
                 </div>
 
                 {/* Payout List */}
-                <div className="flex-1 overflow-y-auto space-y-2">
+                <div className={`flex-1 overflow-y-auto space-y-2 ${selectedAccount?.phase === 'evaluation' ? 'opacity-20' : ''}`}>
                   {payouts
                     .filter(p => selectedAccountId === 'all' || p.accountId === selectedAccountId)
                     .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())

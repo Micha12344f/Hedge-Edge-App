@@ -35,7 +35,7 @@ import {
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import type { TradingAccount } from '@/hooks/useTradingAccounts';
 import type { CopierGroup, VolumeSizingMode, AccountProtectionMode } from '@/types/copier';
-import { createCopierGroup, createDefaultFollower } from '@/mocks/copier-groups';
+import { createCopierGroup, createDefaultFollower } from '@/lib/copier-groups';
 
 // ─── Phase badge config ─────────────────────────────────────────────────────
 

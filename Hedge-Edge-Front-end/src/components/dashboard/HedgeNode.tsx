@@ -25,13 +25,14 @@ interface HedgeNodeProps {
   copierStatus?: CopierConnectionStatus;
   onClick?: () => void;
   onDetailsClick?: () => void;
+  onDoubleClick?: () => void;
   onMouseDown?: (e: React.MouseEvent) => void;
   position?: { x: number; y: number };
 }
 
 type ConnectionStatus = 'connected' | 'lagging' | 'risk';
 
-export const HedgeNode = ({ account, isSelected, isDragging, isLinkSource, copierStatus = 'none', onClick, onDetailsClick, onMouseDown, position }: HedgeNodeProps) => {
+export const HedgeNode = ({ account, isSelected, isDragging, isLinkSource, copierStatus = 'none', onClick, onDetailsClick, onDoubleClick, onMouseDown, position }: HedgeNodeProps) => {
   const profitTarget = Number(account.profit_target) || 0;
   const maxLoss = Number(account.max_loss) || 0;
   const maxDailyLoss = Number(account.max_daily_loss) || 0;
@@ -244,6 +245,10 @@ export const HedgeNode = ({ account, isSelected, isDragging, isLinkSource, copie
     <div
       onClick={onClick}
       onMouseDown={onMouseDown}
+      onDoubleClick={(e) => {
+        e.stopPropagation();
+        onDoubleClick?.();
+      }}
       style={position ? { 
         position: 'absolute', 
         left: position.x, 

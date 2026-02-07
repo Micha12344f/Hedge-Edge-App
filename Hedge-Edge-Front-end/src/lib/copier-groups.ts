@@ -1,6 +1,6 @@
 /**
- * Mock data for Trade Copier Groups
- * Provides realistic demo data for the copier UI
+ * Copier Group Utilities
+ * Real production helpers for creating, storing, and computing copier groups.
  */
 
 import type {
@@ -8,7 +8,6 @@ import type {
   FollowerConfig,
   FollowerStats,
   GroupStats,
-  CopierGroupStatus,
 } from '@/types/copier';
 import type { TradingAccount } from '@/hooks/useTradingAccounts';
 
@@ -118,68 +117,6 @@ export const createCopierGroup = (
     updatedAt: now,
     stats: computeGroupStats(followers),
   };
-};
-
-// ─── Populate Mock Stats for Demo ───────────────────────────────────────────
-
-export const populateMockGroupStats = (groups: CopierGroup[]): CopierGroup[] => {
-  return groups.map(group => ({
-    ...group,
-    followers: group.followers.map(f => ({
-      ...f,
-      stats:
-        f.stats.tradesTotal > 0
-          ? f.stats
-          : {
-              tradesToday: Math.floor(Math.random() * 12) + 1,
-              tradesTotal: Math.floor(Math.random() * 400) + 30,
-              totalProfit: Math.round((Math.random() * 1500 - 300) * 100) / 100,
-              avgLatency: Math.floor(Math.random() * 25) + 12,
-              successRate: Math.round((96 + Math.random() * 4) * 10) / 10,
-              failedCopies: Math.floor(Math.random() * 4),
-              lastCopyTime: new Date(Date.now() - Math.floor(Math.random() * 3600000)).toISOString(),
-            },
-    })),
-    stats: undefined as unknown as GroupStats, // will be recomputed
-  })).map(g => ({ ...g, stats: computeGroupStats(g.followers) }));
-};
-
-// ─── Seed Demo Groups from Existing Accounts ───────────────────────────────
-
-export const seedDemoGroups = (accounts: TradingAccount[]): CopierGroup[] => {
-  const propAccounts = accounts.filter(
-    a => (a.phase === 'evaluation' || a.phase === 'funded') && !a.is_archived,
-  );
-  const hedgeAccounts = accounts.filter(a => a.phase === 'live' && !a.is_archived);
-
-  if (propAccounts.length === 0 || hedgeAccounts.length === 0) return [];
-
-  const groups: CopierGroup[] = [];
-
-  // Create one group per prop account, each copying to first available hedge
-  propAccounts.forEach((prop, idx) => {
-    const hedge = hedgeAccounts[idx % hedgeAccounts.length];
-    const follower = createDefaultFollower(hedge);
-    follower.reverseMode = true; // hedging
-
-    const group: CopierGroup = {
-      id: `group-demo-${idx}`,
-      name: `${prop.account_name} → ${hedge.account_name}`,
-      status: (idx === 0 ? 'active' : idx === 1 ? 'active' : 'paused') as CopierGroupStatus,
-      leaderAccountId: prop.id,
-      leaderAccountName: prop.account_name,
-      leaderPlatform: prop.platform || 'MT5',
-      leaderPhase: prop.phase,
-      leaderSymbolSuffixRemove: '',
-      followers: [follower],
-      createdAt: new Date(Date.now() - 86400000 * (propAccounts.length - idx)).toISOString(),
-      updatedAt: new Date().toISOString(),
-      stats: computeGroupStats([follower]),
-    };
-    groups.push(group);
-  });
-
-  return populateMockGroupStats(groups);
 };
 
 // ─── Summary Across All Groups ──────────────────────────────────────────────

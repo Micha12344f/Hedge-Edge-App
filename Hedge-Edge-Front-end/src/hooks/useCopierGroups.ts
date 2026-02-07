@@ -9,13 +9,11 @@ import type { TradingAccount } from '@/hooks/useTradingAccounts';
 import {
   getStoredCopierGroups,
   saveCopierGroups,
-  seedDemoGroups,
-  populateMockGroupStats,
   getGroupsSummary,
   computeGroupStats,
   createCopierGroup,
   createDefaultFollower,
-} from '@/mocks/copier-groups';
+} from '@/lib/copier-groups';
 
 // ─── localStorage keys for hedge map relationships ──────────────────────────
 
@@ -67,13 +65,7 @@ export function useCopierGroups(accounts: TradingAccount[], loading: boolean) {
     if (loading) return;
     const stored = getStoredCopierGroups();
     if (stored.length > 0) {
-      setGroups(populateMockGroupStats(stored));
-    } else if (accounts.length >= 2) {
-      const demo = seedDemoGroups(accounts);
-      if (demo.length > 0) {
-        saveCopierGroups(demo);
-        setGroups(demo);
-      }
+      setGroups(stored);
     }
     setInitialized(true);
   }, [accounts, loading]);
@@ -104,7 +96,7 @@ export function useCopierGroups(accounts: TradingAccount[], loading: boolean) {
             const newStatuses = stored.map(g => `${g.id}:${g.status}`).sort().join(',');
             if (prevStatuses === newStatuses) return prev;
           }
-          return populateMockGroupStats(stored);
+          return stored;
         });
       }
     };
@@ -120,7 +112,7 @@ export function useCopierGroups(accounts: TradingAccount[], loading: boolean) {
       if (e.key === 'hedge_edge_copier_groups' && e.newValue) {
         try {
           const stored = JSON.parse(e.newValue) as CopierGroup[];
-          setGroups(populateMockGroupStats(stored));
+          setGroups(stored);
         } catch { /* ignore parse errors */ }
       }
     };
@@ -132,7 +124,7 @@ export function useCopierGroups(accounts: TradingAccount[], loading: boolean) {
 
   const reload = useCallback(() => {
     const stored = getStoredCopierGroups();
-    setGroups(stored.length > 0 ? populateMockGroupStats(stored) : []);
+    setGroups(stored.length > 0 ? stored : []);
   }, []);
 
   // ── Summary ────────────────────────────────────────────────────
@@ -142,8 +134,7 @@ export function useCopierGroups(accounts: TradingAccount[], loading: boolean) {
   // ── CRUD Handlers ──────────────────────────────────────────────
 
   const addGroup = useCallback((group: CopierGroup) => {
-    const populated = populateMockGroupStats([group])[0];
-    setGroups(prev => [...prev, populated]);
+    setGroups(prev => [...prev, group]);
   }, []);
 
   const updateGroup = useCallback((updated: CopierGroup) => {

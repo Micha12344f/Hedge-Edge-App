@@ -619,6 +619,20 @@ const connectionsAPI = {
   },
 
   /**
+   * Manual refresh all accounts from cached ZMQ data
+   * Reads from the local ZMQ cache (no network calls) and pushes fresh snapshots to renderer
+   * Use this for the "Refresh" button in the dashboard
+   */
+  manualRefreshAll: async (): Promise<{ success: boolean; error?: string }> => {
+    try {
+      return await ipcRenderer.invoke('connections:manualRefreshAll');
+    } catch (err) {
+      console.error('[Preload] connections:manualRefreshAll error:', err);
+      return { success: false, error: err instanceof Error ? err.message : String(err) };
+    }
+  },
+
+  /**
    * Refresh connection data for an account by re-reading EA file
    * More thorough than refresh() - re-scans terminal files
    */

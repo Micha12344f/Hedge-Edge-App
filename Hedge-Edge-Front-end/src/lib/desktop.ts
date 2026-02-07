@@ -230,10 +230,15 @@ class ConnectionSupervisor {
   }
 
   /**
-   * Get snapshot for a specific account
+   * Get snapshot for a specific account.
+   * Looks up by key first, then falls back to matching by mt5Login.
    */
   getSnapshot(accountId: string): ConnectionSnapshot | null {
-    return this.state.snapshots[accountId] || null;
+    if (this.state.snapshots[accountId]) return this.state.snapshots[accountId];
+    for (const snap of Object.values(this.state.snapshots)) {
+      if ((snap.session as any)?.mt5Login === accountId) return snap;
+    }
+    return null;
   }
 
   /**
@@ -318,6 +323,27 @@ class ConnectionSupervisor {
   }
 
   /**
+   * Manual refresh all accounts from ZMQ cache (no network calls)
+   * Used by the dashboard Refresh button - reads cached data and pushes to renderer
+   */
+  async manualRefreshAll(): Promise<{ success: boolean; error?: string }> {
+    if (!isConnectionsApiAvailable()) {
+      return { success: false, error: 'Connections API not available' };
+    }
+
+    try {
+      const result = await window.electronAPI!.connections.manualRefreshAll();
+      // The IPC handler already pushes updates to renderer via connections:update
+      // So listeners will be notified automatically
+      this.state.lastUpdate = new Date();
+      return result;
+    } catch (err) {
+      console.error('[ConnectionSupervisor] Manual refresh all failed:', err);
+      return { success: false, error: err instanceof Error ? err.message : 'Refresh failed' };
+    }
+  }
+
+  /**
    * Reconnect all persisted accounts (called on app startup)
    */
   async reconnect(): Promise<{ reconnected: number; failed: number }> {
@@ -360,7 +386,7 @@ class ConnectionSupervisor {
    * Check if an account is connected
    */
   isConnected(accountId: string): boolean {
-    const snapshot = this.state.snapshots[accountId];
+    const snapshot = this.getSnapshot(accountId);
     return snapshot?.session.status === 'connected';
   }
 
@@ -368,7 +394,7 @@ class ConnectionSupervisor {
    * Get connection status for an account
    */
   getStatus(accountId: string): ConnectionStatus {
-    const snapshot = this.state.snapshots[accountId];
+    const snapshot = this.getSnapshot(accountId);
     return snapshot?.session.status || 'disconnected';
   }
 }

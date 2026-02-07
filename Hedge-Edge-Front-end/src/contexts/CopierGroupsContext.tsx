@@ -20,13 +20,11 @@ import { useTradingAccounts, type TradingAccount } from '@/hooks/useTradingAccou
 import {
   getStoredCopierGroups,
   saveCopierGroups,
-  seedDemoGroups,
-  populateMockGroupStats,
   getGroupsSummary,
   computeGroupStats,
   createCopierGroup,
   createDefaultFollower,
-} from '@/mocks/copier-groups';
+} from '@/lib/copier-groups';
 
 // ─── Relationship helpers (same localStorage key used by Accounts page) ─────
 
@@ -117,13 +115,7 @@ export function CopierGroupsProvider({ children }: { children: ReactNode }) {
     if (loading) return;
     const stored = getStoredCopierGroups();
     if (stored.length > 0) {
-      setGroups(populateMockGroupStats(stored));
-    } else if (accounts.length >= 2) {
-      const demo = seedDemoGroups(accounts);
-      if (demo.length > 0) {
-        saveCopierGroups(demo);
-        setGroups(demo);
-      }
+      setGroups(stored);
     }
     setInitialized(true);
   }, [accounts, loading]);
@@ -142,7 +134,7 @@ export function CopierGroupsProvider({ children }: { children: ReactNode }) {
       if (e.key === 'hedge_edge_copier_groups' && e.newValue) {
         try {
           const stored = JSON.parse(e.newValue) as CopierGroup[];
-          setGroups(populateMockGroupStats(stored));
+          setGroups(stored);
         } catch {
           /* ignore */
         }
@@ -156,7 +148,7 @@ export function CopierGroupsProvider({ children }: { children: ReactNode }) {
 
   const reload = useCallback(() => {
     const stored = getStoredCopierGroups();
-    setGroups(stored.length > 0 ? populateMockGroupStats(stored) : []);
+    setGroups(stored.length > 0 ? stored : []);
   }, []);
 
   // ── Summary ──
@@ -166,8 +158,7 @@ export function CopierGroupsProvider({ children }: { children: ReactNode }) {
   // ── CRUD handlers ──
 
   const addGroup = useCallback((group: CopierGroup) => {
-    const populated = populateMockGroupStats([group])[0];
-    setGroups(prev => [...prev, populated]);
+    setGroups(prev => [...prev, group]);
   }, []);
 
   const updateGroup = useCallback((updated: CopierGroup) => {

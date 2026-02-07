@@ -1294,6 +1294,11 @@ export const DraggableHedgeMap = ({
                       isLinkSource={isLinkSource}
                       copierStatus={getRelConnectionStatus(account.id)}
                       onMouseDown={(e) => handleNodeMouseDown(account.id, e)}
+                      onDoubleClick={() => {
+                        if (onAccountClick) {
+                          onAccountClick(account);
+                        }
+                      }}
                       onDetailsClick={() => {
                         if (onAccountClick) {
                           onAccountClick(account);
@@ -1308,6 +1313,11 @@ export const DraggableHedgeMap = ({
                       isLinkSource={isLinkSource}
                       copierStatus={getRelConnectionStatus(account.id)}
                       onMouseDown={(e) => handleNodeMouseDown(account.id, e)}
+                      onDoubleClick={() => {
+                        if (onAccountClick) {
+                          onAccountClick(account);
+                        }
+                      }}
                       onDetailsClick={() => {
                         if (onAccountClick) {
                           onAccountClick(account);

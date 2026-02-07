@@ -41,8 +41,9 @@ input int    InpPollIntervalSeconds = 600;          // License Check Interval (s
 input bool   InpDevMode = false;                    // DEV MODE (skip license key requirement, DLL still enforced)
 
 input group "=== ZeroMQ Settings ==="
-input string InpZmqDataEndpoint = "tcp://*:51810";  // ZMQ Data Endpoint (PUB socket)
-input string InpZmqCommandEndpoint = "tcp://*:51811"; // ZMQ Command Endpoint (REP socket)
+input string InpZmqDataEndpoint = "tcp://*:51810";  // ZMQ Data Endpoint (PUB socket) - ignored if AutoPort=true
+input string InpZmqCommandEndpoint = "tcp://*:51811"; // ZMQ Command Endpoint (REP socket) - ignored if AutoPort=true
+input bool   InpAutoPort = true;                     // Auto-assign port (tries 51810,51820,...,51890)
 input int    InpPublishIntervalMs = 100;            // Publish Interval (milliseconds)
 input bool   InpEnableCommands = true;              // Enable Remote Commands
 
@@ -72,6 +73,13 @@ ulong g_publishCount = 0;
 CZmqContext g_zmqContext;
 CZmqPublisher g_publisher;
 CZmqReplier g_replier;
+
+// Auto-port: resolved endpoints and port numbers
+string g_resolvedDataEndpoint = "";
+string g_resolvedCommandEndpoint = "";
+int    g_resolvedDataPort = 0;
+int    g_resolvedCommandPort = 0;
+string g_registrationFilePath = "";  // Common\Files\HedgeEdge\{login}.json
 
 // Position tracking
 struct PositionInfo
@@ -201,14 +209,18 @@ int OnInit()
    
    UpdateComment();
    
+   //--- Write registration file for app auto-discovery
+   WriteRegistrationFile();
+   
    //--- Publish initial snapshot
    PublishSnapshot();
    
    UpdateComment();
    
    Print("Hedge Edge ZMQ EA initialized successfully");
-   Print("  Data endpoint: ", InpZmqDataEndpoint);
-   Print("  Command endpoint: ", InpZmqCommandEndpoint);
+   Print("  Data endpoint: ", g_resolvedDataEndpoint);
+   Print("  Command endpoint: ", g_resolvedCommandEndpoint);
+   Print("  Auto-port: ", InpAutoPort ? "ON" : "OFF");
    Print("═══════════════════════════════════════════════════════════");
    return INIT_SUCCEEDED;
 }
@@ -221,6 +233,9 @@ void OnDeinit(const int reason)
    Print("═══════════════════════════════════════════════════════════");
    Print("  Hedge Edge ZMQ EA - Shutting down...");
    Print("═══════════════════════════════════════════════════════════");
+   
+   //--- Remove registration file so app stops looking for this EA
+   DeleteRegistrationFile();
    
    //--- Publish GOODBYE message
    if(g_zmqInitialized)
@@ -331,27 +346,101 @@ bool InitializeZMQ()
       return false;
    }
    
-   //--- Create PUB socket for data streaming
-   if(!g_publisher.Initialize(g_zmqContext, InpZmqDataEndpoint))
+   //--- Resolve endpoints (auto-port or manual)
+   if(InpAutoPort)
    {
-      Print("ERROR: Failed to create PUB socket on ", InpZmqDataEndpoint);
-      Print("  HINT: If port is stuck from a crashed EA, restart the MT5 terminal");
-      g_zmqContext.Shutdown();
-      return false;
-   }
-   Print("  PUB socket bound to ", InpZmqDataEndpoint);
-   
-   //--- Create REP socket for commands
-   if(InpEnableCommands)
-   {
-      if(!g_replier.Initialize(g_zmqContext, InpZmqCommandEndpoint))
+      //--- Auto-port: try ports 51810, 51820, ..., 51890 until one binds
+      bool bound = false;
+      for(int port = 51810; port <= 51890; port += 10)
       {
-         Print("ERROR: Failed to create REP socket on ", InpZmqCommandEndpoint);
-         g_publisher.Shutdown();
+         string dataEp = "tcp://*:" + IntegerToString(port);
+         string cmdEp  = "tcp://*:" + IntegerToString(port + 1);
+         
+         Print("  Auto-port: trying data=", dataEp, " cmd=", cmdEp);
+         
+         if(g_publisher.Initialize(g_zmqContext, dataEp))
+         {
+            //--- PUB bound, now try REP
+            if(InpEnableCommands)
+            {
+               if(g_replier.Initialize(g_zmqContext, cmdEp))
+               {
+                  g_resolvedDataEndpoint = dataEp;
+                  g_resolvedCommandEndpoint = cmdEp;
+                  g_resolvedDataPort = port;
+                  g_resolvedCommandPort = port + 1;
+                  bound = true;
+                  break;
+               }
+               else
+               {
+                  //--- REP failed, unbind PUB and try next
+                  g_publisher.Shutdown();
+                  Print("  Port ", port + 1, " in use, trying next range...");
+               }
+            }
+            else
+            {
+               g_resolvedDataEndpoint = dataEp;
+               g_resolvedCommandEndpoint = "";
+               g_resolvedDataPort = port;
+               g_resolvedCommandPort = 0;
+               bound = true;
+               break;
+            }
+         }
+         else
+         {
+            Print("  Port ", port, " in use, trying next range...");
+         }
+      }
+      
+      if(!bound)
+      {
+         Print("ERROR: Auto-port failed - all ports 51810-51890 are in use");
+         Print("  HINT: Close other EAs or set InpAutoPort=false with a custom port");
          g_zmqContext.Shutdown();
          return false;
       }
-      Print("  REP socket bound to ", InpZmqCommandEndpoint);
+      
+      Print("  ✅ Auto-port assigned: PUB=", g_resolvedDataEndpoint, " REP=", g_resolvedCommandEndpoint);
+   }
+   else
+   {
+      //--- Manual port mode (original behavior)
+      g_resolvedDataEndpoint = InpZmqDataEndpoint;
+      g_resolvedCommandEndpoint = InpZmqCommandEndpoint;
+      
+      //--- Extract port number from endpoint string
+      int colonPos = StringFind(InpZmqDataEndpoint, ":", StringLen("tcp://*"));
+      if(colonPos >= 0)
+         g_resolvedDataPort = (int)StringToInteger(StringSubstr(InpZmqDataEndpoint, colonPos + 1));
+      colonPos = StringFind(InpZmqCommandEndpoint, ":", StringLen("tcp://*"));
+      if(colonPos >= 0)
+         g_resolvedCommandPort = (int)StringToInteger(StringSubstr(InpZmqCommandEndpoint, colonPos + 1));
+      
+      //--- Create PUB socket for data streaming
+      if(!g_publisher.Initialize(g_zmqContext, InpZmqDataEndpoint))
+      {
+         Print("ERROR: Failed to create PUB socket on ", InpZmqDataEndpoint);
+         Print("  HINT: If port is stuck from a crashed EA, restart the MT5 terminal");
+         g_zmqContext.Shutdown();
+         return false;
+      }
+      Print("  PUB socket bound to ", InpZmqDataEndpoint);
+      
+      //--- Create REP socket for commands
+      if(InpEnableCommands)
+      {
+         if(!g_replier.Initialize(g_zmqContext, InpZmqCommandEndpoint))
+         {
+            Print("ERROR: Failed to create REP socket on ", InpZmqCommandEndpoint);
+            g_publisher.Shutdown();
+            g_zmqContext.Shutdown();
+            return false;
+         }
+         Print("  REP socket bound to ", InpZmqCommandEndpoint);
+      }
    }
    
    //--- Set up timer as backup (in case no ticks)
@@ -359,6 +448,7 @@ bool InitializeZMQ()
    
    g_zmqInitialized = true;
    Print("ZeroMQ initialized successfully");
+   Print("  Data port: ", g_resolvedDataPort, "  Command port: ", g_resolvedCommandPort);
    return true;
 }
 
@@ -490,9 +580,12 @@ void ProcessCommands()
    else if(action == "CONFIG")
    {
       response = StringFormat(
-         "{\"success\":true,\"action\":\"CONFIG\",\"config\":{\"zmqEnabled\":true,\"dataPort\":51810,\"commandPort\":51811,\"publishIntervalMs\":%d,\"licenseCheckIntervalSec\":%d},\"timestamp\":\"%s\"}",
+         "{\"success\":true,\"action\":\"CONFIG\",\"config\":{\"zmqEnabled\":true,\"dataPort\":%d,\"commandPort\":%d,\"publishIntervalMs\":%d,\"licenseCheckIntervalSec\":%d,\"autoPort\":%s},\"timestamp\":\"%s\"}",
+         g_resolvedDataPort,
+         g_resolvedCommandPort,
          InpPublishIntervalMs,
          InpPollIntervalSeconds,
+         (InpAutoPort ? "true" : "false"),
          TimeToString(TimeCurrent(), TIME_DATE|TIME_SECONDS)
       );
    }
@@ -546,6 +639,67 @@ void GatherPositions()
 }
 
 //+------------------------------------------------------------------+
+//| Write registration file for app auto-discovery                     |
+//| File is written to Common\Files\HedgeEdge\ so all terminals       |
+//| and the desktop app can find it.                                   |
+//+------------------------------------------------------------------+
+void WriteRegistrationFile()
+{
+   string login = IntegerToString(AccountInfoInteger(ACCOUNT_LOGIN));
+   string fileName = "HedgeEdge\\" + login + ".json";
+   
+   //--- Create directory (MQL5 creates parent dirs automatically with FILE_COMMON)
+   int handle = FileOpen(fileName, FILE_WRITE | FILE_TXT | FILE_COMMON);
+   if(handle == INVALID_HANDLE)
+   {
+      Print("WARNING: Could not write registration file: ", fileName, " Error: ", GetLastError());
+      return;
+   }
+   
+   //--- Build registration JSON
+   string json = "{";
+   json += "\"login\":\"" + login + "\",";
+   json += "\"broker\":\"" + EscapeJson(AccountInfoString(ACCOUNT_COMPANY)) + "\",";
+   json += "\"server\":\"" + EscapeJson(AccountInfoString(ACCOUNT_SERVER)) + "\",";
+   json += "\"dataPort\":" + IntegerToString(g_resolvedDataPort) + ",";
+   json += "\"commandPort\":" + IntegerToString(g_resolvedCommandPort) + ",";
+   json += "\"platform\":\"MT5\",";
+   json += "\"autoPort\":" + (InpAutoPort ? "true" : "false") + ",";
+   json += "\"startTime\":\"" + TimeToString(TimeCurrent(), TIME_DATE|TIME_SECONDS) + "\",";
+   json += "\"terminalPath\":\"" + EscapeJson(TerminalInfoString(TERMINAL_DATA_PATH)) + "\",";
+   json += "\"eaVersion\":\"2.1\"";
+   json += "}";
+   
+   FileWriteString(handle, json);
+   FileClose(handle);
+   
+   g_registrationFilePath = fileName;
+   Print("Registration file written: ", fileName);
+   Print("  Common files path: ", TerminalInfoString(TERMINAL_COMMONDATA_PATH) + "\\Files\\" + fileName);
+}
+
+//+------------------------------------------------------------------+
+//| Delete registration file on EA shutdown                            |
+//+------------------------------------------------------------------+
+void DeleteRegistrationFile()
+{
+   if(StringLen(g_registrationFilePath) == 0)
+   {
+      //--- Try to reconstruct the path
+      string login = IntegerToString(AccountInfoInteger(ACCOUNT_LOGIN));
+      g_registrationFilePath = "HedgeEdge\\" + login + ".json";
+   }
+   
+   if(FileIsExist(g_registrationFilePath, FILE_COMMON))
+   {
+      if(FileDelete(g_registrationFilePath, FILE_COMMON))
+         Print("Registration file deleted: ", g_registrationFilePath);
+      else
+         Print("WARNING: Could not delete registration file: ", g_registrationFilePath);
+   }
+}
+
+//+------------------------------------------------------------------+
 //| Build snapshot JSON                                                |
 //+------------------------------------------------------------------+
 string BuildSnapshotJson(string messageType)
@@ -591,6 +745,8 @@ string BuildSnapshotJson(string messageType)
    
    //--- ZMQ-specific fields
    json += "\"zmqMode\":true,";
+   json += "\"dataPort\":" + IntegerToString(g_resolvedDataPort) + ",";
+   json += "\"commandPort\":" + IntegerToString(g_resolvedCommandPort) + ",";
    json += "\"snapshotIndex\":" + IntegerToString(g_snapshotIndex) + ",";
    json += "\"avgLatencyUs\":" + DoubleToString(avgLatencyUs, 2) + ",";
    

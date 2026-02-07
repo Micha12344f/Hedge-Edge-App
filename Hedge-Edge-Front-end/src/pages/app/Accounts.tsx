@@ -6,6 +6,7 @@ import { AccountDetailsModal } from '@/components/dashboard/AccountDetailsModal'
 import { ConfigureCopierGroupModal } from '@/components/dashboard/ConfigureCopierGroupModal';
 import { useCopierGroupsContext } from '@/contexts/CopierGroupsContext';
 import type { CopierGroup } from '@/types/copier';
+import { useConnectionsFeed } from '@/hooks/useConnectionsFeed';
 import { useToast } from '@/hooks/use-toast';
 import {
   Dialog,
@@ -59,6 +60,7 @@ const Accounts = () => {
   const [detailsModalOpen, setDetailsModalOpen] = useState(false);
   const [hedgeMapAccountIds, setHedgeMapAccountIds] = useState<string[]>(getStoredHedgeMapAccounts);
   const { toast } = useToast();
+  const { getSnapshot } = useConnectionsFeed({ autoStart: true });
 
   // Copier groups integration for sync + status colors + ConfigureCopierGroupModal
   const {
@@ -382,6 +384,24 @@ const Accounts = () => {
         open={detailsModalOpen}
         onOpenChange={setDetailsModalOpen}
         onSyncAccount={syncAccountFromMT5}
+        connectedAccount={(() => {
+          if (!selectedAccount) return null;
+          const rel = relationships.find(
+            r => r.sourceId === selectedAccount.id || r.targetId === selectedAccount.id
+          );
+          if (!rel) return null;
+          const connectedId = rel.sourceId === selectedAccount.id ? rel.targetId : rel.sourceId;
+          return accounts.find(a => a.id === connectedId) || null;
+        })()}
+        connectedAccountSnapshot={(() => {
+          if (!selectedAccount) return null;
+          const rel = relationships.find(
+            r => r.sourceId === selectedAccount.id || r.targetId === selectedAccount.id
+          );
+          if (!rel) return null;
+          const connectedId = rel.sourceId === selectedAccount.id ? rel.targetId : rel.sourceId;
+          return getSnapshot(connectedId) || null;
+        })()}
       />
 
       {/* Configure Copier Group Modal - opens after linking accounts on hedge map */}

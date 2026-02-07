@@ -39,6 +39,8 @@ import {
   Power,
   PowerOff,
   Archive,
+  Scale,
+  Percent,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -77,6 +79,10 @@ interface AccountDetailsModalProps {
   onConnect?: (account: TradingAccount, password: string) => Promise<{ success: boolean; error?: string }>;
   /** Callback to disconnect the account */
   onDisconnect?: (account: TradingAccount) => Promise<{ success: boolean; error?: string }>;
+  /** The connected hedge account (if this is a prop account) or connected prop account (if this is a hedge account) */
+  connectedAccount?: TradingAccount | null;
+  /** Connection snapshot for the connected account */
+  connectedAccountSnapshot?: ConnectionSnapshot | null;
 }
 
 export function AccountDetailsModal({
@@ -87,6 +93,8 @@ export function AccountDetailsModal({
   connectionSnapshot,
   onConnect,
   onDisconnect,
+  connectedAccount,
+  connectedAccountSnapshot,
 }: AccountDetailsModalProps) {
   // Password state for accounts without cached password
   const [password, setPassword] = useState("");
@@ -540,7 +548,112 @@ export function AccountDetailsModal({
               </>
             )}
 
-            {/* Connection Unavailable */}
+            {/* Hedge Analytics Section — shows Prop P&L, Hedge P&L, Discrepancy */}
+            {connectedAccount && account && (() => {
+              const isPropAccount = account.phase === 'evaluation' || account.phase === 'funded';
+              const propAccount = isPropAccount ? account : connectedAccount;
+              const hedgeAccount = isPropAccount ? connectedAccount : account;
+
+              // Prop P&L
+              const propSize = Number(propAccount.account_size) || 0;
+              const propBalance = Number(propAccount.current_balance) || propSize;
+              const propPnL = propBalance - propSize;
+              const propPnLPercent = propSize > 0 ? (propPnL / propSize) * 100 : 0;
+
+              // Hedge P&L — the P&L on the hedge account from copied trades
+              const hedgeSize = Number(hedgeAccount.account_size) || 0;
+              const hedgeBalance = Number(hedgeAccount.current_balance) || hedgeSize;
+              // Use live snapshot if available
+              const hedgeLiveBalance = isPropAccount
+                ? (connectedAccountSnapshot?.metrics?.balance ?? hedgeBalance)
+                : (connectionSnapshot?.metrics?.balance ?? hedgeBalance);
+              const hedgePnL = hedgeLiveBalance - hedgeSize;
+              const hedgePnLPercent = hedgeSize > 0 ? (hedgePnL / hedgeSize) * 100 : 0;
+
+              // Challenge / Evaluation fee
+              const challengeFee = Number(propAccount.evaluation_fee) || 0;
+
+              // Hedge Discrepancy = Prop P&L + Hedge P&L - Challenge Fee
+              // Positive = net profit, Negative = net cost
+              const hedgeDiscrepancy = propPnL + hedgePnL - challengeFee;
+              const isDiscrepancyPositive = hedgeDiscrepancy >= 0;
+
+              return (
+                <Card className="border-border/50">
+                  <CardHeader className="pb-2">
+                    <CardTitle className="text-sm flex items-center gap-2">
+                      <Scale className="h-4 w-4 text-muted-foreground" />
+                      Hedge Analytics
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent className="space-y-3">
+                    {/* Prop P&L */}
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <div className={`w-2 h-2 rounded-full ${propPnL >= 0 ? 'bg-primary' : 'bg-red-500'}`} />
+                        <span className="text-sm text-muted-foreground">Prop P&L</span>
+                        <span className="text-xs text-muted-foreground/60">({propAccount.account_name})</span>
+                      </div>
+                      <div className="text-right">
+                        <span className={`text-sm font-semibold ${propPnL >= 0 ? 'text-primary' : 'text-red-500'}`}>
+                          {propPnL >= 0 ? '+' : ''}{formatCurrency(propPnL)}
+                        </span>
+                        <span className={`text-xs ml-1 ${propPnL >= 0 ? 'text-primary/70' : 'text-red-500/70'}`}>
+                          ({propPnLPercent >= 0 ? '+' : ''}{propPnLPercent.toFixed(2)}%)
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* Hedge P&L */}
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <div className={`w-2 h-2 rounded-full ${hedgePnL >= 0 ? 'bg-blue-400' : 'bg-red-500'}`} />
+                        <span className="text-sm text-muted-foreground">Hedge P&L</span>
+                        <span className="text-xs text-muted-foreground/60">({hedgeAccount.account_name})</span>
+                      </div>
+                      <div className="text-right">
+                        <span className={`text-sm font-semibold ${hedgePnL >= 0 ? 'text-blue-400' : 'text-red-500'}`}>
+                          {hedgePnL >= 0 ? '+' : ''}{formatCurrency(hedgePnL)}
+                        </span>
+                        <span className={`text-xs ml-1 ${hedgePnL >= 0 ? 'text-blue-400/70' : 'text-red-500/70'}`}>
+                          ({hedgePnLPercent >= 0 ? '+' : ''}{hedgePnLPercent.toFixed(2)}%)
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* Challenge Fee (if applicable) */}
+                    {challengeFee > 0 && (
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <div className="w-2 h-2 rounded-full bg-yellow-500" />
+                          <span className="text-sm text-muted-foreground">Challenge Fee</span>
+                        </div>
+                        <span className="text-sm font-semibold text-yellow-500">
+                          -{formatCurrency(challengeFee)}
+                        </span>
+                      </div>
+                    )}
+
+                    <Separator />
+
+                    {/* Hedge Discrepancy */}
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <Percent className="h-3.5 w-3.5 text-muted-foreground" />
+                        <span className="text-sm font-medium">Hedge Discrepancy</span>
+                      </div>
+                      <span className={`text-lg font-bold ${isDiscrepancyPositive ? 'text-primary' : 'text-red-500'}`}>
+                        {isDiscrepancyPositive ? '+' : ''}{formatCurrency(hedgeDiscrepancy)}
+                      </span>
+                    </div>
+                    <p className="text-xs text-muted-foreground">
+                      Net result: Prop P&L + Hedge P&L{challengeFee > 0 ? ' − Challenge Fee' : ''}
+                    </p>
+                  </CardContent>
+                </Card>
+              );
+            })()}
+
             {terminalStatus === 'not-running' && (
               <Card className="border-orange-500/50">
                 <CardHeader>

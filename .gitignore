@@ -39,3 +39,13 @@ Thumbs.db
 
 # Electron
 out/
+
+# Build (front-end)
+build/
+
+# Test scripts
+zmq_listener_test.mjs
+zmq_test2.mjs
+
+# Lock files (use package-lock.json instead)
+bun.lockb

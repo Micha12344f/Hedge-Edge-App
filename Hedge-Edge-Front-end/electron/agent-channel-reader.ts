@@ -6,7 +6,8 @@
  * MT5: ZeroMQ (sub-millisecond latency)
  * - SUB socket subscribes to EA's PUB socket for real-time snapshots
  * - REQ socket sends commands to EA's REP socket
- * - Default ports: 51810 (data), 51811 (commands)
+ * - Auto-discovery: reads EA registration files from Common\Files\HedgeEdge\*.json
+ * - Fallback: scans port ranges 51810-51890 (step 10) for legacy EAs
  * 
  * cTrader: Windows Named Pipes
  * - Data pipe receives account snapshots from cBot
@@ -459,6 +460,24 @@ export async function sendCTraderCommand(
 export type ChannelMode = 'zmq' | 'file' | 'pipe' | 'auto';
 export type Platform = 'MT5' | 'cTrader';
 
+/**
+ * EA Registration File structure
+ * Written by HedgeEdgeZMQ EA v2.1+ to Common\Files\HedgeEdge\{login}.json
+ * Enables auto-discovery of running EAs and their assigned ports
+ */
+export interface EARegistration {
+  login: string;
+  broker: string;
+  server: string;
+  dataPort: number;
+  commandPort: number;
+  platform: string;
+  autoPort: boolean;
+  startTime: string;
+  terminalPath: string;
+  eaVersion: string;
+}
+
 export interface TerminalConfig {
   terminalId: string;
   platform: Platform;
@@ -490,16 +509,23 @@ export class AgentChannelReader extends EventEmitter {
   private static readonly DEFAULT_ZMQ_DATA_PORT = 51810;
   private static readonly DEFAULT_ZMQ_COMMAND_PORT = 51811;
   
-  // Multi-account port ranges to scan
-  // Each account uses a pair of ports: data port and command port (data + 1)
-  // Default ranges: 51810-51811 (account 1), 51820-51821 (account 2), etc.
-  private static readonly MULTI_ACCOUNT_PORT_RANGES: Array<{ dataPort: number; commandPort: number; name: string }> = [
-    { dataPort: 51810, commandPort: 51811, name: 'mt5-account-1' },
-    { dataPort: 51820, commandPort: 51821, name: 'mt5-account-2' },
-    { dataPort: 51830, commandPort: 51831, name: 'mt5-account-3' },
-    { dataPort: 51840, commandPort: 51841, name: 'mt5-account-4' },
-    { dataPort: 51850, commandPort: 51851, name: 'mt5-account-5' },
+  // Fallback port ranges for scanning when no EA registration files exist
+  // Used ONLY as a last resort - the primary method is file-based discovery
+  private static readonly FALLBACK_PORT_RANGES: Array<{ dataPort: number; commandPort: number; name: string }> = [
+    { dataPort: 51810, commandPort: 51811, name: 'mt5-port-51810' },
+    { dataPort: 51820, commandPort: 51821, name: 'mt5-port-51820' },
+    { dataPort: 51830, commandPort: 51831, name: 'mt5-port-51830' },
+    { dataPort: 51840, commandPort: 51841, name: 'mt5-port-51840' },
+    { dataPort: 51850, commandPort: 51851, name: 'mt5-port-51850' },
+    { dataPort: 51860, commandPort: 51861, name: 'mt5-port-51860' },
+    { dataPort: 51870, commandPort: 51871, name: 'mt5-port-51870' },
+    { dataPort: 51880, commandPort: 51881, name: 'mt5-port-51880' },
+    { dataPort: 51890, commandPort: 51891, name: 'mt5-port-51890' },
   ];
+  
+  // EA registration files directory (written by EA v2.1+ with auto-port)
+  // Located at: %APPDATA%\MetaQuotes\Terminal\Common\Files\HedgeEdge\
+  private static readonly EA_REGISTRATION_DIR = 'HedgeEdge';
   
   constructor() {
     super();
@@ -524,23 +550,174 @@ export class AgentChannelReader extends EventEmitter {
   }
   
   /**
-   * Get the list of port ranges to scan for multi-account support
+   * Get the path to the MT5 Common Files directory
+   * All MT5 terminals share: %APPDATA%\MetaQuotes\Terminal\Common\Files\
    */
-  static getMultiAccountPortRanges(): Array<{ dataPort: number; commandPort: number; name: string }> {
-    return AgentChannelReader.MULTI_ACCOUNT_PORT_RANGES;
+  private static getCommonFilesPath(): string {
+    const appData = process.env.APPDATA;
+    if (!appData) {
+      throw new Error('APPDATA environment variable not set');
+    }
+    return path.join(appData, 'MetaQuotes', 'Terminal', 'Common', 'Files');
   }
   
   /**
-   * Scan all configured port ranges for MT5 terminals
-   * Connects to any terminal that responds on the known port ranges
-   * Detection is purely event-driven via PUB/SUB (heartbeats, CONNECTED events)
+   * Get the EA registration directory path
+   */
+  private static getRegistrationDirPath(): string {
+    return path.join(AgentChannelReader.getCommonFilesPath(), AgentChannelReader.EA_REGISTRATION_DIR);
+  }
+  
+  /**
+   * Read EA registration files from the Common Files directory
+   * Each running EA (v2.1+) writes a JSON file: HedgeEdge/{login}.json
+   * Contains: login, broker, server, dataPort, commandPort, platform, autoPort, startTime, terminalPath, eaVersion
+   * 
+   * @returns Array of discovered EA registrations with port info
+   */
+  async readEARegistrationFiles(): Promise<EARegistration[]> {
+    const registrations: EARegistration[] = [];
+    
+    try {
+      const regDir = AgentChannelReader.getRegistrationDirPath();
+      
+      // Check if directory exists
+      try {
+        await fs.access(regDir);
+      } catch {
+        console.log(`[AgentChannelReader] No EA registration directory found at: ${regDir}`);
+        console.log('[AgentChannelReader] EAs may be running older versions without auto-port support');
+        return registrations;
+      }
+      
+      // Read all .json files in the registration directory
+      const files = await fs.readdir(regDir);
+      const jsonFiles = files.filter(f => f.endsWith('.json'));
+      
+      if (jsonFiles.length === 0) {
+        console.log('[AgentChannelReader] No EA registration files found (no EAs running or using legacy mode)');
+        return registrations;
+      }
+      
+      console.log(`[AgentChannelReader] Found ${jsonFiles.length} EA registration file(s)`);
+      
+      // Read each registration file in parallel
+      const readPromises = jsonFiles.map(async (file) => {
+        try {
+          const filePath = path.join(regDir, file);
+          const buffer = await fs.readFile(filePath);
+          let content: string;
+          
+          // Handle MQL5 file encoding (may have BOM)
+          if (buffer.length >= 2 && buffer[0] === 0xFF && buffer[1] === 0xFE) {
+            content = buffer.toString('utf16le').substring(1); // UTF-16 LE BOM
+          } else if (buffer.length >= 3 && buffer[0] === 0xEF && buffer[1] === 0xBB && buffer[2] === 0xBF) {
+            content = buffer.toString('utf-8').substring(1); // UTF-8 BOM
+          } else {
+            content = buffer.toString('utf-8');
+          }
+          
+          content = content.replace(/\0/g, '').trim();
+          const reg = JSON.parse(content) as EARegistration;
+          
+          // Validate required fields
+          if (!reg.login || !reg.dataPort || !reg.commandPort) {
+            console.warn(`[AgentChannelReader] Invalid registration file ${file}: missing required fields`);
+            return null;
+          }
+          
+          console.log(`[AgentChannelReader] 📋 EA registered: login=${reg.login} broker=${reg.broker} ports=${reg.dataPort}/${reg.commandPort} auto=${reg.autoPort}`);
+          return reg;
+        } catch (err) {
+          console.warn(`[AgentChannelReader] Failed to read registration file ${file}:`, err instanceof Error ? err.message : err);
+          return null;
+        }
+      });
+      
+      const results = await Promise.all(readPromises);
+      for (const reg of results) {
+        if (reg) registrations.push(reg);
+      }
+      
+    } catch (err) {
+      console.warn('[AgentChannelReader] Error reading EA registration files:', err instanceof Error ? err.message : err);
+    }
+    
+    return registrations;
+  }
+  
+  /**
+   * Get the list of port ranges for multi-account support
+   * Primary: reads EA registration files (dynamic, scalable)
+   * Fallback: returns static port ranges for legacy EAs
+   */
+  static getMultiAccountPortRanges(): Array<{ dataPort: number; commandPort: number; name: string }> {
+    // Return fallback ranges for synchronous callers
+    // For dynamic discovery, use readEARegistrationFiles() instead
+    return AgentChannelReader.FALLBACK_PORT_RANGES;
+  }
+  
+  /**
+   * Scan for MT5 terminals and connect to them
+   * 
+   * Discovery strategy (in order):
+   * 1. PRIMARY: Read EA registration files from Common\Files\HedgeEdge\*.json
+   *    - Written by EA v2.1+ with auto-port support
+   *    - Contains exact port, login, broker info — no guessing needed
+   * 2. FALLBACK: Scan known port ranges (51810-51890, step 10)
+   *    - For legacy EAs without registration file support
+   *    - Tries connecting to each port pair and checks for EA responses
+   * 
    * @returns Array of terminal IDs that were successfully connected
    */
   async scanAndConnectAllMT5Terminals(): Promise<string[]> {
     const connectedTerminals: string[] = [];
     
-    // Phase 1: Try to connect to all ports in parallel (SUB + REQ sockets)
-    const connectionPromises = AgentChannelReader.MULTI_ACCOUNT_PORT_RANGES.map(async (portRange) => {
+    // ═══════════════════════════════════════════════════════════════
+    // Phase 1: Try EA registration file discovery (primary method)
+    // ═══════════════════════════════════════════════════════════════
+    let portRanges: Array<{ dataPort: number; commandPort: number; name: string }> = [];
+    const discoveredPorts = new Set<number>(); // Track discovered data ports to avoid duplicates
+    
+    try {
+      const registrations = await this.readEARegistrationFiles();
+      
+      if (registrations.length > 0) {
+        console.log(`[AgentChannelReader] 🔍 Discovered ${registrations.length} EA(s) via registration files`);
+        
+        // Convert registrations to port ranges
+        for (const reg of registrations) {
+          const name = `mt5-${reg.login}`;
+          portRanges.push({
+            dataPort: reg.dataPort,
+            commandPort: reg.commandPort,
+            name,
+          });
+          discoveredPorts.add(reg.dataPort);
+        }
+      }
+    } catch (err) {
+      console.warn('[AgentChannelReader] Registration file discovery failed:', err instanceof Error ? err.message : err);
+    }
+    
+    // ═══════════════════════════════════════════════════════════════
+    // Phase 1b: Fallback port scan ONLY if no registration files found
+    // When registration files exist, we trust them completely — no need
+    // to waste time scanning empty ports (each takes ~5s to timeout)
+    // ═══════════════════════════════════════════════════════════════
+    if (discoveredPorts.size === 0) {
+      console.log('[AgentChannelReader] No registration files found — falling back to port scan');
+      for (const fallback of AgentChannelReader.FALLBACK_PORT_RANGES) {
+        portRanges.push(fallback);
+      }
+    }
+    
+    console.log(`[AgentChannelReader] Scanning ${portRanges.length} port range(s) (${discoveredPorts.size} from registration, ${portRanges.length - discoveredPorts.size} fallback)`);
+    
+    // ═══════════════════════════════════════════════════════════════
+    // Phase 2: Connect to all discovered ports in parallel
+    // ═══════════════════════════════════════════════════════════════
+    const connectionPromises = portRanges.map(async (portRange) => {
       // Skip if already connected to this port range
       const existingBridge = this.zmqBridges.get(portRange.name);
       if (existingBridge && existingBridge.isConnected()) {
@@ -562,16 +739,18 @@ export class AgentChannelReader extends EventEmitter {
     
     const results = await Promise.all(connectionPromises);
     
-    // Phase 2: Wait for PUB/SUB events (heartbeats arrive every 1-5s from the EA)
-    // We must wait long enough for at least one heartbeat cycle
+    // ═══════════════════════════════════════════════════════════════
+    // Phase 3: Wait for PUB/SUB events (heartbeats arrive every 1-5s)
+    // ═══════════════════════════════════════════════════════════════
     const newConnections = results.filter(r => r.connected && !r.existing);
     if (newConnections.length > 0) {
       console.log(`[AgentChannelReader] Waiting for PUB/SUB events from ${newConnections.length} new connections...`);
       await new Promise(resolve => setTimeout(resolve, 7000));
     }
     
-    // Phase 3: Check which connections received ANY PUB/SUB events
-    // Primary detection is event-driven. PING fallback for quiet EAs.
+    // ═══════════════════════════════════════════════════════════════
+    // Phase 4: Verify which connections have live EAs
+    // ═══════════════════════════════════════════════════════════════
     for (const result of results) {
       if (result.existing) continue;
       
@@ -587,14 +766,13 @@ export class AgentChannelReader extends EventEmitter {
             connectedTerminals.push(result.portRange.name);
           } else {
             // No PUB events yet - try a lightweight PING to check if EA is alive
-            // PING is NOT a snapshot - just a yes/no alive check via REQ/REP
             console.log(`[AgentChannelReader] No PUB events on ${result.portRange.name}, trying PING...`);
             try {
               const alive = await bridge.ping();
               if (alive) {
                 console.log(`[AgentChannelReader] ✅ EA detected on ${result.portRange.name} via PING`);
                 connectedTerminals.push(result.portRange.name);
-                // Request initial account data in background (populates state for UI)
+                // Request initial account data in background
                 this.requestInitialStateFromBridge(bridge, result.portRange.name);
               } else {
                 console.log(`[AgentChannelReader] No EA on ${result.portRange.name}, disconnecting`);
@@ -609,6 +787,7 @@ export class AgentChannelReader extends EventEmitter {
       }
     }
     
+    console.log(`[AgentChannelReader] Scan complete: ${connectedTerminals.length} terminal(s) connected`);
     return connectedTerminals;
   }
   
@@ -620,9 +799,10 @@ export class AgentChannelReader extends EventEmitter {
   private async requestInitialStateFromBridge(bridge: ZmqBridge, terminalId: string): Promise<void> {
     try {
       const response = await bridge.sendCommand({ action: 'STATUS' });
-      if (response.success && response.data) {
-        const accountData = response.data as any;
-        if (accountData && accountData.broker) {
+      // The EA's STATUS response is the full snapshot JSON at the top level
+      // (it may NOT have a "success" field - check for accountId/broker directly)
+      const accountData = (response.success && response.data) ? response.data as any : response as any;
+      if (accountData && (accountData.broker || accountData.accountId)) {
           // Build an AgentSnapshot from the response
           const snapshot: AgentSnapshot = {
             timestamp: new Date().toISOString(),
@@ -663,7 +843,6 @@ export class AgentChannelReader extends EventEmitter {
           this.notifyListeners(terminalId, snapshot);
           this.emit('accountUpdate', terminalId, snapshot);
           console.log(`[AgentChannelReader] Initial state loaded for ${terminalId}: ${snapshot.accountId} @ ${snapshot.broker}`);
-        }
       }
     } catch (error) {
       console.warn(`[AgentChannelReader] Failed to get initial state for ${terminalId}:`, error instanceof Error ? error.message : error);
@@ -893,17 +1072,16 @@ export class AgentChannelReader extends EventEmitter {
   
   /**
    * Set up event-driven handlers for the ZMQ bridge
-   * This replaces snapshot polling with real-time event handling
+   * 
+   * EFFICIENCY MODEL (inspired by Heron Copier):
+   * - TRADE EVENTS (position open/close/modify) → emit IMMEDIATELY (for hedge execution)
+   * - ACCOUNT DATA (balance, equity, prices) → cache silently, serve on-demand
+   * - HEARTBEATS → cache silently as keepalive proof, no UI push
+   * - UI refreshes account data every 30s or on manual "Refresh" button
    */
   private setupEventDrivenHandlers(bridge: ZmqBridge, terminalId: string): void {
-    // Generic event handler - emits all events for subscribers
-    bridge.on('event', (event: ZmqEvent) => {
-      this.emit('event', terminalId, event);
-    });
-    
-    // Connection events
+    // Connection events - emit immediately (important state changes)
     bridge.on('connected', (event: ZmqEvent) => {
-      // Update cached snapshot from initial account state
       const snapshot = this.convertZmqEventToSnapshot(event);
       this.lastSnapshots.set(terminalId, snapshot);
       this.notifyListeners(terminalId, snapshot);
@@ -918,81 +1096,52 @@ export class AgentChannelReader extends EventEmitter {
       this.emit('terminalDisconnected', terminalId, 'MT5');
     });
     
-    // Heartbeat - real-time keepalive with metrics and positions
-    // This is now a primary way to get real-time equity/position updates
+    // ─── SILENT CACHING: Heartbeat & Account Updates ───────────────────
+    // These arrive at high frequency (every 1-2s). We cache the data
+    // silently so getLastSnapshot() returns fresh data, but we do NOT
+    // emit events or push to the UI. The UI reads from cache on its
+    // 30-second refresh timer or when the user clicks "Refresh".
+    
     bridge.on('heartbeat', (event: ZmqEvent) => {
-      // Update cached snapshot from heartbeat data (now includes positions)
       const heartbeatData = event.data as ZmqHeartbeatData;
       if (heartbeatData) {
-        let existingSnapshot = this.lastSnapshots.get(terminalId);
-        
+        const existingSnapshot = this.lastSnapshots.get(terminalId);
         if (existingSnapshot) {
-          // Update existing snapshot with heartbeat data
           existingSnapshot.balance = heartbeatData.balance;
           existingSnapshot.equity = heartbeatData.equity;
           existingSnapshot.floatingPnL = heartbeatData.profit;
           existingSnapshot.isLicenseValid = heartbeatData.isLicenseValid;
           existingSnapshot.isPaused = heartbeatData.isPaused;
-          
-          // Update margin info if provided
-          if (heartbeatData.margin !== undefined) {
-            existingSnapshot.margin = heartbeatData.margin;
-          }
-          if (heartbeatData.freeMargin !== undefined) {
-            existingSnapshot.freeMargin = heartbeatData.freeMargin;
-          }
-          
-          // Update positions if provided (for real-time position updates)
+          if (heartbeatData.margin !== undefined) existingSnapshot.margin = heartbeatData.margin;
+          if (heartbeatData.freeMargin !== undefined) existingSnapshot.freeMargin = heartbeatData.freeMargin;
           if (heartbeatData.positions && heartbeatData.positions.length >= 0) {
             existingSnapshot.positions = heartbeatData.positions.map(p => ({
-              id: p.id,
-              symbol: p.symbol,
-              volume: p.volume,
-              volumeLots: p.volumeLots,
-              side: p.side,
-              entryPrice: p.entryPrice,
-              currentPrice: p.currentPrice,
-              stopLoss: p.stopLoss,
-              takeProfit: p.takeProfit,
-              profit: p.profit,
-              swap: p.swap,
-              commission: p.commission,
-              openTime: p.openTime,
-              comment: p.comment,
+              id: p.id, symbol: p.symbol, volume: p.volume, volumeLots: p.volumeLots,
+              side: p.side, entryPrice: p.entryPrice, currentPrice: p.currentPrice,
+              stopLoss: p.stopLoss, takeProfit: p.takeProfit, profit: p.profit,
+              swap: p.swap, commission: p.commission, openTime: p.openTime, comment: p.comment,
             }));
           }
-          
           existingSnapshot.timestamp = event.timestamp;
           this.lastSnapshots.set(terminalId, existingSnapshot);
-          this.notifyListeners(terminalId, existingSnapshot);
-          
-          // Emit accountUpdate so main.ts pushes to renderer
-          this.emit('accountUpdate', terminalId, existingSnapshot);
+          // NO emit - silent cache only
         }
       }
-      
+      // Emit lightweight heartbeat for health-check tracking only (no UI push)
       this.emit('heartbeat', terminalId, event);
     });
     
-    // Account state updates
     bridge.on('accountUpdate', (event: ZmqEvent) => {
+      // Silently cache the full account state
       const snapshot = this.convertZmqEventToSnapshot(event);
       this.lastSnapshots.set(terminalId, snapshot);
-      this.notifyListeners(terminalId, snapshot);
-      // Emit event so main.ts can update connection state and push to renderer
-      this.emit('accountUpdate', terminalId, snapshot);
+      // NO emit to main.ts - UI refreshes on timer or manual trigger
     });
     
-    // Legacy snapshot handler for backwards compatibility
-    bridge.on('snapshot', (snapshot: ZmqSnapshot) => {
-      const agentSnapshot = this.convertZmqSnapshot(snapshot);
-      this.lastSnapshots.set(terminalId, agentSnapshot);
-      this.notifyListeners(terminalId, agentSnapshot);
-      // Emit event so main.ts can update connection state and push to renderer
-      this.emit('accountUpdate', terminalId, agentSnapshot);
-    });
+    // ─── IMMEDIATE EVENTS: Trade Actions ──────────────────────────────
+    // These are CRITICAL for hedge execution and must be forwarded instantly.
+    // Position events trigger the copier/hedge logic in the app.
     
-    // Position events - real-time trade notifications
     bridge.on('positionOpened', (event: ZmqEvent) => {
       this.emit('positionOpened', terminalId, event);
     });
@@ -1009,7 +1158,7 @@ export class AgentChannelReader extends EventEmitter {
       this.emit('positionReversed', terminalId, event);
     });
     
-    // Order events
+    // Order events - immediate (affects trade state)
     bridge.on('orderPlaced', (event: ZmqEvent) => {
       this.emit('orderPlaced', terminalId, event);
     });
@@ -1018,12 +1167,7 @@ export class AgentChannelReader extends EventEmitter {
       this.emit('orderCancelled', terminalId, event);
     });
     
-    // Price updates (if enabled)
-    bridge.on('priceUpdate', (event: ZmqEvent) => {
-      this.emit('priceUpdate', terminalId, event);
-    });
-    
-    // Pause/resume events
+    // Pause/resume events - immediate (affects trading state)
     bridge.on('paused', (event: ZmqEvent) => {
       this.emit('paused', terminalId, event);
     });

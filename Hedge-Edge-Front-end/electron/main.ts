@@ -347,27 +347,18 @@ function buildSnapshot(accountId: string): ConnectionSnapshot | null {
 }
 
 /**
- * Build all snapshots - includes multiple keys for matching
- * Each snapshot is indexed by both terminalId AND actual MT5 login
+ * Build all snapshots - one entry per real connection
+ * Keyed by connection session ID (terminalId). The raw MT5 login is
+ * available inside each snapshot (session.mt5Login / session.login)
+ * so the frontend can match by login without duplicate map keys.
  */
 function buildAllSnapshots(): ConnectionSnapshotMap {
   const snapshots: ConnectionSnapshotMap = {};
   for (const [accountId, session] of connectionSessions) {
     const snapshot = buildSnapshot(accountId);
     if (snapshot) {
-      // Primary key: terminalId (e.g., "mt5-account-1")
+      // Single canonical key per connection (e.g., "mt5-11789976")
       snapshots[accountId] = snapshot;
-      
-      // Also index by actual MT5 login for frontend matching
-      const terminalId = session._terminalId || accountId;
-      const zmqSnapshot = agentChannelReader.getLastSnapshot(terminalId);
-      if (zmqSnapshot?.accountId && String(zmqSnapshot.accountId) !== '0') {
-        const mt5Login = String(zmqSnapshot.accountId);
-        // Add secondary key for login-based matching
-        if (mt5Login !== accountId) {
-          snapshots[mt5Login] = snapshot;
-        }
-      }
     }
   }
   return snapshots;
@@ -712,22 +703,22 @@ async function connectAccount(params: {
         const s = agentChannelReader.getLastSnapshot(terminalId);
         if (s && String(s.accountId) === String(credentials.login)) {
           snapshot = s;
+          // Store terminalId for ZMQ routing (was missing before)
+          session._terminalId = terminalId;
           break;
         }
       }
       
-      // Try to connect via ZeroMQ if no existing connection
+      // Try to discover via auto-port scan if no existing connection
       if (!snapshot) {
-        const connected = await agentChannelReader.connectMT5('mt5-default', {
-          dataPort: 51810,
-          commandPort: 51811,
-        });
-        
-        if (connected) {
-          await new Promise(resolve => setTimeout(resolve, 500));
-          const s = agentChannelReader.getLastSnapshot('mt5-default');
+        const discovered = await agentChannelReader.scanAndConnectAllMT5Terminals();
+        for (const tid of discovered) {
+          const s = agentChannelReader.getLastSnapshot(tid);
           if (s && String(s.accountId) === String(credentials.login)) {
             snapshot = s;
+            // Update session with discovered terminalId for routing
+            session._terminalId = tid;
+            break;
           }
         }
       }
@@ -858,11 +849,99 @@ let mainWindow: BrowserWindow | null = null;
 // ============================================================================
 
 /**
+ * EFFICIENCY MODEL (inspired by Heron Copier):
+ * 
+ * 1. TRADE EVENTS (position open/close/modify) → push to UI IMMEDIATELY
+ *    These are critical for hedge execution and must be instant.
+ * 
+ * 2. ACCOUNT DATA (balance, equity, margin) → 30-second refresh timer
+ *    No need for real-time streaming of financial metrics.
+ *    User can also click "Refresh" button for on-demand update.
+ * 
+ * 3. HEARTBEATS → update health timestamp only, NO UI push
+ *    Just proves the EA is alive. Data is cached in agentChannelReader.
+ * 
+ * 4. CONNECTION STATE CHANGES → push immediately
+ *    Connect/disconnect are important state transitions.
+ */
+
+// 30-second periodic refresh timer
+let periodicRefreshTimer: NodeJS.Timeout | null = null;
+const ACCOUNT_REFRESH_INTERVAL_MS = 30000; // 30 seconds
+
+/**
+ * Start periodic account data refresh (30s timer)
+ * Reads cached ZMQ data and pushes to renderer
+ */
+function startPeriodicRefresh(window: BrowserWindow): void {
+  if (periodicRefreshTimer) clearInterval(periodicRefreshTimer);
+  
+  periodicRefreshTimer = setInterval(() => {
+    if (window.isDestroyed()) {
+      if (periodicRefreshTimer) clearInterval(periodicRefreshTimer);
+      return;
+    }
+    
+    // Read cached data from agentChannelReader (already updated by ZMQ silently)
+    refreshAllSessionsFromCache();
+    pushConnectionUpdate(window);
+  }, ACCOUNT_REFRESH_INTERVAL_MS);
+  
+  console.log(`[Main] Started periodic account refresh (every ${ACCOUNT_REFRESH_INTERVAL_MS / 1000}s)`);
+}
+
+/**
+ * Refresh all session metrics from cached ZMQ data (no network calls)
+ */
+function refreshAllSessionsFromCache(): void {
+  for (const [accountId, session] of connectionSessions) {
+    if (session.status !== 'connected') continue;
+    
+    const terminalId = session._terminalId || accountId;
+    const snapshot = agentChannelReader.getLastSnapshot(terminalId);
+    if (!snapshot) continue;
+    
+    // Update metrics from cached snapshot
+    const metrics: ConnectionMetrics = {
+      balance: snapshot.balance ?? 0,
+      equity: snapshot.equity ?? 0,
+      profit: snapshot.floatingPnL ?? 0,
+      positionCount: snapshot.positions?.length ?? 0,
+      margin: snapshot.margin,
+      freeMargin: snapshot.freeMargin,
+      marginLevel: snapshot.marginLevel,
+    };
+    connectionMetrics.set(accountId, metrics);
+    lastEADataTimestamp.set(accountId, new Date());
+    
+    // Update positions from cached snapshot
+    if (snapshot.positions) {
+      const positions: ConnectionPosition[] = snapshot.positions.map((p: any) => ({
+        ticket: parseInt(p.id) || 0,
+        symbol: p.symbol,
+        type: p.side === 'BUY' ? 'buy' : 'sell',
+        volume: p.volumeLots,
+        openPrice: p.entryPrice,
+        currentPrice: p.currentPrice,
+        profit: p.profit,
+        stopLoss: p.stopLoss ?? 0,
+        takeProfit: p.takeProfit ?? 0,
+        openTime: p.openTime || new Date().toISOString(),
+        magic: 0,
+        comment: p.comment || '',
+      }));
+      connectionPositions.set(accountId, positions);
+    }
+  }
+}
+
+/**
  * Set up event forwarding from agentChannelReader to the renderer
- * This enables real-time event streaming without polling
+ * ONLY trade events and connection state changes push immediately.
+ * Account data refreshes on 30s timer or manual "Refresh" button.
  */
 function setupTradingEventForwarding(window: BrowserWindow): void {
-  // Forward all events from agentChannelReader to the renderer
+  // Forward critical events to renderer
   const forwardEvent = (eventName: string, terminalId: string, eventData: unknown) => {
     if (window.isDestroyed()) return;
     try {
@@ -878,28 +957,35 @@ function setupTradingEventForwarding(window: BrowserWindow): void {
     }
   };
   
-  // Position events (real-time trade notifications)
+  // ━━━ IMMEDIATE: Trade Events (critical for hedge execution) ━━━━━━━━━━━
   agentChannelReader.on('positionOpened', (terminalId: string, event: unknown) => {
+    console.log(`[Main] Trade event: positionOpened on ${terminalId}`);
     forwardEvent('positionOpened', terminalId, event);
+    // Also refresh cached data and push full snapshot so UI shows new position
+    refreshAllSessionsFromCache();
     pushConnectionUpdate(window);
   });
   
   agentChannelReader.on('positionClosed', (terminalId: string, event: unknown) => {
+    console.log(`[Main] Trade event: positionClosed on ${terminalId}`);
     forwardEvent('positionClosed', terminalId, event);
+    refreshAllSessionsFromCache();
     pushConnectionUpdate(window);
   });
   
   agentChannelReader.on('positionModified', (terminalId: string, event: unknown) => {
     forwardEvent('positionModified', terminalId, event);
+    refreshAllSessionsFromCache();
     pushConnectionUpdate(window);
   });
   
   agentChannelReader.on('positionReversed', (terminalId: string, event: unknown) => {
     forwardEvent('positionReversed', terminalId, event);
+    refreshAllSessionsFromCache();
     pushConnectionUpdate(window);
   });
   
-  // Order events
+  // ━━━ IMMEDIATE: Order Events ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
   agentChannelReader.on('orderPlaced', (terminalId: string, event: unknown) => {
     forwardEvent('orderPlaced', terminalId, event);
   });
@@ -908,99 +994,27 @@ function setupTradingEventForwarding(window: BrowserWindow): void {
     forwardEvent('orderCancelled', terminalId, event);
   });
   
-  // Connection events
+  // ━━━ IMMEDIATE: Connection State Changes ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
   agentChannelReader.on('terminalConnected', (terminalId: string) => {
+    console.log(`[Main] Terminal connected: ${terminalId}`);
     forwardEvent('connected', terminalId, { connected: true });
+    refreshAllSessionsFromCache();
     pushConnectionUpdate(window);
   });
   
   agentChannelReader.on('terminalDisconnected', (terminalId: string) => {
+    console.log(`[Main] Terminal disconnected: ${terminalId}`);
     forwardEvent('disconnected', terminalId, { connected: false });
     pushConnectionUpdate(window);
   });
   
-  // Heartbeat events (lightweight keepalive) - also update connection state
-  agentChannelReader.on('heartbeat', (terminalId: string, event: unknown) => {
-    forwardEvent('heartbeat', terminalId, event);
-    // Update metrics from heartbeat and push to renderer
-    updateMetricsFromHeartbeat(terminalId, event);
-    pushConnectionUpdate(window);
-  });
-  
-  // Account state updates (contains positions, balance, equity, etc.)
-  // This is the main event that keeps the UI in sync with the EA
-  agentChannelReader.on('accountUpdate', (terminalId: string, snapshot: unknown) => {
-    // Update metrics and positions from the account snapshot
-    const snap = snapshot as {
-      balance?: number;
-      equity?: number;
-      margin?: number;
-      freeMargin?: number;
-      marginLevel?: number;
-      floatingPnL?: number;
-      positions?: Array<{
-        id: string;
-        symbol: string;
-        side: string;
-        volumeLots: number;
-        entryPrice: number;
-        currentPrice: number;
-        profit: number;
-        stopLoss: number | null;
-        takeProfit: number | null;
-        openTime: string;
-        comment: string;
-      }>;
-    };
-    
-    // Update metrics
-    const metrics = connectionMetrics.get(terminalId) || {
-      balance: 0,
-      equity: 0,
-      profit: 0,
-      positionCount: 0,
-    };
-    
-    if (snap.balance !== undefined) metrics.balance = snap.balance;
-    if (snap.equity !== undefined) metrics.equity = snap.equity;
-    if (snap.floatingPnL !== undefined) metrics.profit = snap.floatingPnL;
-    if (snap.positions) metrics.positionCount = snap.positions.length;
-    if (snap.margin !== undefined) (metrics as any).margin = snap.margin;
-    if (snap.freeMargin !== undefined) (metrics as any).freeMargin = snap.freeMargin;
-    if (snap.marginLevel !== undefined) (metrics as any).marginLevel = snap.marginLevel;
-    
-    connectionMetrics.set(terminalId, metrics);
+  // ━━━ SILENT: Heartbeat (health tracking only, no UI push) ━━━━━━━━━━━━━
+  agentChannelReader.on('heartbeat', (terminalId: string, _event: unknown) => {
+    // Just update the health timestamp - proves EA is alive
     lastEADataTimestamp.set(terminalId, new Date());
-    
-    // Update positions
-    if (snap.positions) {
-      const positions: ConnectionPosition[] = snap.positions.map((p) => ({
-        ticket: parseInt(p.id) || 0,
-        symbol: p.symbol,
-        type: p.side === 'BUY' ? 'buy' : 'sell',
-        volume: p.volumeLots,
-        openPrice: p.entryPrice,
-        currentPrice: p.currentPrice,
-        profit: p.profit,
-        stopLoss: p.stopLoss ?? 0,
-        takeProfit: p.takeProfit ?? 0,
-        openTime: p.openTime || new Date().toISOString(),
-        magic: 0,
-        comment: p.comment || '',
-      }));
-      connectionPositions.set(terminalId, positions);
-    }
-    
-    // Push updated connection state to renderer
-    pushConnectionUpdate(window);
   });
   
-  // Price updates (if enabled)
-  agentChannelReader.on('priceUpdate', (terminalId: string, event: unknown) => {
-    forwardEvent('priceUpdate', terminalId, event);
-  });
-  
-  // Pause/resume events
+  // ━━━ IMMEDIATE: Pause/Resume Events ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
   agentChannelReader.on('paused', (terminalId: string, event: unknown) => {
     forwardEvent('paused', terminalId, event);
   });
@@ -1009,15 +1023,13 @@ function setupTradingEventForwarding(window: BrowserWindow): void {
     forwardEvent('resumed', terminalId, event);
   });
   
-  // Generic event handler for all events
-  agentChannelReader.on('event', (terminalId: string, event: unknown) => {
-    forwardEvent('event', terminalId, event);
-  });
-  
   // Error events
   agentChannelReader.on('error', (terminalId: string, error: Error) => {
     forwardEvent('error', terminalId, { message: error.message });
   });
+  
+  // ━━━ START: 30-second periodic refresh timer ━━━━━━━━━━━━━━━━━━━━━━━━━━
+  startPeriodicRefresh(window);
 }
 
 // ============================================================================
@@ -1637,13 +1649,10 @@ function setupIpcHandlers() {
             };
           }
           
-          // Try to connect via ZeroMQ
-          const zmqConnected = await agentChannelReader.connectMT5('mt5-default', {
-            dataPort: 51810,
-            commandPort: 51811,
-          });
+          // Try to discover via auto-port scan
+          const discovered = await agentChannelReader.scanAndConnectAllMT5Terminals();
           
-          if (zmqConnected) {
+          if (discovered.length > 0) {
             return {
               success: true,
               data: {
@@ -1652,6 +1661,7 @@ function setupIpcHandlers() {
                 terminalRunning: true,
                 zmqMode: true,
                 zmqConnected: true,
+                terminalsFound: discovered.length,
                 lastHeartbeat: new Date().toISOString(),
               },
             };
@@ -1765,18 +1775,14 @@ function setupIpcHandlers() {
         }
       }
       
-      // Try to connect via ZeroMQ if not connected
+      // Try to discover via auto-port scan if not connected
       if (zmqTerminals.length === 0) {
-        const connected = await agentChannelReader.connectMT5('mt5-default', {
-          dataPort: 51810,
-          commandPort: 51811,
-        });
+        const discovered = await agentChannelReader.scanAndConnectAllMT5Terminals();
         
-        if (connected) {
-          await new Promise(resolve => setTimeout(resolve, 500));
-          const snapshot = agentChannelReader.getLastSnapshot('mt5-default');
+        for (const tid of discovered) {
+          const snapshot = agentChannelReader.getLastSnapshot(tid);
           if (snapshot && String(snapshot.accountId) === String(credentials.login)) {
-            console.log('[Main] Validated MT5 credentials via new ZeroMQ connection:', credentials.login);
+            console.log('[Main] Validated MT5 credentials via auto-discovery:', credentials.login);
             return { success: true, data: { valid: true } };
           }
         }
@@ -2357,13 +2363,32 @@ function setupIpcHandlers() {
     }
     
     try {
-      await fetchSessionMetrics(accountId);
+      // Read from ZMQ cache (no network calls needed)
+      refreshAllSessionsFromCache();
       return { success: true };
     } catch (error) {
       return { 
         success: false, 
         error: error instanceof Error ? error.message : 'Failed to refresh' 
       };
+    }
+  });
+
+  // Manual refresh all accounts from cached ZMQ data + push to renderer immediately
+  ipcMain.handle('connections:manualRefreshAll', async () => {
+    console.log('[Main] Manual refresh triggered by user');
+    try {
+      refreshAllSessionsFromCache();
+      // Push updated snapshots to renderer immediately
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        pushConnectionUpdate(mainWindow);
+      }
+      return safeSerializeForIPC({ 
+        success: true, 
+        snapshots: buildAllSnapshots(),
+      });
+    } catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : 'Refresh failed' };
     }
   });
 
@@ -2451,18 +2476,15 @@ function setupIpcHandlers() {
           }
         }
         
-        // Try to reconnect via ZeroMQ
-        const connected = await agentChannelReader.connectMT5('mt5-default', {
-          dataPort: 51810,
-          commandPort: 51811,
-        });
+        // Try to reconnect via auto-port scan
+        const discovered = await agentChannelReader.scanAndConnectAllMT5Terminals();
         
-        if (connected) {
-          await new Promise(resolve => setTimeout(resolve, 500));
-          const snapshot = agentChannelReader.getLastSnapshot('mt5-default');
-          if (snapshot && String(snapshot.accountId) === String(accountId)) {
+        for (const tid of discovered) {
+          const disc = agentChannelReader.getLastSnapshot(tid);
+          if (disc && String(disc.accountId) === String(accountId)) {
             lastEADataTimestamp.set(accountId, new Date());
             session.status = 'connected';
+            session._terminalId = tid;
             session.lastUpdate = new Date().toISOString();
             connectionSessions.set(accountId, session);
             return { success: true };
@@ -2776,15 +2798,11 @@ function setupIpcHandlers() {
           }
         }
         
-        // Try to connect
-        const connected = await agentChannelReader.connectMT5('mt5-default', {
-          dataPort: 51810,
-          commandPort: 51811,
-        });
+        // Try to discover via auto-port scan
+        const discovered = await agentChannelReader.scanAndConnectAllMT5Terminals();
         
-        if (connected) {
-          await new Promise(resolve => setTimeout(resolve, 500));
-          const snapshot = agentChannelReader.getLastSnapshot('mt5-default');
+        for (const tid of discovered) {
+          const snapshot = agentChannelReader.getLastSnapshot(tid);
           if (snapshot) {
             return { success: true, data: snapshot };
           }

@@ -14,6 +14,8 @@
 import { safeStorage, app } from 'electron';
 import { promises as fs } from 'fs';
 import path from 'path';
+import os from 'os';
+import crypto from 'crypto';
 
 // ============================================================================
 // Types
@@ -182,9 +184,6 @@ export class LicenseStore {
   private getDeviceId(): string {
     // Use a combination of factors for device identification
     // In production, this would be more sophisticated
-    const os = require('os');
-    const crypto = require('crypto');
-    
     const factors = [
       os.hostname(),
       os.platform(),

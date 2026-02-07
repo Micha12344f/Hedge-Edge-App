@@ -346,7 +346,10 @@ export class ZmqBridge extends EventEmitter {
       this.subSocket = new this.zmq.Subscriber();
       
       // Configure socket options
-      this.subSocket.receiveTimeout = 0; // Non-blocking
+      // NOTE: Do NOT set receiveTimeout = 0 here. Non-blocking mode breaks
+      // the `for await` async iterator in zeromq v6 beta, causing it to
+      // silently receive nothing. Default (-1 = infinite wait) is correct
+      // for async iteration.
       this.subSocket.linger = 0;
       
       // Connect to EA's PUB socket
@@ -401,6 +404,8 @@ export class ZmqBridge extends EventEmitter {
   private async startReceiving(): Promise<void> {
     if (!this.subSocket) return;
 
+    console.log('[ZmqBridge] Starting async receive loop on SUB socket...');
+
     try {
       for await (const [msg] of this.subSocket) {
         if (!this.isRunning) break;
@@ -411,6 +416,10 @@ export class ZmqBridge extends EventEmitter {
           
           this.status.eventsReceived++;
           this.status.lastEvent = new Date();
+
+          if (this.status.eventsReceived === 1) {
+            console.log(`[ZmqBridge] First PUB message received! (${messageStr.length} bytes, type: ${event.type})`);
+          }
           
           // Handle event-driven message types
           this.handleEvent(event);
@@ -509,8 +518,6 @@ export class ZmqBridge extends EventEmitter {
         this.cachedAccountState = event.data as ZmqAccountData;
         this.status.lastAccountState = this.cachedAccountState;
         this.emit('connected', event);
-        // Also emit as snapshot for backwards compatibility
-        this.emit('snapshot', this.buildLegacySnapshot(event));
         break;
         
       case 'DISCONNECTED':
@@ -520,36 +527,40 @@ export class ZmqBridge extends EventEmitter {
         break;
         
       case 'HEARTBEAT':
-        // Update cached metrics from heartbeat
+        // Silently update cached metrics - no log, no push to UI
+        // Heartbeats are just keepalives; UI refreshes on 30s timer or manual
         this.updateFromHeartbeat(event.data as ZmqHeartbeatData);
         this.emit('heartbeat', event);
         break;
         
       case 'ACCOUNT_UPDATE':
-        console.log('[ZmqBridge] Account state update received');
+        // Silently cache account state - no console.log spam
+        // UI will pick this up on next 30s refresh cycle or manual refresh
         this.cachedAccountState = event.data as ZmqAccountData;
         this.status.lastAccountState = this.cachedAccountState;
         this.emit('accountUpdate', event);
-        // Also emit as snapshot for backwards compatibility
-        this.emit('snapshot', this.buildLegacySnapshot(event));
         break;
         
       case 'POSITION_OPENED':
+        // TRADE EVENT - log and emit immediately (triggers hedge logic)
         console.log('[ZmqBridge] Position opened:', (event.data as ZmqPositionEventData).position);
         this.emit('positionOpened', event);
         break;
         
       case 'POSITION_CLOSED':
+        // TRADE EVENT - log and emit immediately (triggers hedge logic)
         console.log('[ZmqBridge] Position closed:', (event.data as ZmqPositionEventData).position);
         this.emit('positionClosed', event);
         break;
         
       case 'POSITION_MODIFIED':
+        // TRADE EVENT - log and emit immediately
         console.log('[ZmqBridge] Position modified:', (event.data as ZmqPositionEventData).position);
         this.emit('positionModified', event);
         break;
         
       case 'POSITION_REVERSED':
+        // TRADE EVENT - log and emit immediately
         console.log('[ZmqBridge] Position reversed:', (event.data as ZmqPositionEventData).position);
         this.emit('positionReversed', event);
         break;
@@ -563,7 +574,8 @@ export class ZmqBridge extends EventEmitter {
         break;
         
       case 'PRICE_UPDATE':
-        this.emit('priceUpdate', event);
+        // Price updates are cached silently - no emit to avoid flooding
+        // UI reads from cached state on refresh
         break;
         
       case 'PAUSED':
@@ -577,8 +589,7 @@ export class ZmqBridge extends EventEmitter {
         break;
         
       default:
-        // Unknown event type - still emit for flexibility
-        console.log('[ZmqBridge] Unknown event type:', event.type);
+        // Unknown event type - silently ignore
         break;
     }
   }

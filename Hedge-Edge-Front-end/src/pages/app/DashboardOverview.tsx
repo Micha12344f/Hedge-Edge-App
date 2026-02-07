@@ -33,11 +33,13 @@ import {
 
 const DashboardOverview = () => {
   const { accounts, loading, createAccount, deleteAccount, archiveAccount, restoreAccount, syncAccountFromMT5 } = useTradingAccounts();
-  const { snapshots, getSnapshot, disconnect, refreshFromEA } = useConnectionsFeed({ autoStart: true, debug: true });
+  const { snapshots, getSnapshot, disconnect, refreshFromEA, manualRefreshAll } = useConnectionsFeed({ autoStart: true, debug: true });
   const [addModalOpen, setAddModalOpen] = useState(false);
   const [activeTab, setActiveTab] = useState('all');
   const [selectedAccount, setSelectedAccount] = useState<TradingAccount | null>(null);
   const [detailsModalOpen, setDetailsModalOpen] = useState(false);
+  const [isRefreshing, setIsRefreshing] = useState(false);
+  const [lastRefreshTime, setLastRefreshTime] = useState<Date | null>(null);
 
   // Auto-refresh from EA files on mount
   useEffect(() => {
@@ -49,6 +51,21 @@ const DashboardOverview = () => {
     }, 1000);
     return () => clearTimeout(timer);
   }, [refreshFromEA]);
+
+  // Manual refresh handler for the Refresh button
+  const handleManualRefresh = async () => {
+    if (isRefreshing) return;
+    setIsRefreshing(true);
+    try {
+      const result = await manualRefreshAll();
+      console.log('[DashboardOverview] Manual refresh result:', result);
+      setLastRefreshTime(new Date());
+    } catch (err) {
+      console.error('[DashboardOverview] Manual refresh failed:', err);
+    } finally {
+      setIsRefreshing(false);
+    }
+  };
 
   // Helper to get connection snapshot for an account
   // The connection system uses MT5 login as the key
@@ -95,6 +112,23 @@ const DashboardOverview = () => {
       setActiveTab('all');
     }
     // Otherwise, stay on the archived tab (no action needed)
+  };
+
+  // Wrapper to handle delete and tab switching (when deleting from archived tab)
+  const handleDeleteAccount = async (id: string) => {
+    // Count archived accounts BEFORE deleting (excluding the one being deleted)
+    const archivedCountAfterDelete = accounts.filter(a => a.is_archived && a.id !== id).length;
+    
+    // Check if this is an archived account being deleted
+    const isArchived = accounts.find(a => a.id === id)?.is_archived;
+    
+    // Delete the account
+    await deleteAccount(id);
+    
+    // If we were on the archived tab and no more archived accounts remain, switch to "all"
+    if (isArchived && activeTab === 'archived' && archivedCountAfterDelete === 0) {
+      setActiveTab('all');
+    }
   };
 
   // Filter accounts: "all" excludes archived, "archived" shows only archived
@@ -193,7 +227,32 @@ const DashboardOverview = () => {
           </h1>
           <p className="text-muted-foreground">Manage all your trading accounts in one place</p>
         </div>
-        <div className="flex gap-3">
+        <div className="flex gap-3 items-center">
+          {/* Last refresh timestamp */}
+          {lastRefreshTime && (
+            <span className="text-xs text-muted-foreground hidden sm:inline">
+              Last refresh: {lastRefreshTime.toLocaleTimeString()}
+            </span>
+          )}
+          <TooltipProvider>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button 
+                  variant="outline" 
+                  size="sm" 
+                  className="group"
+                  onClick={handleManualRefresh}
+                  disabled={isRefreshing}
+                >
+                  <RefreshCw className={`mr-2 h-4 w-4 transition-transform group-hover:scale-110 ${isRefreshing ? 'animate-spin' : ''}`} />
+                  {isRefreshing ? 'Refreshing...' : 'Refresh'}
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>
+                <p>Refresh all account data from ZMQ cache (auto-refreshes every 30s)</p>
+              </TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
           <TooltipProvider>
             <Tooltip>
               <TooltipTrigger asChild>
@@ -424,7 +483,7 @@ const DashboardOverview = () => {
                     >
                       <AccountCard
                         account={account}
-                        onDelete={deleteAccount}
+                        onDelete={handleDeleteAccount}
                         onArchive={handleArchiveAccount}
                         onRestore={handleRestoreAccount}
                         onClick={handleAccountClick}

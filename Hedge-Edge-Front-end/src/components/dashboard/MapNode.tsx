@@ -22,9 +22,10 @@ interface MapNodeProps {
   onMouseDown?: (e: React.MouseEvent) => void;
   onClick?: () => void;
   onDetailsClick?: () => void;
+  onDoubleClick?: () => void;
 }
 
-export const MapNode = ({ account, isSelected, isDragging, isLinkSource, copierStatus = 'none', onMouseDown, onClick, onDetailsClick }: MapNodeProps) => {
+export const MapNode = ({ account, isSelected, isDragging, isLinkSource, copierStatus = 'none', onMouseDown, onClick, onDetailsClick, onDoubleClick }: MapNodeProps) => {
   const pnl = Number(account.pnl) || 0;
   const pnlPercent = Number(account.pnl_percent) || 0;
   const isProfit = pnl >= 0;
@@ -103,6 +104,10 @@ export const MapNode = ({ account, isSelected, isDragging, isLinkSource, copierS
     <div
       onMouseDown={onMouseDown}
       onClick={onClick}
+      onDoubleClick={(e) => {
+        e.stopPropagation();
+        onDoubleClick?.();
+      }}
       className={cn(
         'relative cursor-grab active:cursor-grabbing group',
         isDragging && 'scale-110 z-50',

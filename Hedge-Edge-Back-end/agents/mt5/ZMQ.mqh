@@ -306,8 +306,38 @@ public:
       
       if(result != 0)
       {
-         Print("ZMQ Socket: Failed to bind to ", endpoint, ", error: ", zmq_errno());
-         return false;
+         int err = zmq_errno();
+         // If port is already in use (zombie socket from crashed EA), try to recover
+         if(err == 100 || err == ZMQ_EADDRINUSE) // 100 = EADDRINUSE on Windows
+         {
+            Print("ZMQ Socket: Port in use, attempting recovery via unbind+rebind on ", endpoint);
+            // Try unbinding first (may release zombie socket in same process)
+            zmq_unbind(m_socket, endpointArr);
+            Sleep(200);
+            
+            // Retry bind
+            result = zmq_bind(m_socket, endpointArr);
+            if(result != 0)
+            {
+               // Last resort: close socket, recreate and try again
+               Print("ZMQ Socket: Unbind+rebind failed, recreating socket...");
+               SetLinger(0);
+               zmq_close(m_socket);
+               Sleep(500);
+               m_socket = zmq_socket(m_context, m_type);
+               if(m_socket != 0)
+               {
+                  result = zmq_bind(m_socket, endpointArr);
+               }
+            }
+         }
+         
+         if(result != 0)
+         {
+            Print("ZMQ Socket: Failed to bind to ", endpoint, ", error: ", zmq_errno());
+            Print("ZMQ Socket: If port is stuck, restart the MT5 terminal to release zombie sockets");
+            return false;
+         }
       }
       
       m_bound = true;
