@@ -29,6 +29,7 @@ import {
   Settings2,
 } from 'lucide-react';
 import type { ConnectionStatus } from '@/contexts/CopierGroupsContext';
+import type { ConnectionSnapshot } from '@/types/connections';
 
 export interface HedgeRelationship {
   id: string;
@@ -58,6 +59,8 @@ interface DraggableHedgeMapProps {
   autoAlignOnMount?: boolean;
   /** Get the copier connection status for a given source→target pair */
   getConnectionStatus?: (sourceId: string, targetId: string) => ConnectionStatus;
+  /** Get the connection snapshot for an account (by login or id) */
+  getAccountSnapshot?: (key: string) => ConnectionSnapshot | null;
 }
 
 // Local storage key for positions
@@ -183,6 +186,7 @@ export const DraggableHedgeMap = ({
   onAccountClick,
   autoAlignOnMount = true,
   getConnectionStatus: getConnectionStatusProp,
+  getAccountSnapshot,
 }: DraggableHedgeMapProps) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const transformRef = useRef<HTMLDivElement>(null);
@@ -1312,6 +1316,7 @@ export const DraggableHedgeMap = ({
                       isDragging={isDragging}
                       isLinkSource={isLinkSource}
                       copierStatus={getRelConnectionStatus(account.id)}
+                      connectionSnapshot={getAccountSnapshot?.(account.login || account.id) ?? undefined}
                       onMouseDown={(e) => handleNodeMouseDown(account.id, e)}
                       onDoubleClick={() => {
                         if (onAccountClick) {

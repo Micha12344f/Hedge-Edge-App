@@ -273,6 +273,34 @@ const tradingAPI = {
       ipcRenderer.removeListener('trading:event', handler);
     };
   },
+
+  /**
+   * Request trade history from a specific connected terminal.
+   * The deals will be forwarded via the onEvent listener as a 'tradeHistory' event.
+   * @param terminalId The MT5 login / terminal ID
+   * @param days Number of days of history to fetch (default 30)
+   */
+  getHistory: async (terminalId: string, days: number = 30): Promise<any> => {
+    try {
+      return await ipcRenderer.invoke('trading:getHistory', String(terminalId), days);
+    } catch (err) {
+      console.error('[Preload] getHistory error:', err);
+      return { success: false, error: err instanceof Error ? err.message : String(err) };
+    }
+  },
+
+  /**
+   * Request trade history from ALL connected terminals.
+   * The deals will be forwarded via the onEvent listener as 'tradeHistory' events.
+   */
+  getHistoryAll: async (): Promise<any> => {
+    try {
+      return await ipcRenderer.invoke('trading:getHistoryAll');
+    } catch (err) {
+      console.error('[Preload] getHistoryAll error:', err);
+      return { success: false, error: err instanceof Error ? err.message : String(err) };
+    }
+  },
 };
 
 // ============================================================================
@@ -411,9 +439,10 @@ const agentAPI = {
 const terminalsAPI = {
   /**
    * Detect installed trading terminals (MT4/MT5/cTrader) - fast scan
+   * @param forceRefresh - If true, bypass 30s cache and do a fresh scan
    */
-  detect: (): Promise<DetectionResult> => {
-    return ipcRenderer.invoke('terminals:detect');
+  detect: (forceRefresh?: boolean): Promise<DetectionResult> => {
+    return ipcRenderer.invoke('terminals:detect', forceRefresh === true);
   },
 
   /**
@@ -1151,6 +1180,170 @@ const agentChannelAPI = {
 };
 
 // ============================================================================
+// Trade Copier API
+// ============================================================================
+
+interface CopierGroupConfig {
+  id: string;
+  name: string;
+  status: 'active' | 'paused' | 'error';
+  leaderAccountId: string;
+  leaderAccountName: string;
+  leaderPlatform: string;
+  leaderPhase: string;
+  leaderSymbolSuffixRemove: string;
+  followers: Array<{
+    id: string;
+    accountId: string;
+    accountName: string;
+    platform: string;
+    phase: string;
+    status: string;
+    volumeSizing: string;
+    lotMultiplier: number;
+    riskMultiplier: number;
+    fixedLot: number;
+    fixedRiskPercent: number;
+    fixedRiskNominal: number;
+    copySL: boolean;
+    copyTP: boolean;
+    additionalSLPips: number;
+    additionalTPPips: number;
+    reverseMode: boolean;
+    symbolWhitelist: string[];
+    symbolBlacklist: string[];
+    symbolSuffix: string;
+    symbolAliases: Array<{ masterSymbol: string; slaveSymbol: string; lotMultiplier?: number }>;
+    protectionMode: string;
+    minThreshold: number;
+    maxThreshold: number;
+    delayMs: number;
+  }>;
+}
+
+const copierAPI = {
+  /**
+   * Update copier groups configuration
+   * Sends the full group list to the copier engine in main process
+   */
+  updateGroups: (groups: CopierGroupConfig[]): Promise<{ success: boolean; error?: string }> => {
+    if (!Array.isArray(groups)) {
+      return Promise.resolve({ success: false, error: 'Groups must be an array' });
+    }
+    return ipcRenderer.invoke('copier:updateGroups', groups);
+  },
+
+  /**
+   * Update account UUID → terminal ID mapping.
+   * Maps Supabase account UUIDs to MT5 login numbers so the copier engine
+   * can find the correct ZMQ terminal for each account.
+   * @param mapping - Record<supabaseUUID, mt5Login>
+   */
+  updateAccountMap: (mapping: Record<string, string>): Promise<{ success: boolean; error?: string }> => {
+    return ipcRenderer.invoke('copier:updateAccountMap', mapping);
+  },
+
+  /**
+   * Enable or disable the global copier
+   */
+  setGlobalEnabled: (enabled: boolean): Promise<{ success: boolean; error?: string }> => {
+    return ipcRenderer.invoke('copier:setGlobalEnabled', enabled);
+  },
+
+  /**
+   * Get current stats for a copier group
+   */
+  getGroupStats: (groupId: string): Promise<{
+    success: boolean;
+    data?: {
+      groupId: string;
+      tradesToday: number;
+      tradesTotal: number;
+      totalProfit: number;
+      avgLatency: number;
+      activeFollowers: number;
+      totalFollowers: number;
+      followers: Record<string, {
+        tradesToday: number;
+        tradesTotal: number;
+        totalProfit: number;
+        avgLatency: number;
+        successRate: number;
+        failedCopies: number;
+        lastCopyTime: string | null;
+      }>;
+    };
+    error?: string;
+  }> => {
+    if (!groupId || typeof groupId !== 'string') {
+      return Promise.resolve({ success: false, error: 'Group ID is required' });
+    }
+    return ipcRenderer.invoke('copier:getGroupStats', groupId);
+  },
+
+  /**
+   * Get recent copier activity log entries
+   */
+  getActivityLog: (limit?: number): Promise<{
+    success: boolean;
+    data?: Array<{
+      id: string;
+      groupId: string;
+      followerId: string;
+      timestamp: string;
+      type: string;
+      symbol: string;
+      action: string;
+      volume: number;
+      price: number;
+      latency: number;
+      status: string;
+      errorMessage?: string;
+    }>;
+    error?: string;
+  }> => {
+    return ipcRenderer.invoke('copier:getActivityLog', limit ?? 100);
+  },
+
+  /**
+   * Reset circuit breaker for a follower that hit the error threshold
+   */
+  resetCircuitBreaker: (groupId: string, followerId: string): Promise<{ success: boolean; error?: string }> => {
+    if (!groupId || !followerId) {
+      return Promise.resolve({ success: false, error: 'Group ID and Follower ID are required' });
+    }
+    return ipcRenderer.invoke('copier:resetCircuitBreaker', groupId, followerId);
+  },
+
+  /**
+   * Get the current global enabled state
+   */
+  isGlobalEnabled: (): Promise<{ success: boolean; data?: boolean; error?: string }> => {
+    return ipcRenderer.invoke('copier:isGlobalEnabled');
+  },
+
+  /**
+   * Subscribe to real-time copier events (stats, activity, errors)
+   * Returns an unsubscribe function
+   */
+  onCopierEvent: (callback: (event: {
+    type: 'statsUpdate' | 'activity' | 'copyError' | 'protectionTriggered';
+    data: unknown;
+  }) => void): () => void => {
+    const handler = (_event: unknown, payload: {
+      type: 'statsUpdate' | 'activity' | 'copyError' | 'protectionTriggered';
+      data: unknown;
+    }) => {
+      callback(payload);
+    };
+    ipcRenderer.on('copier:event', handler);
+    return () => {
+      ipcRenderer.removeListener('copier:event', handler);
+    };
+  },
+};
+
+// ============================================================================
 // Core App API
 // ============================================================================
 
@@ -1246,6 +1439,11 @@ const electronAPI = {
    * Agent data channel for reading EA/cBot snapshots
    */
   agentChannel: agentChannelAPI,
+
+  /**
+   * Trade copier engine for leader→follower copy management
+   */
+  copier: copierAPI,
 };
 
 // Expose the API to the renderer process via window.electronAPI

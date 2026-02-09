@@ -10,7 +10,7 @@ Requirements:
 - Valid MT5 credentials in environment variables
 """
 
-from flask import Flask, jsonify
+from flask import Flask, jsonify, request as flask_request
 from flask_cors import CORS
 import MetaTrader5 as mt5
 import os
@@ -200,6 +200,170 @@ def get_symbols():
         mt5.shutdown()
 
 
+@app.route('/api/mt5/order', methods=['POST'])
+def place_order():
+    """Place a new market order (Trade Copier fallback)
+    
+    JSON body: { symbol, side (BUY/SELL), volume, sl?, tp?, magic?, comment?, deviation? }
+    """
+    if not initialize_mt5():
+        return jsonify({'success': False, 'error': 'Failed to connect to MT5'}), 500
+    
+    try:
+        data = flask_request.get_json()
+        if not data:
+            return jsonify({'success': False, 'error': 'JSON body required'}), 400
+        
+        symbol = data.get('symbol')
+        side = data.get('side', '').upper()
+        volume = float(data.get('volume', 0))
+        sl = float(data.get('sl', 0))
+        tp = float(data.get('tp', 0))
+        magic = int(data.get('magic', 123456))
+        comment = data.get('comment', 'HedgeEdge Copy')
+        deviation = int(data.get('deviation', 10))
+        
+        if not symbol:
+            return jsonify({'success': False, 'error': 'Symbol is required'}), 400
+        if side not in ('BUY', 'SELL'):
+            return jsonify({'success': False, 'error': 'Side must be BUY or SELL'}), 400
+        if volume <= 0:
+            return jsonify({'success': False, 'error': 'Volume must be positive'}), 400
+        
+        # Get symbol info for price
+        symbol_info = mt5.symbol_info(symbol)
+        if symbol_info is None:
+            return jsonify({'success': False, 'error': f'Symbol not found: {symbol}'}), 400
+        
+        if not symbol_info.visible:
+            mt5.symbol_select(symbol, True)
+        
+        tick = mt5.symbol_info_tick(symbol)
+        if tick is None:
+            return jsonify({'success': False, 'error': f'Cannot get tick for {symbol}'}), 400
+        
+        price = tick.ask if side == 'BUY' else tick.bid
+        order_type = mt5.ORDER_TYPE_BUY if side == 'BUY' else mt5.ORDER_TYPE_SELL
+        
+        # Normalize volume
+        lot_step = symbol_info.volume_step
+        lot_min = symbol_info.volume_min
+        lot_max = symbol_info.volume_max
+        if lot_step > 0:
+            volume = int(volume / lot_step) * lot_step
+        volume = max(lot_min, min(lot_max, volume))
+        
+        request_params = {
+            'action': mt5.TRADE_ACTION_DEAL,
+            'symbol': symbol,
+            'volume': volume,
+            'type': order_type,
+            'price': price,
+            'sl': sl if sl > 0 else 0.0,
+            'tp': tp if tp > 0 else 0.0,
+            'deviation': deviation,
+            'magic': magic,
+            'comment': comment,
+            'type_time': mt5.ORDER_TIME_GTC,
+            'type_filling': mt5.ORDER_FILLING_IOC,
+        }
+        
+        result = mt5.order_send(request_params)
+        
+        if result is None:
+            return jsonify({'success': False, 'error': 'order_send returned None', 'last_error': str(mt5.last_error())}), 500
+        
+        if result.retcode != mt5.TRADE_RETCODE_DONE:
+            return jsonify({
+                'success': False,
+                'error': f'Order rejected: retcode={result.retcode}, comment={result.comment}',
+                'retcode': result.retcode,
+            }), 400
+        
+        return jsonify({
+            'success': True,
+            'action': 'OPEN_POSITION',
+            'ticket': result.deal,
+            'order': result.order,
+            'symbol': symbol,
+            'side': side,
+            'volume': volume,
+            'price': result.price,
+            'retcode': result.retcode,
+            'timestamp': datetime.now().isoformat(),
+        }), 200
+    
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+    finally:
+        mt5.shutdown()
+
+
+@app.route('/api/mt5/order/<int:ticket>', methods=['PUT'])
+def modify_order(ticket):
+    """Modify position SL/TP (Trade Copier fallback)
+    
+    JSON body: { sl?, tp? }
+    """
+    if not initialize_mt5():
+        return jsonify({'success': False, 'error': 'Failed to connect to MT5'}), 500
+    
+    try:
+        data = flask_request.get_json()
+        if not data:
+            return jsonify({'success': False, 'error': 'JSON body required'}), 400
+        
+        # Find the position
+        position = None
+        positions = mt5.positions_get()
+        if positions:
+            for pos in positions:
+                if pos.ticket == ticket:
+                    position = pos
+                    break
+        
+        if position is None:
+            return jsonify({'success': False, 'error': f'Position not found: {ticket}'}), 404
+        
+        new_sl = float(data.get('sl', position.sl))
+        new_tp = float(data.get('tp', position.tp))
+        
+        request_params = {
+            'action': mt5.TRADE_ACTION_SLTP,
+            'position': ticket,
+            'symbol': position.symbol,
+            'sl': new_sl,
+            'tp': new_tp,
+        }
+        
+        result = mt5.order_send(request_params)
+        
+        if result is None:
+            return jsonify({'success': False, 'error': 'order_send returned None'}), 500
+        
+        if result.retcode != mt5.TRADE_RETCODE_DONE:
+            return jsonify({
+                'success': False,
+                'error': f'Modify rejected: retcode={result.retcode}, comment={result.comment}',
+                'retcode': result.retcode,
+            }), 400
+        
+        return jsonify({
+            'success': True,
+            'action': 'MODIFY_POSITION',
+            'ticket': ticket,
+            'sl': new_sl,
+            'tp': new_tp,
+            'retcode': result.retcode,
+            'timestamp': datetime.now().isoformat(),
+        }), 200
+    
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+    finally:
+        mt5.shutdown()
+
+
 if __name__ == '__main__':
     print("=" * 50)
     print("MT5 API Server Starting...")
@@ -212,5 +376,7 @@ if __name__ == '__main__':
     print("  - http://localhost:5000/api/mt5/snapshot")
     print("  - http://localhost:5000/api/mt5/health")
     print("  - http://localhost:5000/api/mt5/symbols")
+    print("  - http://localhost:5000/api/mt5/order  [POST] - Place order")
+    print("  - http://localhost:5000/api/mt5/order/<ticket>  [PUT] - Modify SL/TP")
     print("=" * 50)
     app.run(host='0.0.0.0', port=5000, debug=False)

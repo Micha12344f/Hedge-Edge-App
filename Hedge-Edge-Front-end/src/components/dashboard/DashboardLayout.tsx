@@ -3,6 +3,7 @@ import { DashboardSidebar } from './DashboardSidebar';
 import { AnimatedBackground } from '@/components/ui/animated-background';
 import { SidebarProvider } from '@/contexts/SidebarContext';
 import { CopierGroupsProvider } from '@/contexts/CopierGroupsContext';
+import { TradeHistoryProvider } from '@/contexts/TradeHistoryContext';
 import { useKeyboardShortcuts } from '@/hooks/useKeyboardShortcuts';
 
 // Wrapper component to use hooks
@@ -24,9 +25,11 @@ export const DashboardLayout = () => {
   return (
     <SidebarProvider>
       <CopierGroupsProvider>
-        <AnimatedBackground>
-          <DashboardContent />
-        </AnimatedBackground>
+        <TradeHistoryProvider>
+          <AnimatedBackground>
+            <DashboardContent />
+          </AnimatedBackground>
+        </TradeHistoryProvider>
       </CopierGroupsProvider>
     </SidebarProvider>
   );

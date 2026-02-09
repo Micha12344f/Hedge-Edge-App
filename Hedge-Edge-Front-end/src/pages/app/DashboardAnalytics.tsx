@@ -1,6 +1,8 @@
-﻿import { useState, useMemo } from 'react';
+﻿import { useState, useMemo, useCallback, useEffect, useRef } from 'react';
 import { useTradingAccounts } from '@/hooks/useTradingAccounts';
-import { useTradeHistory, buildChartData } from '@/hooks/useTradeHistory';
+import { useTradeHistoryContext } from '@/contexts/TradeHistoryContext';
+import { buildChartData } from '@/hooks/useTradeHistory';
+import { useConnectionsFeed } from '@/hooks/useConnectionsFeed';
 import { PROP_FIRMS } from '@/components/dashboard/AddAccountModal';
 import { Card, CardContent } from '@/components/ui/card';
 import { PageBackground } from '@/components/ui/page-background';
@@ -64,24 +66,68 @@ const savePayouts = (payouts: PayoutEntry[]) => {
 };
 
 const DashboardAnalytics = () => {
-  const { accounts, loading, fetchAccounts } = useTradingAccounts();
+  const { accounts, loading, fetchAccounts, syncAccountFromMT5 } = useTradingAccounts();
   const [selectedAccountId, setSelectedAccountId] = useState<string>('all');
   const [payouts, setPayouts] = useState<PayoutEntry[]>(getStoredPayouts);
   const [isAddingPayout, setIsAddingPayout] = useState(false);
   const [newPayoutAmount, setNewPayoutAmount] = useState('');
   const [isRefreshingChart, setIsRefreshingChart] = useState(false);
 
-  // Build login → account id map for trade event routing
-  const loginToAccountId = useMemo(() => {
-    const map: Record<string, string> = {};
-    for (const a of accounts) {
-      if (a.login) map[a.login] = a.id;
-    }
-    return map;
-  }, [accounts]);
+  // Trade history from always-mounted context (records events on ALL pages)
+  const { getTradesForAccount, requestHistoryForAccount, requestHistoryForAll } = useTradeHistoryContext();
 
-  // Track closed trades in real-time via IPC events
-  const { getTradesForAccount } = useTradeHistory({ loginToAccountId });
+  // Live connections feed — gives us real-time balance/equity/profit from the EA
+  const { getSnapshot } = useConnectionsFeed({ autoStart: true });
+
+  // Helper to get live snapshot for an account (same pattern as DashboardOverview)
+  const getAccountSnapshot = useCallback((account: { login?: string; id: string; is_archived?: boolean }) => {
+    if (account.is_archived || !account.login) return null;
+    return getSnapshot(account.login) || getSnapshot(account.id) || null;
+  }, [getSnapshot]);
+
+  // Auto-sync: whenever we have a live EA snapshot, persist balance to Supabase
+  // so the database stays up-to-date even after app restart
+  const hasSyncedRef = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    for (const account of accounts) {
+      if (account.is_archived || !account.login) continue;
+      const snap = getAccountSnapshot(account);
+      if (!snap?.metrics?.balance) continue;
+      // Only sync once per session per account to avoid excessive writes
+      if (hasSyncedRef.current.has(account.id)) continue;
+      hasSyncedRef.current.add(account.id);
+      syncAccountFromMT5(account.id, {
+        balance: snap.metrics.balance,
+        equity: snap.metrics.equity,
+        profit: snap.metrics.profit,
+      });
+    }
+  }, [accounts, getAccountSnapshot, syncAccountFromMT5]);
+
+  // Auto-fetch trade history from connected EAs when the Analytics page loads
+  // or when the selected account changes (if we have no local trades yet)
+  const hasFetchedHistoryRef = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    // On initial page load, request history from ALL connected terminals
+    if (hasFetchedHistoryRef.current.size === 0) {
+      requestHistoryForAll();
+      hasFetchedHistoryRef.current.add('__all__');
+    }
+  }, [requestHistoryForAll]);
+
+  useEffect(() => {
+    // When a specific account is selected, fetch its history if we have none
+    if (!selectedAccountId || selectedAccountId === 'all') return;
+    const account = accounts.find(a => a.id === selectedAccountId);
+    if (!account?.login || account.is_archived) return;
+    // Only fetch once per session per account
+    if (hasFetchedHistoryRef.current.has(account.login)) return;
+    const trades = getTradesForAccount(selectedAccountId);
+    if (trades.length === 0) {
+      hasFetchedHistoryRef.current.add(account.login);
+      requestHistoryForAccount(account.login);
+    }
+  }, [selectedAccountId, accounts, getTradesForAccount, requestHistoryForAccount]);
 
   // Separate active and archived accounts - archived accounts don't need live data
   const activeAccounts = accounts.filter(a => !a.is_archived);
@@ -191,10 +237,15 @@ const DashboardAnalytics = () => {
       : 0);
 
   // Calculate totals for the chart header - funded and evaluation account balances (active only)
+  // Use live balance from EA when connected, fall back to Supabase value
   const fundedAccounts = activeAccounts.filter(a => a.phase === 'funded');
   const evaluationAccounts = activeAccounts.filter(a => a.phase === 'evaluation');
-  const totalFunded = fundedAccounts.reduce((sum, acc) => sum + (Number(acc.current_balance) || Number(acc.account_size) || 0), 0);
-  const totalEvaluation = evaluationAccounts.reduce((sum, acc) => sum + (Number(acc.current_balance) || Number(acc.account_size) || 0), 0);
+  const getLiveBalance = (acc: typeof activeAccounts[0]) => {
+    const snap = getAccountSnapshot(acc);
+    return snap?.metrics?.balance ?? (Number(acc.current_balance) || Number(acc.account_size) || 0);
+  };
+  const totalFunded = fundedAccounts.reduce((sum, acc) => sum + getLiveBalance(acc), 0);
+  const totalEvaluation = evaluationAccounts.reduce((sum, acc) => sum + getLiveBalance(acc), 0);
 
   // Get unique prop firms from connected accounts (excluding hedge and archived accounts)
   // Use account_size (starting/original size) not current_balance for the bar chart
@@ -219,9 +270,16 @@ const DashboardAnalytics = () => {
     ? Number(selectedAccount.account_size) || 0
     : 0;
 
-  // Calculate current P&L (profit/loss relative to starting balance)
+  // Get LIVE balance from EA connection (falls back to stale Supabase value)
+  const liveSnapshot = selectedAccount ? getAccountSnapshot(selectedAccount) : null;
+  const liveBalance = liveSnapshot?.metrics?.balance;
+  const effectiveBalance = selectedAccount
+    ? (liveBalance ?? (Number(selectedAccount.current_balance) || Number(selectedAccount.account_size) || 0))
+    : 0;
+
+  // Calculate current P&L using live EA balance when available
   const currentPnL = selectedAccount 
-    ? (Number(selectedAccount.current_balance) || Number(selectedAccount.account_size) || 0) - startingBalance
+    ? effectiveBalance - startingBalance
     : 0;
   
   // Build chart data from real tracked trade history
@@ -236,6 +294,13 @@ const DashboardAnalytics = () => {
 
   // Calculate max trades for X-axis domain
   const maxTrades = Math.max(...areaChartData.map(d => d.trades), 0);
+
+  // Time-based domain helpers for area chart
+  const hasMultiplePoints = areaChartData.length > 1;
+  const formatTimeAxis = (tick: number) => {
+    const d = new Date(tick);
+    return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+  };
 
   // Calculate profit target and max loss as P&L values
   const profitTargetPnL = selectedAccount 
@@ -490,7 +555,7 @@ const DashboardAnalytics = () => {
                         <div>
                           <h3 className="text-sm font-medium text-muted-foreground">Balance</h3>
                           <span className="text-2xl font-semibold text-foreground">
-                            {formatCurrency(Number(selectedAccount.current_balance) || Number(selectedAccount.account_size) || 0)}
+                            {formatCurrency(effectiveBalance)}
                           </span>
                         </div>
                       </>
@@ -566,12 +631,19 @@ const DashboardAnalytics = () => {
                     onClick={async () => {
                       setIsRefreshingChart(true);
                       try {
+                        // Fetch account metadata AND trade history from connected EAs
                         await fetchAccounts();
+                        if (selectedAccount?.login) {
+                          await requestHistoryForAccount(selectedAccount.login);
+                        } else {
+                          await requestHistoryForAll();
+                        }
                       } finally {
-                        setTimeout(() => setIsRefreshingChart(false), 600);
+                        // Allow time for IPC events to arrive and update state
+                        setTimeout(() => setIsRefreshingChart(false), 1500);
                       }
                     }}
-                    title="Refresh chart data"
+                    title="Refresh chart data &amp; trade history"
                   >
                     <RefreshCw className={`h-3.5 w-3.5 ${isRefreshingChart ? 'animate-spin' : ''}`} />
                   </Button>
@@ -720,16 +792,15 @@ const DashboardAnalytics = () => {
                           vertical={false}
                         />
                         <XAxis 
-                          dataKey="trades" 
+                          dataKey="time" 
                           type="number"
-                          domain={maxTrades === 0 ? [-0.5, 0.5] : [0, maxTrades]}
-                          allowDecimals={false}
+                          domain={hasMultiplePoints ? ['dataMin', 'dataMax'] : ['auto', 'auto']}
+                          tickFormatter={formatTimeAxis}
                           axisLine={{ stroke: 'hsl(var(--border))' }}
                           tickLine={{ stroke: 'hsl(var(--border))' }}
                           tick={{ fill: '#ffffff', fontSize: 12 }}
-                          ticks={maxTrades === 0 ? [0] : undefined}
                           label={{ 
-                            value: 'Number of Trades', 
+                            value: 'Time', 
                             position: 'bottom', 
                             offset: 15,
                             fill: '#ffffff',
@@ -825,9 +896,12 @@ const DashboardAnalytics = () => {
                           content={({ active, payload }) => {
                             if (active && payload && payload.length) {
                               const data = payload[0].payload;
+                              const timeStr = data.time ? new Date(data.time).toLocaleString() : '';
+                              const tradeLabel = data.trades > 0 ? `Trade #${data.trades}` : 'Current';
                               return (
                                 <div className="bg-card border border-border rounded-lg p-3 shadow-lg">
-                                  <p className="text-foreground text-sm">Number of trades: {data.trades}</p>
+                                  <p className="text-foreground text-sm font-medium">{tradeLabel}</p>
+                                  {timeStr && <p className="text-xs text-muted-foreground mb-1">{timeStr}</p>}
                                   <p className={`text-sm flex items-center gap-2 ${data.pnl >= 0 ? 'text-primary' : 'text-destructive'}`}>
                                     <span className={`w-2 h-2 rounded-full ${data.pnl >= 0 ? 'bg-primary' : 'bg-destructive'}`}></span>
                                     P&L: {formatCurrency(data.pnl)}

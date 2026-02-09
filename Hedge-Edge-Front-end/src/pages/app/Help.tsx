@@ -79,7 +79,7 @@ const faqCategories = [
       },
       {
         question: 'What license key do I need?',
-        answer: 'You need a valid Hedge Edge license key to unlock all features. Visit our website to purchase a license, then enter the key in Settings > License section. Demo licenses are available for testing.',
+        answer: 'You need a valid Hedge Edge license key to unlock all features. Visit our website to purchase a license, then enter the key in Settings > License section.',
       },
       {
         question: 'How do I install the EA/cBot?',

@@ -1,6 +1,8 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useTradingAccounts, TradingAccount } from '@/hooks/useTradingAccounts';
 import { useConnectionsFeed } from '@/hooks/useConnectionsFeed';
+import { isBridgeAvailable, mt5, type AccountSnapshot } from '@/lib/local-trading-bridge';
+import type { ConnectionSnapshot } from '@/types/connections';
 import { AccountCard } from '@/components/dashboard/AccountCard';
 import { AddAccountModal } from '@/components/dashboard/AddAccountModal';
 import { AccountDetailsModal } from '@/components/dashboard/AccountDetailsModal';
@@ -41,6 +43,63 @@ const DashboardOverview = () => {
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [lastRefreshTime, setLastRefreshTime] = useState<Date | null>(null);
 
+  // Terminal bridge connectivity — polls the local trading bridge for each account
+  // so cards reflect real-time connectivity (same source the modal uses)
+  const [terminalSnapshots, setTerminalSnapshots] = useState<Record<string, AccountSnapshot>>({});
+  const terminalPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  const pollTerminalAccounts = useCallback(async () => {
+    if (!isBridgeAvailable()) return;
+
+    try {
+      const status = await mt5.getStatus();
+      if (!status.success || !status.data?.terminalRunning) {
+        // Terminal not running — clear all terminal snapshots
+        setTerminalSnapshots(prev => Object.keys(prev).length > 0 ? {} : prev);
+        return;
+      }
+
+      const nonArchivedWithLogin = accounts.filter(a => !a.is_archived && a.login);
+      const newSnaps: Record<string, AccountSnapshot> = {};
+
+      // Check each account concurrently (IPC is fast, same process)
+      await Promise.all(
+        nonArchivedWithLogin.map(async (account) => {
+          try {
+            const result = await mt5.getSnapshot({
+              login: String(account.login),
+              password: '',
+              server: String(account.server || ''),
+            });
+            if (result.success && result.data) {
+              newSnaps[String(account.login)] = result.data;
+            }
+          } catch {
+            // Account not available via terminal — skip
+          }
+        })
+      );
+
+      setTerminalSnapshots(newSnaps);
+    } catch (err) {
+      console.error('[DashboardOverview] Terminal poll error:', err);
+    }
+  }, [accounts]);
+
+  // Start terminal polling on mount and whenever accounts change
+  useEffect(() => {
+    // Initial poll after a short delay to let the app settle
+    const initTimer = setTimeout(pollTerminalAccounts, 1500);
+
+    // Then poll every 5 seconds
+    terminalPollRef.current = setInterval(pollTerminalAccounts, 5000);
+
+    return () => {
+      clearTimeout(initTimer);
+      if (terminalPollRef.current) clearInterval(terminalPollRef.current);
+    };
+  }, [pollTerminalAccounts]);
+
   // Auto-refresh from EA files on mount
   useEffect(() => {
     // Give the app a moment to initialize, then refresh from EA files
@@ -57,7 +116,10 @@ const DashboardOverview = () => {
     if (isRefreshing) return;
     setIsRefreshing(true);
     try {
-      const result = await manualRefreshAll();
+      const [result] = await Promise.all([
+        manualRefreshAll(),
+        pollTerminalAccounts(), // Also refresh terminal bridge data immediately
+      ]);
       console.log('[DashboardOverview] Manual refresh result:', result);
       setLastRefreshTime(new Date());
     } catch (err) {
@@ -67,17 +129,64 @@ const DashboardOverview = () => {
     }
   };
 
+  // Helper to synthesize a ConnectionSnapshot from local terminal data
+  const buildTerminalSnapshot = useCallback((account: TradingAccount, snap: AccountSnapshot): ConnectionSnapshot => {
+    return {
+      session: {
+        id: String(account.login),
+        accountId: account.id,
+        platform: 'mt5',
+        role: 'local',
+        status: 'connected',
+        lastUpdate: snap.timestamp || new Date().toISOString(),
+      },
+      metrics: {
+        balance: snap.balance,
+        equity: snap.equity,
+        profit: snap.profit,
+        positionCount: snap.positions_count || 0,
+        margin: snap.margin,
+        freeMargin: snap.margin_free,
+        marginLevel: snap.margin_level,
+      },
+      positions: snap.positions?.map(p => ({
+        ticket: p.ticket,
+        symbol: p.symbol,
+        type: p.type.toLowerCase() as 'buy' | 'sell',
+        volume: p.volume,
+        openPrice: p.price_open,
+        currentPrice: p.price_current,
+        profit: p.profit,
+        stopLoss: p.sl,
+        takeProfit: p.tp,
+        openTime: p.time,
+        magic: p.magic,
+        comment: p.comment,
+      })),
+      timestamp: snap.timestamp || new Date().toISOString(),
+    };
+  }, []);
+
   // Helper to get connection snapshot for an account
-  // The connection system uses MT5 login as the key
+  // Checks supervisor first, then falls back to local terminal bridge data
   // Returns null for archived accounts - they should be fully disconnected
-  const getAccountSnapshot = (account: TradingAccount) => {
+  const getAccountSnapshot = useCallback((account: TradingAccount): ConnectionSnapshot | null => {
     // Archived accounts should NEVER have connection snapshots - they are fully disconnected
     if (account.is_archived) return null;
-    
     if (!account.login) return null;
-    // Try login as key first (MT5 login number)
-    return getSnapshot(account.login) || getSnapshot(account.id) || null;
-  };
+
+    // 1. Try supervisor snapshot first (most authoritative)
+    const supervisorSnap = getSnapshot(account.login) || getSnapshot(account.id);
+    if (supervisorSnap) return supervisorSnap;
+
+    // 2. Fallback: check local terminal bridge data
+    const terminalSnap = terminalSnapshots[String(account.login)];
+    if (terminalSnap) {
+      return buildTerminalSnapshot(account, terminalSnap);
+    }
+
+    return null;
+  }, [getSnapshot, terminalSnapshots, buildTerminalSnapshot]);
 
   const handleAccountClick = (account: TradingAccount) => {
     setSelectedAccount(account);
@@ -141,10 +250,23 @@ const DashboardOverview = () => {
   });
 
   // Calculate stats (exclude archived accounts)
+  // Use live balance from connection snapshot when available, else fall back to stored value
   const activeAccounts = accounts.filter(a => !a.is_archived);
+  const getLiveBalance = (acc: TradingAccount) => {
+    const snap = getAccountSnapshot(acc);
+    return snap?.metrics?.balance ?? (Number(acc.current_balance) || Number(acc.account_size) || 0);
+  };
   const propAccounts = activeAccounts.filter(a => a.phase === 'funded' || a.phase === 'evaluation');
   const propBalance = propAccounts.reduce((sum, acc) => sum + (Number(acc.account_size) || 0), 0);
-  const totalPnL = activeAccounts.reduce((sum, acc) => sum + (Number(acc.pnl) || 0), 0);
+  const totalPnL = activeAccounts.reduce((sum, acc) => {
+    const snap = getAccountSnapshot(acc);
+    const size = Number(acc.account_size) || 0;
+    if (snap?.metrics?.balance != null) {
+      return sum + (snap.metrics.balance - size);
+    }
+    return sum + (Number(acc.pnl) || 0);
+  }, 0);
+  const totalAUM = activeAccounts.reduce((sum, acc) => sum + getLiveBalance(acc), 0);
   const totalAccountValue = activeAccounts.reduce((sum, acc) => sum + (Number(acc.account_size) || 0), 0);
   // Calculate weighted average return based on account sizes (more accurate than simple average)
   const avgPnLPercent = totalAccountValue > 0 
@@ -180,11 +302,11 @@ const DashboardOverview = () => {
     {
       title: 'Assets Under Management',
       icon: Wallet,
-      value: propBalance,
+      value: totalAUM,
       type: 'currency' as const,
       className: 'text-foreground',
       iconClassName: 'text-muted-foreground',
-      tooltip: 'Total account sizes across all prop firm accounts (Evaluation + Funded)',
+      tooltip: 'Total live balance across all active accounts',
       colorByValue: false,
     },
     {

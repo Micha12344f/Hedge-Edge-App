@@ -67,6 +67,14 @@ const saveLocalAccounts = (accounts: TradingAccount[]) => {
   localStorage.setItem(LOCAL_ACCOUNTS_KEY, JSON.stringify(accounts));
 };
 
+// Custom event name used to sync all useTradingAccounts instances in the same tab
+const ACCOUNTS_CHANGED_EVENT = 'hedge_edge_accounts_changed';
+
+/** Notify other hook instances that accounts have been mutated */
+const dispatchAccountsChanged = () => {
+  window.dispatchEvent(new CustomEvent(ACCOUNTS_CHANGED_EVENT));
+};
+
 export const useTradingAccounts = () => {
   const [accounts, setAccounts] = useState<TradingAccount[]>([]);
   const [loading, setLoading] = useState(true);
@@ -159,6 +167,7 @@ export const useTradingAccounts = () => {
     });
     
     await fetchAccounts();
+    dispatchAccountsChanged();
     return { error: null };
   };
 
@@ -192,6 +201,7 @@ export const useTradingAccounts = () => {
     });
     
     await fetchAccounts();
+    dispatchAccountsChanged();
     return { error: null };
   };
 
@@ -239,6 +249,7 @@ export const useTradingAccounts = () => {
 
     // Update local state without showing toast
     await fetchAccounts();
+    dispatchAccountsChanged();
   };
 
   const archiveAccount = async (id: string) => {
@@ -271,6 +282,7 @@ export const useTradingAccounts = () => {
     });
     
     await fetchAccounts();
+    dispatchAccountsChanged();
     return { error: null };
   };
 
@@ -304,6 +316,7 @@ export const useTradingAccounts = () => {
     });
     
     await fetchAccounts();
+    dispatchAccountsChanged();
     return { error: null };
   };
 
@@ -335,11 +348,21 @@ export const useTradingAccounts = () => {
     });
     
     await fetchAccounts();
+    dispatchAccountsChanged();
     return { error: null };
   };
 
   useEffect(() => {
     fetchAccounts();
+  }, [user]);
+
+  // Listen for mutations from other hook instances and refetch
+  useEffect(() => {
+    const handleAccountsChanged = () => {
+      fetchAccounts();
+    };
+    window.addEventListener(ACCOUNTS_CHANGED_EVENT, handleAccountsChanged);
+    return () => window.removeEventListener(ACCOUNTS_CHANGED_EVENT, handleAccountsChanged);
   }, [user]);
 
   return {

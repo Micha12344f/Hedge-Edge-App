@@ -46,13 +46,24 @@ export const AccountCard = ({
   onDisconnect,
   isConnecting = false,
 }: AccountCardProps) => {
-  const pnl = Number(account.pnl) || 0;
-  const pnlPercent = Number(account.pnl_percent) || 0;
+  const accountSize = Number(account.account_size) || 0;
+  
+  // Live metrics from connection (if connected)
+  const liveBalance = connectionSnapshot?.metrics?.balance;
+  const liveEquity = connectionSnapshot?.metrics?.equity;
+  const liveProfit = connectionSnapshot?.metrics?.profit;
+  const positionCount = connectionSnapshot?.metrics?.positionCount ?? 0;
+
+  // Use live balance for P&L calculation when available, otherwise fall back to stored values
+  const effectiveBalance = liveBalance ?? (Number(account.current_balance) || accountSize);
+  const pnl = liveBalance != null ? (effectiveBalance - accountSize) : (Number(account.pnl) || 0);
+  const pnlPercent = liveBalance != null
+    ? (accountSize > 0 ? (pnl / accountSize) * 100 : 0)
+    : (Number(account.pnl_percent) || 0);
   const isProfit = pnl >= 0;
   
   const profitTarget = Number(account.profit_target) || 0;
   const maxLoss = Number(account.max_loss) || 0;
-  const accountSize = Number(account.account_size) || 0;
   
   const isHedgeAccount = account.phase === 'live';
   const isArchived = account.is_archived;
@@ -76,12 +87,6 @@ export const AccountCard = ({
   const isLicenseExpired = licenseStatus === 'expired';
   const hasLicenseError = licenseStatus === 'error' || licenseStatus === 'invalid';
   const licenseErrorMsg = connectionSnapshot?.license?.errorMessage || connectionSnapshot?.session.licenseError;
-  
-  // Live metrics from connection (if connected)
-  const liveBalance = connectionSnapshot?.metrics?.balance;
-  const liveEquity = connectionSnapshot?.metrics?.equity;
-  const liveProfit = connectionSnapshot?.metrics?.profit;
-  const positionCount = connectionSnapshot?.metrics?.positionCount ?? 0;
 
   const formatCurrency = (value: number) => {
     return new Intl.NumberFormat('en-US', {
@@ -184,13 +189,21 @@ export const AccountCard = ({
     );
   }
 
+  // Determine if account should show disconnected state (visual dimming)
+  // Applies to ALL account types — hedge, funded, and evaluation
+  const isDisconnected = !isConnected && !isConnectionActive;
+  
+  // Whether we have any connection data at all (for showing status badges on ALL types)
+  const hasConnectionData = connectionSnapshot != null;
+
   return (
     <Card 
       className={cn(
         "border-border/30 bg-gradient-to-br from-card/80 to-card/40 backdrop-blur-sm transition-all duration-300 group hover:shadow-lg",
         config.border,
         config.glow,
-        onClick && "cursor-pointer"
+        onClick && "cursor-pointer",
+        isDisconnected && "opacity-60 border-border/20 hover:opacity-80"
       )}
       onClick={handleCardClick}
     >
@@ -211,10 +224,34 @@ export const AccountCard = ({
                 ) : null;
               }
             })()}
-            <h3 className="font-semibold text-foreground group-hover:text-primary transition-colors">{account.account_name}</h3>
+            <h3 className={cn("font-semibold group-hover:text-primary transition-colors", isDisconnected ? "text-muted-foreground" : "text-foreground")}>{account.account_name}</h3>
             <Badge variant="outline" className={cn('text-xs transition-all group-hover:scale-105', config.badge)}>
               {config.label}
             </Badge>
+            {isDisconnected && (
+              <Badge variant="outline" className="text-[10px] bg-muted/30 text-muted-foreground border-muted-foreground/30 flex items-center gap-1">
+                <WifiOff className="h-3 w-3" />
+                Disconnected
+              </Badge>
+            )}
+            {isConnectionActive && (
+              <Badge variant="outline" className="text-[10px] bg-yellow-500/10 text-yellow-500 border-yellow-500/30 flex items-center gap-1 animate-pulse">
+                <Loader2 className="h-3 w-3 animate-spin" />
+                {connectionStatus === 'reconnecting' ? 'Reconnecting' : 'Connecting'}
+              </Badge>
+            )}
+            {isConnected && (
+              <Badge variant="outline" className="text-[10px] bg-primary/10 text-primary border-primary/30 flex items-center gap-1">
+                <Wifi className="h-3 w-3" />
+                Connected
+              </Badge>
+            )}
+            {hasConnectionError && (
+              <Badge variant="outline" className="text-[10px] bg-destructive/10 text-destructive border-destructive/30 flex items-center gap-1">
+                <AlertTriangle className="h-3 w-3" />
+                Error
+              </Badge>
+            )}
           </div>
           <p className="text-sm text-muted-foreground">
             {isHedgeAccount 
@@ -423,12 +460,23 @@ export const AccountCard = ({
         ) : (
           /* Evaluation/Funded Account Display */
           <>
+            {/* Live connection indicator for funded/eval accounts */}
+            {liveBalance != null && (
+              <div className="flex items-center gap-1.5 mb-1">
+                <span className="relative flex h-2 w-2">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-primary opacity-75"></span>
+                  <span className="relative inline-flex rounded-full h-2 w-2 bg-primary"></span>
+                </span>
+                <span className="text-[10px] text-primary font-medium">Live</span>
+              </div>
+            )}
+
             {/* Balance & P&L */}
             <div className="grid grid-cols-2 gap-4">
               <div className="p-2 rounded-lg bg-muted/20 transition-all hover:bg-muted/30">
                 <p className="text-xs text-muted-foreground">Balance</p>
                 <p className="text-lg font-semibold text-foreground">
-                  {formatCurrency(Number(account.current_balance) || accountSize)}
+                  {formatCurrency(effectiveBalance)}
                 </p>
               </div>
               <div className="p-2 rounded-lg bg-muted/20 transition-all hover:bg-muted/30">

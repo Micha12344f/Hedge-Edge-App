@@ -263,8 +263,8 @@ curl https://api.hedge-edge.com/health
 curl -X POST https://api.hedge-edge.com/v1/license/validate \
   -H "Content-Type: application/json" \
   -d '{
-    "licenseKey": "TEST-1234-5678-DEMO",
-    "deviceId": "test-device-123456789",
+    "licenseKey": "YOUR-LICENSE-KEY-HERE",
+    "deviceId": "your-device-id",
     "platform": "desktop"
   }'
 ```

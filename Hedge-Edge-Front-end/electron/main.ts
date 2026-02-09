@@ -42,10 +42,11 @@ import {
   getAgentLogPath,
 } from './agent-supervisor.js';
 
-import { detectTerminals, detectTerminalsDeep, launchTerminal } from './terminal-detector.js';
+import { detectTerminals, detectTerminalsDeep, launchTerminal, invalidateTerminalCache } from './terminal-detector.js';
 import { licenseStore } from './license-store.js';
 import { licenseManager } from './license-manager.js';
 import { webRequestProxy } from './webrequest-proxy.js';
+import { portManager } from './port-manager.js';
 import { 
   checkWebRequestWhitelist, 
   addToWebRequestWhitelist,
@@ -61,6 +62,12 @@ import {
   type AgentSnapshot,
   type AgentCommand,
 } from './agent-channel-reader.js';
+import { CopierEngine } from './copier-engine.js';
+
+// ============================================================================
+// Trade Copier Engine (initialized after agentChannelReader is ready)
+// ============================================================================
+let copierEngine: CopierEngine | null = null;
 
 // ============================================================================
 // Connection Session Manager (In-Memory State)
@@ -130,7 +137,7 @@ type ConnectionSnapshotMap = Record<string, ConnectionSnapshot>;
 
 // EA/cBot heartbeat configuration
 // If no fresh data from EA/cBot within this threshold, consider it disconnected
-const EA_STALENESS_THRESHOLD_MS = 15000; // 15 seconds - EAs typically update every 1-2 seconds
+const EA_STALENESS_THRESHOLD_MS = 5000; // 5 seconds - detect disconnection quickly (EAs heartbeat every 1-2s)
 
 // In-memory connection sessions
 const connectionSessions: Map<string, ConnectionSession> = new Map();
@@ -332,10 +339,15 @@ function buildSnapshot(accountId: string): ConnectionSnapshot | null {
   const sanitizedSession = getSanitizedSession(session);
   
   // Add actual MT5 login to session for proper frontend matching
+  // Priority: ZMQ snapshot (live) > stored credentials (persisted across disconnect)
   if (zmqSnapshot?.accountId) {
     (sanitizedSession as any).mt5Login = String(zmqSnapshot.accountId);
     (sanitizedSession as any).broker = zmqSnapshot.broker;
     (sanitizedSession as any).server = zmqSnapshot.server;
+  } else if (session._credentials?.login) {
+    // Fallback: use stored credentials so frontend can still match
+    // disconnected sessions by login number
+    (sanitizedSession as any).mt5Login = String(session._credentials.login);
   }
   
   return {
@@ -480,11 +492,22 @@ async function verifyZMQConnection(accountId: string, session: ConnectionSession
   try {
     if (session.platform === 'mt5') {
       // Use the terminalId from session if available (multi-account support)
-      const terminalId = session._terminalId || 'mt5-default';
+      // Fall back to accountId itself (which IS the terminalId for auto-reconnect sessions)
+      let terminalId = session._terminalId || accountId;
+      
+      // If terminal not found, try the login credential as terminalId
+      if (!agentChannelReader.isTerminalConnected(terminalId) && session._credentials?.login) {
+        terminalId = session._credentials.login;
+      }
       
       // Check if the terminal is connected
       if (!agentChannelReader.isTerminalConnected(terminalId)) {
         return false;
+      }
+      
+      // Store the resolved terminalId back on the session for future lookups
+      if (!session._terminalId) {
+        session._terminalId = terminalId;
       }
       
       const snapshot = agentChannelReader.getLastSnapshot(terminalId);
@@ -854,12 +877,13 @@ let mainWindow: BrowserWindow | null = null;
  * 1. TRADE EVENTS (position open/close/modify) → push to UI IMMEDIATELY
  *    These are critical for hedge execution and must be instant.
  * 
- * 2. ACCOUNT DATA (balance, equity, margin) → 30-second refresh timer
- *    No need for real-time streaming of financial metrics.
+ * 2. ACCOUNT DATA (balance, equity, margin) → 30-second full refresh timer
+ *    Full cache refresh happens periodically as background sync.
  *    User can also click "Refresh" button for on-demand update.
  * 
- * 3. HEARTBEATS → update health timestamp only, NO UI push
- *    Just proves the EA is alive. Data is cached in agentChannelReader.
+ * 3. HEARTBEATS → update health timestamp + throttled UI push (~2s)
+ *    Proves the EA is alive AND pushes fresh metrics to the renderer
+ *    so dashboard cards update in near-real-time (same as the sidebar modal).
  * 
  * 4. CONNECTION STATE CHANGES → push immediately
  *    Connect/disconnect are important state transitions.
@@ -868,6 +892,14 @@ let mainWindow: BrowserWindow | null = null;
 // 30-second periodic refresh timer
 let periodicRefreshTimer: NodeJS.Timeout | null = null;
 const ACCOUNT_REFRESH_INTERVAL_MS = 30000; // 30 seconds
+
+// 5-second health check timer - detects disconnections fast + auto-reconnects
+let healthCheckTimer: NodeJS.Timeout | null = null;
+const HEALTH_CHECK_INTERVAL_MS = 5000; // 5 seconds
+
+// Heartbeat → UI push throttle (push metrics at most every 2s)
+let lastHeartbeatPushTime = 0;
+const HEARTBEAT_PUSH_THROTTLE_MS = 2000; // 2 seconds
 
 /**
  * Start periodic account data refresh (30s timer)
@@ -891,15 +923,200 @@ function startPeriodicRefresh(window: BrowserWindow): void {
 }
 
 /**
+ * Start fast health check timer (5s)
+ * - Detects stale/disconnected sessions and marks them immediately
+ * - Scans for newly opened MT5 terminals and auto-reconnects (on separate cycle)
+ * 
+ * IMPORTANT: Disconnect detection and reconnect scanning are split into
+ * separate cycles to avoid a race: the disconnect cycle cleans up stale
+ * bridges first, so the next reconnect cycle does a clean port scan.
+ */
+let healthCheckCycle = 0; // even = disconnect check, odd = reconnect scan
+
+function startHealthCheckTimer(window: BrowserWindow): void {
+  if (healthCheckTimer) clearInterval(healthCheckTimer);
+  
+  healthCheckTimer = setInterval(async () => {
+    if (window.isDestroyed()) {
+      if (healthCheckTimer) clearInterval(healthCheckTimer);
+      return;
+    }
+    
+    healthCheckCycle++;
+    let statusChanged = false;
+    
+    // ━━━ ALWAYS: Check connected sessions for staleness → mark disconnected ━━━
+    const now = new Date();
+    for (const [accountId, session] of connectionSessions) {
+      if (session.status !== 'connected') continue;
+      
+      // Primary check: is the ZMQ bridge still actually alive (receiving messages)?
+      const terminalId = session._terminalId || accountId;
+      const bridgeAlive = agentChannelReader.isTerminalConnected(terminalId);
+      
+      if (!bridgeAlive) {
+        // Bridge is dead — mark disconnected immediately, no need for further checks
+        updateSessionStatus(accountId, 'disconnected', 'Trading terminal closed or EA removed');
+        lastEADataTimestamp.delete(accountId);
+        console.log(`[Main] Health check: session ${accountId} marked disconnected (bridge dead for terminal ${terminalId})`);
+        statusChanged = true;
+        continue;
+      }
+      
+      // Secondary check: heartbeat staleness (safety net)
+      const lastUpdate = lastEADataTimestamp.get(accountId);
+      const isStale = !lastUpdate || (now.getTime() - lastUpdate.getTime() > EA_STALENESS_THRESHOLD_MS);
+      
+      if (isStale) {
+        const stillConnected = await verifyZMQConnection(accountId, session);
+        if (!stillConnected) {
+          updateSessionStatus(accountId, 'disconnected', 'Trading terminal closed or EA removed');
+          lastEADataTimestamp.delete(accountId);
+          console.log(`[Main] Health check: session ${accountId} marked disconnected (stale heartbeat)`);
+          statusChanged = true;
+        }
+      }
+    }
+    
+    // If we just disconnected something, push update now and SKIP reconnect scan.
+    // The stale bridges need a cycle to be cleaned up before we scan again.
+    // Reconnect will happen on the next odd cycle.
+    if (statusChanged) {
+      pushConnectionUpdate(window);
+      return; // Skip reconnect — let bridges be cleaned up first
+    }
+    
+    // ━━━ ONLY on odd cycles: Discover new terminals + auto-reconnect disconnected ━━━
+    // Always scan for new terminals (a 2nd EA may have started since last check)
+    // AND try to reconnect disconnected sessions.
+    if (healthCheckCycle % 2 === 1) {
+      try {
+        // This scan discovers NEW terminals and cleans up stale bridges
+        const connectedTerminals = await agentChannelReader.scanAndConnectAllMT5Terminals();
+        
+        // Auto-create sessions for newly discovered terminals that have no session
+        for (const terminalId of connectedTerminals) {
+          if (connectionSessions.has(terminalId)) continue;
+          // Check if any existing session already points to this terminal
+          const alreadyTracked = Array.from(connectionSessions.values()).some(
+            s => s._terminalId === terminalId
+          );
+          if (alreadyTracked) continue;
+          
+          const snapshot = agentChannelReader.getLastSnapshot(terminalId);
+          if (snapshot && snapshot.accountId && snapshot.accountId !== '0') {
+            const session: ConnectionSession = {
+              id: terminalId,
+              accountId: terminalId,
+              platform: 'mt5',
+              role: 'local',
+              status: 'connected',
+              lastUpdate: new Date().toISOString(),
+              lastConnected: new Date().toISOString(),
+              autoReconnect: true,
+              _credentials: {
+                login: String(snapshot.accountId),
+                password: '',
+                server: snapshot.server || snapshot.broker || '',
+              },
+              _terminalId: terminalId,
+            };
+            connectionSessions.set(terminalId, session);
+            lastEADataTimestamp.set(terminalId, new Date());
+            console.log(`[Main] Health check: auto-discovered NEW terminal ${terminalId} (account ${snapshot.accountId})`);
+            statusChanged = true;
+          }
+        }
+        
+        // Try to reconnect disconnected sessions
+        for (const [accountId, session] of connectionSessions) {
+          if (session.status !== 'disconnected' || session.autoReconnect === false) continue;
+          
+          // Try to find a matching terminal
+          for (const terminalId of connectedTerminals) {
+            // Double-check the terminal is truly alive (not a stale bridge)
+            if (!agentChannelReader.isTerminalConnected(terminalId)) continue;
+            
+            const snapshot = agentChannelReader.getLastSnapshot(terminalId);
+            if (!snapshot) continue;
+            
+            // Verify snapshot is fresh (from newly opened terminal, not old cache)
+            const snapshotAge = Date.now() - new Date(snapshot.timestamp).getTime();
+            if (snapshotAge > EA_STALENESS_THRESHOLD_MS * 2) continue;
+            
+            const login = session._credentials?.login || '';
+            const snapshotLogin = String(snapshot.accountId || '');
+            
+            // Match by login number or terminalId
+            if ((login && snapshotLogin === login) || terminalId === accountId || terminalId === session._terminalId) {
+              // Re-connect this session
+              session.status = 'connected';
+              session.lastUpdate = new Date().toISOString();
+              session.lastConnected = session.lastUpdate;
+              session.error = undefined;
+              session._terminalId = terminalId;
+              connectionSessions.set(accountId, session);
+              lastEADataTimestamp.set(accountId, new Date());
+              
+              // Update metrics from snapshot
+              const metrics: ConnectionMetrics = {
+                balance: snapshot.balance ?? 0,
+                equity: snapshot.equity ?? 0,
+                profit: snapshot.floatingPnL ?? 0,
+                positionCount: snapshot.positions?.length ?? 0,
+                margin: snapshot.margin,
+                freeMargin: snapshot.freeMargin,
+                marginLevel: snapshot.marginLevel,
+              };
+              connectionMetrics.set(accountId, metrics);
+              
+              console.log(`[Main] Health check: auto-reconnected session ${accountId} via terminal ${terminalId}`);
+              statusChanged = true;
+              break;
+            }
+          }
+        }
+      } catch (err) {
+        // Scan failed - not critical, will retry next interval
+      }
+    }
+    
+    // Push update to UI if anything changed
+    if (statusChanged) {
+      pushConnectionUpdate(window);
+    }
+  }, HEALTH_CHECK_INTERVAL_MS);
+  
+  console.log(`[Main] Started health check timer (every ${HEALTH_CHECK_INTERVAL_MS / 1000}s)`);
+}
+
+/**
  * Refresh all session metrics from cached ZMQ data (no network calls)
+ * IMPORTANT: Does NOT reset lastEADataTimestamp - that's only updated by
+ * real heartbeats from the EA. This prevents stale cached data from
+ * masking a disconnected terminal.
  */
 function refreshAllSessionsFromCache(): void {
   for (const [accountId, session] of connectionSessions) {
     if (session.status !== 'connected') continue;
     
     const terminalId = session._terminalId || accountId;
+    
+    // First verify the terminal is still actually connected via ZMQ bridge
+    if (!agentChannelReader.isTerminalConnected(terminalId)) {
+      // Terminal bridge reports disconnected - don't refresh from stale cache
+      continue;
+    }
+    
     const snapshot = agentChannelReader.getLastSnapshot(terminalId);
     if (!snapshot) continue;
+    
+    // Check if snapshot data is actually fresh (not stale cached data from a closed terminal)
+    const snapshotAge = Date.now() - new Date(snapshot.timestamp).getTime();
+    if (snapshotAge > EA_STALENESS_THRESHOLD_MS * 2) {
+      // Snapshot is too old - terminal likely closed, don't refresh from stale data
+      continue;
+    }
     
     // Update metrics from cached snapshot
     const metrics: ConnectionMetrics = {
@@ -912,7 +1129,7 @@ function refreshAllSessionsFromCache(): void {
       marginLevel: snapshot.marginLevel,
     };
     connectionMetrics.set(accountId, metrics);
-    lastEADataTimestamp.set(accountId, new Date());
+    // DO NOT reset lastEADataTimestamp here - only real heartbeats should update it
     
     // Update positions from cached snapshot
     if (snapshot.positions) {
@@ -997,6 +1214,45 @@ function setupTradingEventForwarding(window: BrowserWindow): void {
   // ━━━ IMMEDIATE: Connection State Changes ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
   agentChannelReader.on('terminalConnected', (terminalId: string) => {
     console.log(`[Main] Terminal connected: ${terminalId}`);
+    
+    // Immediately try to match this terminal to any disconnected sessions
+    // This provides instant reconnection instead of waiting for the next health check cycle
+    const snapshot = agentChannelReader.getLastSnapshot(terminalId);
+    if (snapshot) {
+      for (const [sessionKey, session] of connectionSessions) {
+        if (session.status !== 'disconnected' || session.autoReconnect === false) continue;
+        
+        const login = session._credentials?.login || '';
+        const snapshotLogin = String(snapshot.accountId || '');
+        
+        if ((login && snapshotLogin === login) || terminalId === sessionKey || terminalId === session._terminalId) {
+          // Re-connect this session immediately
+          session.status = 'connected';
+          session._terminalId = terminalId;
+          session.lastUpdate = new Date().toISOString();
+          session.lastConnected = session.lastUpdate;
+          session.error = undefined;
+          connectionSessions.set(sessionKey, session);
+          lastEADataTimestamp.set(sessionKey, new Date());
+          
+          // Update metrics from snapshot
+          const metrics: ConnectionMetrics = {
+            balance: snapshot.balance ?? 0,
+            equity: snapshot.equity ?? 0,
+            profit: snapshot.floatingPnL ?? 0,
+            positionCount: snapshot.positions?.length ?? 0,
+            margin: snapshot.margin,
+            freeMargin: snapshot.freeMargin,
+            marginLevel: snapshot.marginLevel,
+          };
+          connectionMetrics.set(sessionKey, metrics);
+          
+          console.log(`[Main] Instant auto-reconnected session ${sessionKey} via terminal ${terminalId}`);
+          break;
+        }
+      }
+    }
+    
     forwardEvent('connected', terminalId, { connected: true });
     refreshAllSessionsFromCache();
     pushConnectionUpdate(window);
@@ -1004,14 +1260,43 @@ function setupTradingEventForwarding(window: BrowserWindow): void {
   
   agentChannelReader.on('terminalDisconnected', (terminalId: string) => {
     console.log(`[Main] Terminal disconnected: ${terminalId}`);
+    
+    // IMMEDIATELY mark ALL matching sessions as disconnected
+    for (const [sessionKey, session] of connectionSessions) {
+      if (session._terminalId === terminalId || sessionKey === terminalId) {
+        updateSessionStatus(sessionKey, 'disconnected', 'Trading terminal closed or EA removed');
+        // Clear the EA data timestamp so health check doesn't re-connect prematurely
+        lastEADataTimestamp.delete(sessionKey);
+        console.log(`[Main] Session ${sessionKey} marked as disconnected (terminal ${terminalId} closed)`);
+      }
+    }
+    
     forwardEvent('disconnected', terminalId, { connected: false });
     pushConnectionUpdate(window);
   });
   
-  // ━━━ SILENT: Heartbeat (health tracking only, no UI push) ━━━━━━━━━━━━━
-  agentChannelReader.on('heartbeat', (terminalId: string, _event: unknown) => {
-    // Just update the health timestamp - proves EA is alive
+  // ━━━ THROTTLED: Heartbeat (health tracking + metrics update + throttled UI push) ━━━
+  agentChannelReader.on('heartbeat', (terminalId: string, event: unknown) => {
+    // Update timestamp for the terminalId key
     lastEADataTimestamp.set(terminalId, new Date());
+    
+    // Also update for matching session keys (may differ from terminalId)
+    // e.g., session key could be "mt5-11789976" while terminalId is "11789976"
+    for (const [sessionKey, session] of connectionSessions) {
+      if (session._terminalId === terminalId || sessionKey === terminalId) {
+        lastEADataTimestamp.set(sessionKey, new Date());
+        // Update metrics from heartbeat data so they're fresh when pushed to UI
+        updateMetricsFromHeartbeat(sessionKey, event);
+      }
+    }
+    
+    // Throttled push to renderer — keeps dashboard cards in near-real-time
+    // without flooding the IPC channel on every heartbeat
+    const now = Date.now();
+    if (now - lastHeartbeatPushTime >= HEARTBEAT_PUSH_THROTTLE_MS) {
+      lastHeartbeatPushTime = now;
+      pushConnectionUpdate(window);
+    }
   });
   
   // ━━━ IMMEDIATE: Pause/Resume Events ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -1023,6 +1308,12 @@ function setupTradingEventForwarding(window: BrowserWindow): void {
     forwardEvent('resumed', terminalId, event);
   });
   
+  // ━━━ BATCH: Historical Trade Data ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  agentChannelReader.on('tradeHistory', (terminalId: string, deals: unknown) => {
+    console.log(`[Main] Forwarding trade history for terminal ${terminalId}`);
+    forwardEvent('tradeHistory', terminalId, deals);
+  });
+  
   // Error events
   agentChannelReader.on('error', (terminalId: string, error: Error) => {
     forwardEvent('error', terminalId, { message: error.message });
@@ -1030,6 +1321,9 @@ function setupTradingEventForwarding(window: BrowserWindow): void {
   
   // ━━━ START: 30-second periodic refresh timer ━━━━━━━━━━━━━━━━━━━━━━━━━━
   startPeriodicRefresh(window);
+  
+  // ━━━ START: 5-second health check (disconnect detection + auto-reconnect) ━━━
+  startHealthCheckTimer(window);
 }
 
 // ============================================================================
@@ -1133,22 +1427,15 @@ function isValidAgentConfigUpdate(value: unknown): value is { mode?: AgentMode; 
 }
 
 // ============================================================================
-// Port Checking Utility
+// Port Checking Utility (delegates to centralized PortManager)
 // ============================================================================
 
 /**
- * Check if a port is available (not in use)
+ * Check if a port is available (not in use).
+ * Delegates to the centralized PortManager for consistency.
  */
 async function isPortAvailable(port: number): Promise<boolean> {
-  return new Promise((resolve) => {
-    const server = net.createServer();
-    server.once('error', () => resolve(false));
-    server.once('listening', () => {
-      server.close();
-      resolve(true);
-    });
-    server.listen(port, '127.0.0.1');
-  });
+  return portManager.isPortAvailable(port);
 }
 
 // ============================================================================
@@ -1357,6 +1644,23 @@ async function createWindow() {
   // Set up event-driven trading feed forwarding
   setupTradingEventForwarding(mainWindow);
 
+  // Set up copier engine event forwarding to renderer
+  if (copierEngine) {
+    const forwardCopierEvent = (type: string, data: unknown) => {
+      if (!mainWindow || mainWindow.isDestroyed()) return;
+      try {
+        mainWindow.webContents.send('copier:event', { type, data });
+      } catch (error) {
+        console.error(`[Main] Failed to forward copier ${type} event:`, error);
+      }
+    };
+
+    copierEngine.on('statsUpdate', (data: unknown) => forwardCopierEvent('statsUpdate', data));
+    copierEngine.on('activity', (data: unknown) => forwardCopierEvent('activity', data));
+    copierEngine.on('copyError', (data: unknown) => forwardCopierEvent('copyError', data));
+    copierEngine.on('protectionTriggered', (data: unknown) => forwardCopierEvent('protectionTriggered', data));
+  }
+
   mainWindow.on('closed', () => {
     mainWindow = null;
   });
@@ -1564,17 +1868,23 @@ function setupIpcHandlers() {
         }
       }
       
-      // Try to scan all port ranges if no existing connections
-      if (connectedAccounts.length === 0) {
-        await debugLog('[getConnectedAccounts] No existing ZMQ connections, scanning all port ranges...');
+      // ALWAYS scan for new terminals — a second EA may have started since last scan.
+      // The old code only scanned when connectedAccounts.length === 0, which meant
+      // a 2nd terminal would never be discovered once the 1st was connected.
+      {
+        const knownTerminalIds = new Set(connectedAccounts.map(a => a.terminalId).filter(Boolean));
+        await debugLog(`[getConnectedAccounts] Scanning for additional ZMQ terminals (${knownTerminalIds.size} already known)...`);
         const connectedTerminals = await agentChannelReader.scanAndConnectAllMT5Terminals();
         
         for (const terminalId of connectedTerminals) {
+          // Skip terminals we already added above
+          if (knownTerminalIds.has(terminalId)) continue;
+          
           const snapshot = agentChannelReader.getLastSnapshot(terminalId);
           const stats = agentChannelReader.getStats(terminalId);
           
           if (snapshot) {
-            await debugLog(`[getConnectedAccounts] Found ZMQ account after scan: ${snapshot.accountId} @ ${snapshot.broker} (events: ${stats?.eventsReceived ?? 0})`);
+            await debugLog(`[getConnectedAccounts] Found NEW ZMQ account after scan: ${snapshot.accountId} @ ${snapshot.broker} (${terminalId}, events: ${stats?.eventsReceived ?? 0})`);
             connectedAccounts.push({
               login: String(snapshot.accountId),
               server: snapshot.server || snapshot.broker || 'Unknown',
@@ -2071,8 +2381,9 @@ function setupIpcHandlers() {
   // -------------------------------------------------------------------------
 
   // Detect installed trading terminals (MT4/MT5/cTrader)
-  ipcMain.handle('terminals:detect', async () => {
-    return detectTerminals();
+  // Pass forceRefresh=true to bypass 30s cache (e.g. user clicks Refresh)
+  ipcMain.handle('terminals:detect', async (_event, forceRefresh?: unknown) => {
+    return detectTerminals(forceRefresh === true);
   });
 
   // Deep scan for terminals (SLOW - scans entire system)
@@ -2269,6 +2580,37 @@ function setupIpcHandlers() {
       return { success: true, data: safeSerializeForIPC(snapshot) };
     }
     return { success: false, error: 'No cached state available' };
+  });
+
+  // Fetch trade history on demand for a connected terminal
+  ipcMain.handle('trading:getHistory', async (_event, terminalId: unknown, days: unknown) => {
+    if (typeof terminalId !== 'string') {
+      return { success: false, error: 'Invalid terminal ID' };
+    }
+    const numDays = typeof days === 'number' && days > 0 ? days : 30;
+    try {
+      const deals = await agentChannelReader.fetchTradeHistory(terminalId, numDays);
+      return { success: true, count: deals.length };
+    } catch (err) {
+      return { success: false, error: err instanceof Error ? err.message : String(err) };
+    }
+  });
+
+  // Fetch trade history for ALL connected terminals at once
+  ipcMain.handle('trading:getHistoryAll', async () => {
+    const terminals = agentChannelReader.getRegisteredTerminals();
+    const results: Record<string, number> = {};
+    for (const termId of terminals) {
+      if (agentChannelReader.isTerminalConnected(termId)) {
+        try {
+          const deals = await agentChannelReader.fetchTradeHistory(termId, 30);
+          results[termId] = deals.length;
+        } catch {
+          results[termId] = 0;
+        }
+      }
+    }
+    return { success: true, results };
   });
 
   // -------------------------------------------------------------------------
@@ -2717,6 +3059,28 @@ function setupIpcHandlers() {
   // Get proxy status
   ipcMain.handle('proxy:status', () => {
     return { success: true, data: webRequestProxy.getStatus() };
+  });
+
+  // -------------------------------------------------------------------------
+  // Port Manager Diagnostics
+  // -------------------------------------------------------------------------
+
+  // Get all port allocations and diagnostics
+  ipcMain.handle('ports:diagnostics', async () => {
+    try {
+      const diagnostics = await portManager.getDiagnostics();
+      return { success: true, data: diagnostics };
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to get port diagnostics',
+      };
+    }
+  });
+
+  // Get port allocations (synchronous)
+  ipcMain.handle('ports:allocations', () => {
+    return { success: true, data: portManager.getAllocations() };
   });
 
   // -------------------------------------------------------------------------
@@ -3288,6 +3652,104 @@ function setupIpcHandlers() {
       },
     };
   });
+
+  // -------------------------------------------------------------------------
+  // Trade Copier Handlers
+  // -------------------------------------------------------------------------
+
+  ipcMain.handle('copier:updateGroups', async (_event, groups: unknown) => {
+    if (!copierEngine) {
+      return { success: false, error: 'Copier engine not initialized' };
+    }
+    if (!Array.isArray(groups)) {
+      return { success: false, error: 'Groups must be an array' };
+    }
+    try {
+      copierEngine.updateGroups(groups);
+      return { success: true };
+    } catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : 'Failed to update groups' };
+    }
+  });
+
+  ipcMain.handle('copier:updateAccountMap', async (_event, mapping: unknown) => {
+    if (!copierEngine) {
+      return { success: false, error: 'Copier engine not initialized' };
+    }
+    if (!mapping || typeof mapping !== 'object' || Array.isArray(mapping)) {
+      return { success: false, error: 'Mapping must be a Record<string, string>' };
+    }
+    try {
+      copierEngine.updateAccountMap(mapping as Record<string, string>);
+      return { success: true };
+    } catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : 'Failed to update account map' };
+    }
+  });
+
+  ipcMain.handle('copier:setGlobalEnabled', async (_event, enabled: unknown) => {
+    if (!copierEngine) {
+      return { success: false, error: 'Copier engine not initialized' };
+    }
+    if (typeof enabled !== 'boolean') {
+      return { success: false, error: 'Enabled must be a boolean' };
+    }
+    try {
+      copierEngine.setGlobalEnabled(enabled);
+      return { success: true };
+    } catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : 'Failed to set global state' };
+    }
+  });
+
+  ipcMain.handle('copier:isGlobalEnabled', async () => {
+    if (!copierEngine) {
+      return { success: false, data: false };
+    }
+    return { success: true, data: copierEngine.isGlobalEnabled() };
+  });
+
+  ipcMain.handle('copier:getGroupStats', async (_event, groupId: unknown) => {
+    if (!copierEngine) {
+      return { success: false, error: 'Copier engine not initialized' };
+    }
+    if (typeof groupId !== 'string' || !groupId) {
+      return { success: false, error: 'Group ID is required' };
+    }
+    try {
+      const stats = copierEngine.getGroupStats(groupId);
+      return { success: true, data: stats };
+    } catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : 'Failed to get stats' };
+    }
+  });
+
+  ipcMain.handle('copier:getActivityLog', async (_event, limit: unknown) => {
+    if (!copierEngine) {
+      return { success: true, data: [] };
+    }
+    try {
+      const activity = copierEngine.getActivityLog(typeof limit === 'number' ? limit : 100);
+      return { success: true, data: activity };
+    } catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : 'Failed to get activity log' };
+    }
+  });
+
+  ipcMain.handle('copier:resetCircuitBreaker', async (_event, groupId: unknown, followerId: unknown) => {
+    if (!copierEngine) {
+      return { success: false, error: 'Copier engine not initialized' };
+    }
+    if (typeof groupId !== 'string' || typeof followerId !== 'string') {
+      return { success: false, error: 'Group ID and Follower ID are required' };
+    }
+    try {
+      copierEngine.resetCircuitBreaker(groupId, followerId);
+      return { success: true };
+    } catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : 'Failed to reset circuit breaker' };
+    }
+  });
 }
 
 // ============================================================================
@@ -3338,11 +3800,30 @@ app.whenReady().then(async () => {
     console.error('[Main] Failed to initialize license manager:', error);
   }
   
-  // Start WebRequest proxy (optional local license validation)
+  // ── Port conflict detection at startup ──────────────────────────────────
+  // Check all configured port assignments for collisions before starting
+  // services. This catches misconfigurations (e.g., user set agent port
+  // to 51810 which collides with ZMQ) early instead of causing silent failures.
+  try {
+    const agentConfig = getAgentConfig();
+    const conflicts = portManager.detectStartupConflicts({
+      agentMt5Port: agentConfig.mt5.endpoint.port,
+      agentCtraderPort: agentConfig.ctrader.endpoint.port,
+      proxyPort: 9089,  // default; actual port may differ after fallback
+    });
+    if (conflicts.length > 0) {
+      console.error(`[Main] ⚠️ ${conflicts.length} port conflict(s) detected — check agent-config settings`);
+    }
+  } catch (error) {
+    console.warn('[Main] Port conflict detection failed (non-critical):', error);
+  }
+  
+  // Start WebRequest proxy (with EADDRINUSE retry via PortManager)
   try {
     const proxyStarted = await webRequestProxy.start();
     if (proxyStarted) {
-      console.log('[Main] WebRequest proxy started on port 8089');
+      const proxyStatus = webRequestProxy.getStatus();
+      console.log(`[Main] WebRequest proxy started on port ${proxyStatus.port}`);
     } else {
       console.warn('[Main] WebRequest proxy failed to start (non-critical)');
     }
@@ -3366,6 +3847,14 @@ app.whenReady().then(async () => {
     console.error('[Main] Auto-reconnect failed:', error);
   }
   
+  // Initialize trade copier engine
+  try {
+    copierEngine = new CopierEngine(agentChannelReader);
+    console.log('[Main] Trade copier engine initialized');
+  } catch (error) {
+    console.error('[Main] Failed to initialize copier engine:', error);
+  }
+
   // Create the main window
   await createWindow();
 
@@ -3396,6 +3885,10 @@ app.on('before-quit', async (event) => {
   // Prevent immediate quit to allow async cleanup
   event.preventDefault();
   
+  // Clear timers
+  if (periodicRefreshTimer) clearInterval(periodicRefreshTimer);
+  if (healthCheckTimer) clearInterval(healthCheckTimer);
+  
   try {
     // Shutdown WebRequest proxy
     await webRequestProxy.stop();
@@ -3405,12 +3898,22 @@ app.on('before-quit', async (event) => {
     await licenseManager.shutdown();
     console.log('[Main] License manager shutdown complete');
     
+    // Shutdown copier engine (save correlations)
+    if (copierEngine) {
+      copierEngine.shutdown();
+      console.log('[Main] Copier engine shutdown complete');
+    }
+
     // Shutdown ZMQ bridges first
     await agentChannelReader.shutdown();
     console.log('[Main] ZMQ bridges shutdown complete');
     
     await shutdownSupervisor();
     console.log('[Main] Agent supervisor shutdown complete');
+    
+    // Final: release all port allocations
+    portManager.shutdown();
+    console.log('[Main] PortManager shutdown complete');
   } catch (error) {
     console.error('[Main] Error during shutdown:', error);
   }

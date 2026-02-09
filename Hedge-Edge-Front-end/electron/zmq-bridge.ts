@@ -178,9 +178,35 @@ export interface ZmqPosition {
 }
 
 export interface ZmqCommand {
-  action: 'PAUSE' | 'RESUME' | 'CLOSE_ALL' | 'CLOSE_POSITION' | 'STATUS' | 'GET_ACCOUNT' | 'PING' | 'CONFIG';
+  action: 'PAUSE' | 'RESUME' | 'CLOSE_ALL' | 'CLOSE_POSITION' | 'OPEN_POSITION' | 'MODIFY_POSITION' | 'STATUS' | 'GET_ACCOUNT' | 'PING' | 'CONFIG' | 'GET_HISTORY';
   positionId?: string;
   params?: Record<string, unknown>;
+  // OPEN_POSITION fields
+  symbol?: string;
+  side?: 'BUY' | 'SELL';
+  volume?: number;
+  sl?: number;
+  tp?: number;
+  magic?: number;
+  comment?: string;
+  deviation?: number;
+  // MODIFY_POSITION fields
+  ticket?: string;
+}
+
+export interface ZmqHistoryDeal {
+  ticket: number;
+  positionId: number;
+  symbol: string;
+  type: 'BUY' | 'SELL';
+  entry: 'IN' | 'OUT' | 'INOUT' | 'OTHER';
+  volume: number;
+  price: number;
+  profit: number;
+  swap: number;
+  commission: number;
+  time: string;
+  comment: string;
 }
 
 export interface ZmqResponse {
@@ -194,6 +220,19 @@ export interface ZmqResponse {
   // For STATUS command, includes full snapshot
   type?: string;
   timestamp?: string;
+  // For GET_HISTORY command
+  deals?: ZmqHistoryDeal[];
+  accountId?: string;
+  // For OPEN_POSITION command
+  ticket?: string | number;
+  order?: string | number;
+  symbol?: string;
+  side?: string;
+  volume?: number;
+  price?: number;
+  sl?: number;
+  tp?: number;
+  retcode?: number;
   [key: string]: unknown;
 }
 
@@ -277,6 +316,22 @@ export class ZmqBridge extends EventEmitter {
     reject: (reason: Error) => void;
     timeout: NodeJS.Timeout;
   } | null = null;
+  
+  // Track last time any PUB/SUB message was received for liveness detection
+  // ZMQ SUB sockets are stateless - they don't detect publisher disconnection.
+  // We must track message receipt times to determine if the EA is still alive.
+  private lastMessageReceivedAt: Date | null = null;
+  private static readonly LIVENESS_TIMEOUT_MS = 8000; // 8 seconds (EA heartbeats every 1-2s)
+  
+  // Command queue: serializes concurrent sendCommand() calls to prevent
+  // REQ/REP socket corruption. ZMQ REQ sockets enforce strict send-then-
+  // receive ordering; concurrent sends corrupt the socket state.
+  private commandQueue: Array<{
+    command: ZmqCommand;
+    resolve: (value: ZmqResponse) => void;
+    reject: (reason: Error) => void;
+  }> = [];
+  private isProcessingQueue = false;
   
   // Cached account state (built from events)
   private cachedAccountState: ZmqAccountData | null = null;
@@ -416,6 +471,7 @@ export class ZmqBridge extends EventEmitter {
           
           this.status.eventsReceived++;
           this.status.lastEvent = new Date();
+          this.lastMessageReceivedAt = new Date();
 
           if (this.status.eventsReceived === 1) {
             console.log(`[ZmqBridge] First PUB message received! (${messageStr.length} bytes, type: ${event.type})`);
@@ -533,13 +589,75 @@ export class ZmqBridge extends EventEmitter {
         this.emit('heartbeat', event);
         break;
         
-      case 'ACCOUNT_UPDATE':
-        // Silently cache account state - no console.log spam
-        // UI will pick this up on next 30s refresh cycle or manual refresh
-        this.cachedAccountState = event.data as ZmqAccountData;
+      case 'ACCOUNT_UPDATE': {
+        // Diff positions to detect opens/closes from legacy SNAPSHOT messages.
+        // The EA doesn't send discrete POSITION_OPENED / POSITION_CLOSED events;
+        // it re-publishes a full snapshot after every trade transaction.
+        const newState = event.data as ZmqAccountData;
+        const oldPositions = this.cachedAccountState?.positions ?? [];
+        const newPositions = newState.positions ?? [];
+
+        const oldIds = new Set(oldPositions.map(p => p.id));
+        const newIds = new Set(newPositions.map(p => p.id));
+
+        // Positions present before but missing now → closed
+        for (const pos of oldPositions) {
+          if (!newIds.has(pos.id)) {
+            const closedEvent: ZmqEvent = {
+              type: 'POSITION_CLOSED',
+              eventIndex: event.eventIndex,
+              timestamp: event.timestamp,
+              platform: event.platform || 'MT5',
+              accountId: event.accountId,
+              data: {
+                position: Number(pos.id) || 0,
+                symbol: pos.symbol,
+                volume: pos.volumeLots ?? pos.volume,
+                price: pos.currentPrice,
+                profit: pos.profit + (pos.swap ?? 0) + (pos.commission ?? 0),
+                type: pos.side as 'BUY' | 'SELL',
+                entry: 'OUT' as const,
+                stopLoss: pos.stopLoss ?? undefined,
+                takeProfit: pos.takeProfit ?? undefined,
+              } as ZmqPositionEventData,
+            };
+            console.log(`[ZmqBridge] Position closed (diff): ${pos.symbol} #${pos.id}  profit=${pos.profit}`);
+            this.emit('positionClosed', closedEvent);
+          }
+        }
+
+        // Positions absent before but present now → opened
+        for (const pos of newPositions) {
+          if (!oldIds.has(pos.id)) {
+            const openedEvent: ZmqEvent = {
+              type: 'POSITION_OPENED',
+              eventIndex: event.eventIndex,
+              timestamp: event.timestamp,
+              platform: event.platform || 'MT5',
+              accountId: event.accountId,
+              data: {
+                position: Number(pos.id) || 0,
+                symbol: pos.symbol,
+                volume: pos.volumeLots ?? pos.volume,
+                price: pos.entryPrice,
+                profit: pos.profit,
+                type: pos.side as 'BUY' | 'SELL',
+                entry: 'IN' as const,
+                stopLoss: pos.stopLoss ?? undefined,
+                takeProfit: pos.takeProfit ?? undefined,
+              } as ZmqPositionEventData,
+            };
+            console.log(`[ZmqBridge] Position opened (diff): ${pos.symbol} #${pos.id}`);
+            this.emit('positionOpened', openedEvent);
+          }
+        }
+
+        // Now update cached state
+        this.cachedAccountState = newState;
         this.status.lastAccountState = this.cachedAccountState;
         this.emit('accountUpdate', event);
         break;
+      }
         
       case 'POSITION_OPENED':
         // TRADE EVENT - log and emit immediately (triggers hedge logic)
@@ -716,7 +834,9 @@ export class ZmqBridge extends EventEmitter {
   }
 
   /**
-   * Send a command to the EA and wait for response
+   * Send a command via the queue (safe for concurrent callers).
+   * Commands are serialized: each waits for the previous to complete
+   * before being sent on the REQ/REP socket.
    */
   async sendCommand(command: ZmqCommand): Promise<ZmqResponse> {
     if (!this.isRunning || !this.reqSocket) {
@@ -727,12 +847,44 @@ export class ZmqBridge extends EventEmitter {
       throw new Error('Command socket not connected');
     }
 
-    // Ensure only one command at a time (REQ/REP pattern)
-    if (this.pendingCommand) {
-      throw new Error('Another command is pending');
+    // Enqueue and process serially
+    return new Promise<ZmqResponse>((resolve, reject) => {
+      this.commandQueue.push({ command, resolve, reject });
+      this.processCommandQueue();
+    });
+  }
+
+  /**
+   * Process the command queue one-at-a-time.
+   * Only one REQ/REP exchange happens at any time.
+   */
+  private async processCommandQueue(): Promise<void> {
+    if (this.isProcessingQueue) return;
+    this.isProcessingQueue = true;
+
+    while (this.commandQueue.length > 0) {
+      const item = this.commandQueue.shift()!;
+      try {
+        const result = await this.executeCommand(item.command);
+        item.resolve(result);
+      } catch (err) {
+        item.reject(err instanceof Error ? err : new Error(String(err)));
+      }
     }
 
+    this.isProcessingQueue = false;
+  }
+
+  /**
+   * Execute a single command on the REQ/REP socket.
+   * Private — callers should use sendCommand() which goes through the queue.
+   */
+  private executeCommand(command: ZmqCommand): Promise<ZmqResponse> {
     return new Promise((resolve, reject) => {
+      if (!this.reqSocket) {
+        return reject(new Error('REQ socket not available'));
+      }
+
       const timeout = setTimeout(() => {
         this.pendingCommand = null;
         reject(new Error('Command timeout'));
@@ -827,6 +979,63 @@ export class ZmqBridge extends EventEmitter {
   }
 
   /**
+   * Send OPEN_POSITION command to open a new trade
+   */
+  async openPosition(params: {
+    symbol: string;
+    side: 'BUY' | 'SELL';
+    volume: number;
+    sl?: number;
+    tp?: number;
+    magic?: number;
+    comment?: string;
+    deviation?: number;
+  }): Promise<ZmqResponse> {
+    return this.sendCommand({
+      action: 'OPEN_POSITION',
+      symbol: params.symbol,
+      side: params.side,
+      volume: params.volume,
+      sl: params.sl,
+      tp: params.tp,
+      magic: params.magic,
+      comment: params.comment,
+      deviation: params.deviation,
+    });
+  }
+
+  /**
+   * Send MODIFY_POSITION command to change SL/TP
+   */
+  async modifyPosition(ticket: string, sl?: number, tp?: number): Promise<ZmqResponse> {
+    return this.sendCommand({
+      action: 'MODIFY_POSITION',
+      ticket,
+      sl,
+      tp,
+    });
+  }
+
+  /**
+   * Get historical deal data from MT5
+   * @param days Number of days of history to fetch (default 30)
+   */
+  async getHistory(days: number = 30): Promise<{ deals: ZmqHistoryDeal[]; accountId?: string }> {
+    try {
+      const response = await this.sendCommand({ action: 'GET_HISTORY', params: { days } });
+      if (response.success && Array.isArray(response.deals)) {
+        console.log(`[ZmqBridge] Received ${response.deals.length} historical deals, accountId=${response.accountId}`);
+        return { deals: response.deals as ZmqHistoryDeal[], accountId: response.accountId };
+      }
+      console.warn('[ZmqBridge] GET_HISTORY returned no deals:', response.error || 'unknown');
+      return { deals: [] };
+    } catch (err) {
+      console.error('[ZmqBridge] GET_HISTORY failed:', err);
+      return { deals: [] };
+    }
+  }
+
+  /**
    * Schedule reconnection attempt
    */
   private scheduleReconnect(): void {
@@ -895,6 +1104,13 @@ export class ZmqBridge extends EventEmitter {
       this.pendingCommand = null;
     }
 
+    // Reject all queued commands
+    for (const item of this.commandQueue) {
+      item.reject(new Error('Bridge stopped'));
+    }
+    this.commandQueue = [];
+    this.isProcessingQueue = false;
+
     await this.closeSockets();
 
     this.status.dataSocket = 'disconnected';
@@ -912,7 +1128,8 @@ export class ZmqBridge extends EventEmitter {
   }
 
   /**
-   * Check if bridge is connected and ready
+   * Check if bridge sockets are open (does NOT guarantee EA is alive)
+   * For liveness, use isAlive() which also checks message freshness.
    */
   isConnected(): boolean {
     return (
@@ -920,6 +1137,26 @@ export class ZmqBridge extends EventEmitter {
       this.status.dataSocket === 'connected' &&
       this.status.commandSocket === 'connected'
     );
+  }
+  
+  /**
+   * Check if the EA is actually alive (connected + receiving messages recently)
+   * ZMQ SUB sockets are stateless — they stay "connected" even if the publisher
+   * (MT5 EA) stops. This method checks whether we've received any PUB message
+   * within the liveness timeout window.
+   */
+  isAlive(): boolean {
+    if (!this.isConnected()) return false;
+    if (!this.lastMessageReceivedAt) return false;
+    const age = Date.now() - this.lastMessageReceivedAt.getTime();
+    return age < ZmqBridge.LIVENESS_TIMEOUT_MS;
+  }
+  
+  /**
+   * Get the timestamp of the last received message (for external staleness checks)
+   */
+  getLastMessageTime(): Date | null {
+    return this.lastMessageReceivedAt;
   }
 
   /**

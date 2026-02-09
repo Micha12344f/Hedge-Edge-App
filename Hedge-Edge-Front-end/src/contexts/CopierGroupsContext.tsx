@@ -13,9 +13,10 @@ import {
   useEffect,
   useCallback,
   useMemo,
+  useRef,
   type ReactNode,
 } from 'react';
-import type { CopierGroup, CopierGroupStatus } from '@/types/copier';
+import type { CopierGroup, CopierGroupStatus, CopierActivityEntry, GroupStats, FollowerStats } from '@/types/copier';
 import { useTradingAccounts, type TradingAccount } from '@/hooks/useTradingAccounts';
 import {
   getStoredCopierGroups,
@@ -98,6 +99,14 @@ interface CopierGroupsContextValue {
   /** Underlying accounts list (avoids duplicating useTradingAccounts) */
   accounts: TradingAccount[];
   accountsLoading: boolean;
+
+  // ── Live engine data ──
+  /** Recent activity entries from the copier engine */
+  activityLog: CopierActivityEntry[];
+  /** Reset circuit breaker for a follower */
+  resetCircuitBreaker: (groupId: string, followerId: string) => void;
+  /** Whether the copier engine is globally enabled */
+  globalCopierEnabled: boolean;
 }
 
 const CopierGroupsContext = createContext<CopierGroupsContextValue | null>(null);
@@ -143,6 +152,110 @@ export function CopierGroupsProvider({ children }: { children: ReactNode }) {
     window.addEventListener('storage', handleStorage);
     return () => window.removeEventListener('storage', handleStorage);
   }, []);
+
+  // ── Sync groups to Electron copier engine whenever they change ──
+
+  const [activityLog, setActivityLog] = useState<CopierActivityEntry[]>([]);
+  const [globalCopierEnabled, setGlobalCopierEnabled] = useState(true);
+
+  useEffect(() => {
+    if (!initialized) return;
+    // Push groups to the copier engine in main process
+    window.electronAPI?.copier?.updateGroups(groups).catch(() => {});
+  }, [groups, initialized]);
+
+  // ── Sync account UUID → MT5 login mapping to copier engine ──
+  // The copier engine needs this to match Supabase UUIDs (used to identify
+  // accounts in copier groups) with ZMQ terminal IDs (mt5-{login}).
+
+  useEffect(() => {
+    if (!initialized || loading) return;
+    const api = window.electronAPI?.copier;
+    if (!api?.updateAccountMap) return;
+
+    const mapping: Record<string, string> = {};
+    for (const acc of accounts) {
+      if (acc.id && acc.login) {
+        mapping[acc.id] = acc.login;
+      }
+    }
+    if (Object.keys(mapping).length > 0) {
+      api.updateAccountMap(mapping).catch(() => {});
+    }
+  }, [accounts, initialized, loading]);
+
+  // ── Subscribe to copier engine events (stats, activity, errors) ──
+
+  useEffect(() => {
+    const api = window.electronAPI?.copier;
+    if (!api) return;
+
+    // Restore global enabled state from engine
+    api.isGlobalEnabled().then(result => {
+      if (result.success && typeof result.data === 'boolean') {
+        setGlobalCopierEnabled(result.data);
+      }
+    }).catch(() => {});
+
+    // Load initial activity log
+    api.getActivityLog(100).then(result => {
+      if (result.success && result.data) {
+        setActivityLog(result.data);
+      }
+    }).catch(() => {});
+
+    // Subscribe to live events
+    const unsubscribe = api.onCopierEvent((event) => {
+      switch (event.type) {
+        case 'statsUpdate': {
+          // Update group stats in place from engine data
+          const statsData = event.data as Record<string, {
+            groupId: string;
+            followers: Record<string, FollowerStats>;
+          } & GroupStats>;
+          if (statsData && typeof statsData === 'object') {
+            setGroups(prev => prev.map(g => {
+              const engineStats = statsData[g.id];
+              if (!engineStats) return g;
+              return {
+                ...g,
+                stats: {
+                  tradesToday: engineStats.tradesToday,
+                  tradesTotal: engineStats.tradesTotal,
+                  totalProfit: engineStats.totalProfit,
+                  avgLatency: engineStats.avgLatency,
+                  activeFollowers: engineStats.activeFollowers,
+                  totalFollowers: engineStats.totalFollowers,
+                },
+                followers: g.followers.map(f => {
+                  const fStats = engineStats.followers?.[f.id];
+                  if (!fStats) return f;
+                  return { ...f, stats: fStats };
+                }),
+              };
+            }));
+          }
+          break;
+        }
+        case 'activity': {
+          const entry = event.data as CopierActivityEntry;
+          if (entry) {
+            setActivityLog(prev => [entry, ...prev].slice(0, 500));
+          }
+          break;
+        }
+        case 'copyError':
+        case 'protectionTriggered':
+          // Could trigger toast notifications here in the future
+          console.warn(`[Copier] ${event.type}:`, event.data);
+          break;
+      }
+    });
+
+    return () => {
+      unsubscribe();
+    };
+  }, [initialized]);
 
   // ── Reload from localStorage (manual) ──
 
@@ -296,6 +409,9 @@ export function CopierGroupsProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const toggleGlobal = useCallback((enabled: boolean) => {
+    setGlobalCopierEnabled(enabled);
+    // Sync with copier engine
+    window.electronAPI?.copier?.setGlobalEnabled(enabled).catch(() => {});
     if (!enabled) {
       setGroups(prev =>
         prev.map(g => ({
@@ -508,6 +624,12 @@ export function CopierGroupsProvider({ children }: { children: ReactNode }) {
     [],
   );
 
+  // ── Reset circuit breaker via engine ──
+
+  const resetCircuitBreaker = useCallback((groupId: string, followerId: string) => {
+    window.electronAPI?.copier?.resetCircuitBreaker(groupId, followerId).catch(() => {});
+  }, []);
+
   // ── Context value ──
 
   const value = useMemo<CopierGroupsContextValue>(
@@ -530,6 +652,9 @@ export function CopierGroupsProvider({ children }: { children: ReactNode }) {
       updateGroupFromRelationship,
       accounts,
       accountsLoading: loading,
+      activityLog,
+      resetCircuitBreaker,
+      globalCopierEnabled,
     }),
     [
       groups,
@@ -549,6 +674,9 @@ export function CopierGroupsProvider({ children }: { children: ReactNode }) {
       updateGroupFromRelationship,
       accounts,
       loading,
+      activityLog,
+      resetCircuitBreaker,
+      globalCopierEnabled,
     ],
   );
 

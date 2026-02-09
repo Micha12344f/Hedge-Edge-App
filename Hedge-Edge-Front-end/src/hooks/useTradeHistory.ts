@@ -61,10 +61,13 @@ export interface ChartDataPoint {
   trades: number;
   pnl: number;
   name: string;
+  /** Epoch milliseconds – used for time-based X-axis */
+  time: number;
 }
 
 /**
  * Build chart data from real trade records.
+ * Trades are sorted by timestamp so the P&L curve is chronologically correct.
  * If no trades recorded yet, returns a simple 2-point line from 0 → currentPnL.
  */
 export function buildChartData(
@@ -72,28 +75,40 @@ export function buildChartData(
   currentPnL: number,
   accountName: string
 ): ChartDataPoint[] {
+  const now = Date.now();
+
   if (!trades || trades.length === 0) {
     // No recorded trades — show honest minimal chart
     if (currentPnL === 0) {
-      return [{ trades: 0, pnl: 0, name: accountName }];
+      return [{ trades: 0, pnl: 0, name: accountName, time: now }];
     }
-    // Simple 2-point: start → current
+    // Simple 2-point: start → current (not labelled as a trade since it's synthetic)
     return [
-      { trades: 0, pnl: 0, name: accountName },
-      { trades: 1, pnl: Math.round(currentPnL), name: accountName },
+      { trades: 0, pnl: 0, name: accountName, time: now - 86_400_000 },
+      { trades: 0, pnl: Math.round(currentPnL), name: `${accountName} (no history)`, time: now },
     ];
   }
 
-  // Build from real data: start at 0, then each trade
+  // Sort trades chronologically so the P&L line is time-accurate
+  const sorted = [...trades].sort(
+    (a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime(),
+  );
+
+  // Recalculate running P&L in chronological order
+  let runningPnL = 0;
+  const firstTime = new Date(sorted[0].timestamp).getTime();
+
   const data: ChartDataPoint[] = [
-    { trades: 0, pnl: 0, name: accountName },
+    { trades: 0, pnl: 0, name: accountName, time: firstTime - 1000 },
   ];
 
-  trades.forEach((trade, idx) => {
+  sorted.forEach((trade, idx) => {
+    runningPnL += trade.profit;
     data.push({
       trades: idx + 1,
-      pnl: Math.round(trade.runningPnL),
+      pnl: Math.round(runningPnL),
       name: accountName,
+      time: new Date(trade.timestamp).getTime(),
     });
   });
 
@@ -106,6 +121,7 @@ export function buildChartData(
       trades: data[data.length - 1].trades + 1,
       pnl: roundedCurrent,
       name: accountName,
+      time: now,
     });
   }
 

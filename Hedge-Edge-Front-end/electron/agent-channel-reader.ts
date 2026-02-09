@@ -55,6 +55,7 @@ import {
   CTraderResponse,
   DEFAULT_NAMED_PIPE_CONFIG,
 } from './named-pipe-client.js';
+import { portManager, type ScanResult } from './port-manager.js';
 
 // ============================================================================
 // Types
@@ -569,14 +570,19 @@ export class AgentChannelReader extends EventEmitter {
   }
   
   /**
-   * Read EA registration files from the Common Files directory
+   * Read EA registration files from the Common Files directory.
    * Each running EA (v2.1+) writes a JSON file: HedgeEdge/{login}.json
    * Contains: login, broker, server, dataPort, commandPort, platform, autoPort, startTime, terminalPath, eaVersion
    * 
+   * Enhanced with port validation and stale-file detection:
+   * - Validates port pairs are in expected ZMQ range
+   * - Records file paths for staleness checks
+   * - Cleans up stale registration files with dead ports
+   * 
    * @returns Array of discovered EA registrations with port info
    */
-  async readEARegistrationFiles(): Promise<EARegistration[]> {
-    const registrations: EARegistration[] = [];
+  async readEARegistrationFiles(): Promise<(EARegistration & { _filePath?: string })[]> {
+    const registrations: (EARegistration & { _filePath?: string })[] = [];
     
     try {
       const regDir = AgentChannelReader.getRegistrationDirPath();
@@ -588,6 +594,12 @@ export class AgentChannelReader extends EventEmitter {
         console.log(`[AgentChannelReader] No EA registration directory found at: ${regDir}`);
         console.log('[AgentChannelReader] EAs may be running older versions without auto-port support');
         return registrations;
+      }
+      
+      // Clean stale registration files before reading
+      const cleaned = await portManager.cleanStaleRegistrations(regDir);
+      if (cleaned.length > 0) {
+        console.log(`[AgentChannelReader] Cleaned ${cleaned.length} stale registration file(s): ${cleaned.join(', ')}`);
       }
       
       // Read all .json files in the registration directory
@@ -626,8 +638,19 @@ export class AgentChannelReader extends EventEmitter {
             return null;
           }
           
+          // Validate port range and pairing
+          if (!portManager.isValidPort(reg.dataPort) || !portManager.isValidPort(reg.commandPort)) {
+            console.warn(`[AgentChannelReader] Invalid port numbers in ${file}: data=${reg.dataPort}, cmd=${reg.commandPort}`);
+            return null;
+          }
+          
+          if (reg.commandPort !== reg.dataPort + 1) {
+            console.warn(`[AgentChannelReader] Non-adjacent port pair in ${file}: data=${reg.dataPort}, cmd=${reg.commandPort} (expected ${reg.dataPort + 1})`);
+            // Continue anyway — EA might have custom config, but warn
+          }
+          
           console.log(`[AgentChannelReader] 📋 EA registered: login=${reg.login} broker=${reg.broker} ports=${reg.dataPort}/${reg.commandPort} auto=${reg.autoPort}`);
-          return reg;
+          return { ...reg, _filePath: filePath };
         } catch (err) {
           console.warn(`[AgentChannelReader] Failed to read registration file ${file}:`, err instanceof Error ? err.message : err);
           return null;
@@ -658,137 +681,218 @@ export class AgentChannelReader extends EventEmitter {
   }
   
   /**
-   * Scan for MT5 terminals and connect to them
+   * Scan for MT5 terminals and connect to them.
    * 
-   * Discovery strategy (in order):
-   * 1. PRIMARY: Read EA registration files from Common\Files\HedgeEdge\*.json
-   *    - Written by EA v2.1+ with auto-port support
-   *    - Contains exact port, login, broker info — no guessing needed
-   * 2. FALLBACK: Scan known port ranges (51810-51890, step 10)
-   *    - For legacy EAs without registration file support
-   *    - Tries connecting to each port pair and checks for EA responses
+   * IMPROVED STRATEGY (v2.2):
+   * ─────────────────────────
+   * 1. MUTEX: Acquire scan lock — prevents duplicate bridges from concurrent calls
+   * 2. CLEAN: Remove stale registration files (crash recovery)
+   * 3. DISCOVER: Read EA registration files + fallback port list
+   * 4. TCP-PROBE: Fast parallel probe (~150ms) to find live ports
+   *    → Only ports that respond to TCP get ZMQ bridges (no zombie bridges)
+   * 5. CONNECT: Create ZMQ bridges only for live ports
+   * 6. VERIFY: Wait for PUB/SUB events or PING, disconnect dead ones
+   * 7. REGISTER: Track all ports in the central PortManager
    * 
    * @returns Array of terminal IDs that were successfully connected
    */
   async scanAndConnectAllMT5Terminals(): Promise<string[]> {
+    // ═══════════════════════════════════════════════════════════════
+    // Phase 0: Acquire scan mutex (prevents race conditions)
+    // ═══════════════════════════════════════════════════════════════
+    const releaseLock = await portManager.acquireScanLock();
+    if (!releaseLock) {
+      console.warn('[AgentChannelReader] Could not acquire scan lock (another scan may be stuck)');
+      // Return currently connected terminals instead of empty
+      return Array.from(this.zmqBridges.entries())
+        .filter(([, bridge]) => bridge.isConnected())
+        .map(([id]) => id);
+    }
+    
     const connectedTerminals: string[] = [];
     
-    // ═══════════════════════════════════════════════════════════════
-    // Phase 1: Try EA registration file discovery (primary method)
-    // ═══════════════════════════════════════════════════════════════
-    let portRanges: Array<{ dataPort: number; commandPort: number; name: string }> = [];
-    const discoveredPorts = new Set<number>(); // Track discovered data ports to avoid duplicates
-    
     try {
-      const registrations = await this.readEARegistrationFiles();
+      // ═══════════════════════════════════════════════════════════════
+      // Phase 1: Read EA registration files (primary discovery)
+      // Registration files are cleaned of stale entries inside readEARegistrationFiles()
+      // ═══════════════════════════════════════════════════════════════
+      let candidates: Array<{ dataPort: number; commandPort: number; name: string; source: 'registration' | 'fallback' }> = [];
+      const discoveredPorts = new Set<number>();
       
-      if (registrations.length > 0) {
-        console.log(`[AgentChannelReader] 🔍 Discovered ${registrations.length} EA(s) via registration files`);
+      try {
+        const registrations = await this.readEARegistrationFiles();
         
-        // Convert registrations to port ranges
-        for (const reg of registrations) {
-          const name = `mt5-${reg.login}`;
-          portRanges.push({
-            dataPort: reg.dataPort,
-            commandPort: reg.commandPort,
-            name,
-          });
-          discoveredPorts.add(reg.dataPort);
+        if (registrations.length > 0) {
+          console.log(`[AgentChannelReader] 🔍 Discovered ${registrations.length} EA(s) via registration files`);
+          
+          for (const reg of registrations) {
+            const name = `mt5-${reg.login}`;
+            candidates.push({
+              dataPort: reg.dataPort,
+              commandPort: reg.commandPort,
+              name,
+              source: 'registration',
+            });
+            discoveredPorts.add(reg.dataPort);
+          }
+        }
+      } catch (err) {
+        console.warn('[AgentChannelReader] Registration file discovery failed:', err instanceof Error ? err.message : err);
+      }
+      
+      // Fallback port scan ONLY if no registration files found
+      if (discoveredPorts.size === 0) {
+        console.log('[AgentChannelReader] No registration files found — falling back to port scan');
+        for (const fallback of AgentChannelReader.FALLBACK_PORT_RANGES) {
+          candidates.push({ ...fallback, source: 'fallback' });
         }
       }
-    } catch (err) {
-      console.warn('[AgentChannelReader] Registration file discovery failed:', err instanceof Error ? err.message : err);
-    }
-    
-    // ═══════════════════════════════════════════════════════════════
-    // Phase 1b: Fallback port scan ONLY if no registration files found
-    // When registration files exist, we trust them completely — no need
-    // to waste time scanning empty ports (each takes ~5s to timeout)
-    // ═══════════════════════════════════════════════════════════════
-    if (discoveredPorts.size === 0) {
-      console.log('[AgentChannelReader] No registration files found — falling back to port scan');
-      for (const fallback of AgentChannelReader.FALLBACK_PORT_RANGES) {
-        portRanges.push(fallback);
-      }
-    }
-    
-    console.log(`[AgentChannelReader] Scanning ${portRanges.length} port range(s) (${discoveredPorts.size} from registration, ${portRanges.length - discoveredPorts.size} fallback)`);
-    
-    // ═══════════════════════════════════════════════════════════════
-    // Phase 2: Connect to all discovered ports in parallel
-    // ═══════════════════════════════════════════════════════════════
-    const connectionPromises = portRanges.map(async (portRange) => {
-      // Skip if already connected to this port range
-      const existingBridge = this.zmqBridges.get(portRange.name);
-      if (existingBridge && existingBridge.isConnected()) {
-        connectedTerminals.push(portRange.name);
-        return { portRange, connected: false, existing: true };
+      
+      // ═══════════════════════════════════════════════════════════════
+      // Phase 2: Fast TCP probe — filter to only live ports (~150ms)
+      // This eliminates the old 7-second blind wait and prevents
+      // creating ZMQ bridges to dead ports (which would leak sockets)
+      // ═══════════════════════════════════════════════════════════════
+      // First, include truly alive terminals in the result (use isAlive not isConnected)
+      // and clean up stale bridges that are socket-connected but no longer receiving data
+      const alreadyConnected = new Set<string>();
+      const staleBridges: string[] = [];
+      for (const [name, bridge] of this.zmqBridges) {
+        if (bridge.isAlive()) {
+          connectedTerminals.push(name);
+          alreadyConnected.add(name);
+        } else if (bridge.isConnected() && !bridge.isAlive()) {
+          // Socket is open but no data received recently = stale/dead bridge
+          staleBridges.push(name);
+        }
       }
       
-      // Try to connect to this port range
-      try {
-        const connected = await this.connectMT5(portRange.name, {
-          dataPort: portRange.dataPort,
-          commandPort: portRange.commandPort,
-        });
-        return { portRange, connected, existing: false };
-      } catch (error) {
-        return { portRange, connected: false, existing: false };
+      // Clean up stale bridges so they don't block reconnection to same ports
+      for (const staleId of staleBridges) {
+        console.log(`[AgentChannelReader] Cleaning up stale bridge: ${staleId} (socket open but no data)`);
+        await this.safeDisconnectMT5(staleId);
       }
-    });
-    
-    const results = await Promise.all(connectionPromises);
-    
-    // ═══════════════════════════════════════════════════════════════
-    // Phase 3: Wait for PUB/SUB events (heartbeats arrive every 1-5s)
-    // ═══════════════════════════════════════════════════════════════
-    const newConnections = results.filter(r => r.connected && !r.existing);
-    if (newConnections.length > 0) {
-      console.log(`[AgentChannelReader] Waiting for PUB/SUB events from ${newConnections.length} new connections...`);
-      await new Promise(resolve => setTimeout(resolve, 7000));
-    }
-    
-    // ═══════════════════════════════════════════════════════════════
-    // Phase 4: Verify which connections have live EAs
-    // ═══════════════════════════════════════════════════════════════
-    for (const result of results) {
-      if (result.existing) continue;
       
-      if (result.connected) {
-        const bridge = this.zmqBridges.get(result.portRange.name);
-        if (bridge) {
-          const status = bridge.getStatus();
-          const hasEvents = status.eventsReceived > 0;
-          const hasAccountState = bridge.getCachedAccountState() !== null;
-          
-          if (hasEvents || hasAccountState) {
-            console.log(`[AgentChannelReader] ✅ EA detected on ${result.portRange.name} via PUB/SUB (events: ${status.eventsReceived})`);
-            connectedTerminals.push(result.portRange.name);
-          } else {
-            // No PUB events yet - try a lightweight PING to check if EA is alive
-            console.log(`[AgentChannelReader] No PUB events on ${result.portRange.name}, trying PING...`);
-            try {
-              const alive = await bridge.ping();
-              if (alive) {
-                console.log(`[AgentChannelReader] ✅ EA detected on ${result.portRange.name} via PING`);
-                connectedTerminals.push(result.portRange.name);
-                // Request initial account data in background
-                this.requestInitialStateFromBridge(bridge, result.portRange.name);
-              } else {
-                console.log(`[AgentChannelReader] No EA on ${result.portRange.name}, disconnecting`);
-                await this.disconnectMT5(result.portRange.name);
-              }
-            } catch {
-              console.log(`[AgentChannelReader] No EA on ${result.portRange.name} (PING timeout), disconnecting`);
-              await this.disconnectMT5(result.portRange.name);
+      // Remove candidates that already have active bridges
+      candidates = candidates.filter(c => !alreadyConnected.has(c.name));
+      
+      if (candidates.length === 0) {
+        console.log(`[AgentChannelReader] All known ports already connected (${connectedTerminals.length} terminal(s))`);
+        return connectedTerminals;
+      }
+      
+      console.log(`[AgentChannelReader] TCP-probing ${candidates.length} port(s) (${discoveredPorts.size} from registration, ${candidates.length - discoveredPorts.size} fallback)`);
+      const scanResults = await portManager.discoverLivePorts(candidates);
+      const livePorts = scanResults.filter(r => r.alive);
+      const deadPorts = scanResults.filter(r => !r.alive);
+      
+      if (deadPorts.length > 0) {
+        console.log(`[AgentChannelReader] Skipping ${deadPorts.length} dead port(s): ${deadPorts.map(d => d.dataPort).join(', ')}`);
+      }
+      
+      if (livePorts.length === 0) {
+        console.log('[AgentChannelReader] No live ports found');
+        return connectedTerminals;
+      }
+      
+      // ═══════════════════════════════════════════════════════════════
+      // Phase 3: Connect ONLY to live ports (no zombie bridges)
+      // ═══════════════════════════════════════════════════════════════
+      console.log(`[AgentChannelReader] Connecting to ${livePorts.length} live port(s)...`);
+      
+      const connectionPromises = livePorts.map(async (scanResult) => {
+        // Register port allocations
+        portManager.allocate(scanResult.dataPort, 'zmq-data', scanResult.terminalId);
+        portManager.allocate(scanResult.commandPort, 'zmq-command', scanResult.terminalId);
+        portManager.markVerified(scanResult.dataPort);
+        
+        try {
+          const connected = await this.connectMT5(scanResult.terminalId, {
+            dataPort: scanResult.dataPort,
+            commandPort: scanResult.commandPort,
+          });
+          return { scanResult, connected };
+        } catch (error) {
+          // Release ports on failure
+          portManager.release(scanResult.dataPort);
+          portManager.release(scanResult.commandPort);
+          return { scanResult, connected: false };
+        }
+      });
+      
+      const results = await Promise.all(connectionPromises);
+      
+      // ═══════════════════════════════════════════════════════════════
+      // Phase 4: Wait briefly for PUB/SUB events, then verify via PING
+      // Reduced from 7s to 3s since we already know ports are alive
+      // ═══════════════════════════════════════════════════════════════
+      const newConnections = results.filter(r => r.connected);
+      if (newConnections.length > 0) {
+        console.log(`[AgentChannelReader] Waiting for PUB/SUB events from ${newConnections.length} new connection(s)...`);
+        await new Promise(resolve => setTimeout(resolve, 3000));
+      }
+      
+      // ═══════════════════════════════════════════════════════════════
+      // Phase 5: Verify connections and clean up dead ones
+      // ═══════════════════════════════════════════════════════════════
+      for (const result of results) {
+        if (!result.connected) continue;
+        
+        const bridge = this.zmqBridges.get(result.scanResult.terminalId);
+        if (!bridge) continue;
+        
+        const status = bridge.getStatus();
+        const hasEvents = status.eventsReceived > 0;
+        const hasAccountState = bridge.getCachedAccountState() !== null;
+        
+        if (hasEvents || hasAccountState) {
+          console.log(`[AgentChannelReader] ✅ EA detected on ${result.scanResult.terminalId} via PUB/SUB (events: ${status.eventsReceived})`);
+          connectedTerminals.push(result.scanResult.terminalId);
+        } else {
+          // No PUB events yet — try PING as final check
+          console.log(`[AgentChannelReader] No PUB events on ${result.scanResult.terminalId}, trying PING...`);
+          try {
+            const alive = await bridge.ping();
+            if (alive) {
+              console.log(`[AgentChannelReader] ✅ EA detected on ${result.scanResult.terminalId} via PING`);
+              connectedTerminals.push(result.scanResult.terminalId);
+              this.requestInitialStateFromBridge(bridge, result.scanResult.terminalId);
+            } else {
+              console.log(`[AgentChannelReader] No EA on ${result.scanResult.terminalId}, disconnecting`);
+              await this.safeDisconnectMT5(result.scanResult.terminalId);
             }
+          } catch {
+            console.log(`[AgentChannelReader] No EA on ${result.scanResult.terminalId} (PING timeout), disconnecting`);
+            await this.safeDisconnectMT5(result.scanResult.terminalId);
           }
         }
       }
+      
+      console.log(`[AgentChannelReader] Scan complete: ${connectedTerminals.length} terminal(s) connected`);
+    } finally {
+      // Always release the scan lock
+      releaseLock();
     }
     
-    console.log(`[AgentChannelReader] Scan complete: ${connectedTerminals.length} terminal(s) connected`);
     return connectedTerminals;
+  }
+  
+  /**
+   * Safe disconnect that always cleans up port allocations and bridge references,
+   * even if the underlying bridge.stop() throws.
+   */
+  private async safeDisconnectMT5(terminalId: string): Promise<void> {
+    try {
+      await this.disconnectMT5(terminalId);
+    } catch (error) {
+      console.error(`[AgentChannelReader] Error during disconnect of ${terminalId}, force-cleaning:`, error);
+      // Force cleanup even if stop() threw
+      this.zmqBridges.delete(terminalId);
+      this.lastSnapshots.delete(terminalId);
+      this.terminalConfigs.delete(terminalId);
+    }
+    // Always release port allocations
+    portManager.releaseByLabel(terminalId);
   }
   
   /**
@@ -850,15 +954,21 @@ export class AgentChannelReader extends EventEmitter {
   }
   
   /**
-   * Disconnect from an MT5 terminal
+   * Disconnect from an MT5 terminal.
+   * Also releases port allocations in the central PortManager.
    */
   async disconnectMT5(terminalId: string): Promise<void> {
     const bridge = this.zmqBridges.get(terminalId);
     if (bridge) {
-      await bridge.stop();
+      try {
+        await bridge.stop();
+      } catch (error) {
+        console.error(`[AgentChannelReader] Error stopping bridge for ${terminalId}:`, error);
+      }
       this.zmqBridges.delete(terminalId);
       this.lastSnapshots.delete(terminalId);
       this.terminalConfigs.delete(terminalId);
+      portManager.releaseByLabel(terminalId);
       console.log(`[AgentChannelReader] Disconnected from ${terminalId}`);
     }
   }
@@ -1086,6 +1196,24 @@ export class AgentChannelReader extends EventEmitter {
       this.lastSnapshots.set(terminalId, snapshot);
       this.notifyListeners(terminalId, snapshot);
       this.emit('terminalConnected', terminalId, 'MT5');
+      
+      // ─── HISTORICAL DEALS: Fetch closed-trade history after a short delay ───
+      // Delay to avoid blocking the command queue during initial connection
+      // handshake (STATUS, PING etc. need to go through first)
+      setTimeout(() => {
+        bridge.getHistory(30).then((result) => {
+          const deals = result.deals;
+          if (deals && deals.length > 0) {
+            const emitId = result.accountId ? `mt5-${result.accountId}` : terminalId;
+            console.log(`[AgentChannelReader] Fetched ${deals.length} historical deals for terminal ${terminalId} → emitting as ${emitId}`);
+            this.emit('tradeHistory', emitId, deals);
+          } else {
+            console.log(`[AgentChannelReader] No historical deals returned for terminal ${terminalId}`);
+          }
+        }).catch((err) => {
+          console.warn(`[AgentChannelReader] Failed to fetch trade history for ${terminalId}:`, err);
+        });
+      }, 5000); // Wait 5s after connection before fetching history
     });
     
     bridge.on('disconnected', (event: ZmqEvent) => {
@@ -1380,11 +1508,43 @@ export class AgentChannelReader extends EventEmitter {
   }
   
   /**
-   * Check if terminal is connected
+   * Fetch trade history on demand for a specific terminal.
+   * Returns the deals array from the bridge, or empty array on failure.
+   */
+  async fetchTradeHistory(terminalId: string, days: number = 30): Promise<any[]> {
+    const bridge = this.zmqBridges.get(terminalId);
+    if (!bridge || !bridge.isConnected()) {
+      console.warn(`[AgentChannelReader] Cannot fetch history: terminal ${terminalId} not connected via ZMQ`);
+      return [];
+    }
+    try {
+      const result = await bridge.getHistory(days);
+      const deals = result.deals;
+      if (deals && deals.length > 0) {
+        // Use the EA-reported accountId (login number) for the emit key so
+        // that TradeHistoryContext can map it to the Supabase account ID via
+        // loginMapRef.  Format: "mt5-{login}" to match existing convention.
+        const emitId = result.accountId ? `mt5-${result.accountId}` : terminalId;
+        console.log(`[AgentChannelReader] On-demand history fetch: ${deals.length} deals for ${terminalId} → emitting as ${emitId}`);
+        // Emit the event so the renderer can process the deals
+        this.emit('tradeHistory', emitId, deals);
+        return deals;
+      }
+      console.log(`[AgentChannelReader] On-demand history fetch: 0 deals for ${terminalId}`);
+      return [];
+    } catch (err) {
+      console.error(`[AgentChannelReader] On-demand history fetch failed for ${terminalId}:`, err);
+      return [];
+    }
+  }
+
+  /**
+   * Check if terminal is connected AND actively receiving data (alive)
+   * Uses heartbeat-based liveness, not just socket state.
    */
   isTerminalConnected(terminalId: string): boolean {
     const bridge = this.zmqBridges.get(terminalId);
-    if (bridge) return bridge.isConnected();
+    if (bridge) return bridge.isAlive();
     
     const pipeClient = this.pipeClients.get(terminalId);
     if (pipeClient) return pipeClient.isConnected();
@@ -1598,6 +1758,63 @@ export class AgentChannelReader extends EventEmitter {
   }
   
   /**
+   * Open a new position on a terminal (Trade Copier support)
+   */
+  async openPosition(terminalId: string, params: {
+    symbol: string;
+    side: 'BUY' | 'SELL';
+    volume: number;
+    sl?: number;
+    tp?: number;
+    magic?: number;
+    comment?: string;
+    deviation?: number;
+  }): Promise<{ success: boolean; ticket?: string; error?: string; data?: unknown }> {
+    // Prefer ZMQ direct method for rich parameter support
+    const bridge = this.zmqBridges.get(terminalId);
+    if (bridge && bridge.isConnected()) {
+      try {
+        const response = await bridge.openPosition(params);
+        return {
+          success: response.success,
+          ticket: response.ticket != null ? String(response.ticket) : undefined,
+          error: response.error,
+          data: response,
+        };
+      } catch (error) {
+        console.warn(`[AgentChannelReader] ZMQ openPosition failed for ${terminalId}:`, error);
+        return {
+          success: false,
+          error: error instanceof Error ? error.message : 'ZMQ openPosition failed',
+        };
+      }
+    }
+    
+    return { success: false, error: 'Terminal not connected via ZMQ' };
+  }
+  
+  /**
+   * Modify position SL/TP on a terminal (Trade Copier support)
+   */
+  async modifyPosition(terminalId: string, ticket: string, sl?: number, tp?: number): Promise<{ success: boolean; error?: string }> {
+    const bridge = this.zmqBridges.get(terminalId);
+    if (bridge && bridge.isConnected()) {
+      try {
+        const response = await bridge.modifyPosition(ticket, sl, tp);
+        return { success: response.success, error: response.error };
+      } catch (error) {
+        console.warn(`[AgentChannelReader] ZMQ modifyPosition failed for ${terminalId}:`, error);
+        return {
+          success: false,
+          error: error instanceof Error ? error.message : 'ZMQ modifyPosition failed',
+        };
+      }
+    }
+    
+    return { success: false, error: 'Terminal not connected via ZMQ' };
+  }
+  
+  /**
    * Ping the agent to check connectivity
    */
   async ping(terminalId: string): Promise<boolean> {
@@ -1696,16 +1913,18 @@ export class AgentChannelReader extends EventEmitter {
   }
   
   /**
-   * Stop all connections and cleanup
+   * Stop all connections and cleanup.
+   * Releases all port allocations via PortManager.
    */
   async shutdown(): Promise<void> {
-    // Stop all ZMQ bridges (MT5)
+    // Stop all ZMQ bridges (MT5) and release their ports
     for (const [terminalId, bridge] of this.zmqBridges) {
       try {
         await bridge.stop();
       } catch (error) {
         console.error(`[AgentChannelReader] Error stopping ZMQ bridge for ${terminalId}:`, error);
       }
+      portManager.releaseByLabel(terminalId);
     }
     this.zmqBridges.clear();
     

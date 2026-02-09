@@ -25,41 +25,8 @@ CORS(app)
 # Mock License Database (In production, this would be a real database)
 # ============================================================================
 
-# Valid test license keys
-TEST_LICENSES = {
-    "TEST-1234-5678-DEMO": {
-        "plan": "demo",
-        "email": "demo@test.com",
-        "created": "2026-01-01",
-        "expires": "2026-12-31",
-        "max_devices": 1,
-        "features": ["trade-copying", "hedge-detection"]
-    },
-    "73E0A88D-DAF0-4EC5-979B-236C3BF0C925": {
-        "plan": "professional",
-        "email": "user@hedge-edge.com",
-        "created": "2026-01-01",
-        "expires": "2027-12-31",
-        "max_devices": 10,
-        "features": ["trade-copying", "hedge-detection", "multi-account", "analytics", "api-access"]
-    },
-    "PROD-ABCD-EFGH-FULL": {
-        "plan": "professional",
-        "email": "pro@hedge-edge.com",
-        "created": "2026-01-01",
-        "expires": "2027-01-01",
-        "max_devices": 3,
-        "features": ["trade-copying", "hedge-detection", "multi-account", "analytics", "api-access"]
-    },
-    "ENTE-RPRS-TEAM-PLAN": {
-        "plan": "enterprise",
-        "email": "enterprise@company.com",
-        "created": "2026-01-01",
-        "expires": "2028-01-01",
-        "max_devices": 50,
-        "features": ["trade-copying", "hedge-detection", "multi-account", "analytics", "api-access", "priority-support", "custom-integrations"]
-    }
-}
+# License keys (add real keys here or load from environment/database)
+TEST_LICENSES = {}
 
 # Device tracking (in production, stored in database)
 DEVICE_REGISTRATIONS = {}
@@ -235,9 +202,8 @@ if __name__ == '__main__':
     print("=" * 60)
     print("Hedge Edge License API Server (Development)")
     print("=" * 60)
-    print("\nAvailable test license keys:")
-    for key, info in TEST_LICENSES.items():
-        print(f"  {key} - {info['plan']} (expires: {info['expires']})")
+    print("\nNo test license keys configured.")
+    print("Add license keys to TEST_LICENSES dict or load from environment.")
     print("\nEndpoints:")
     print("  POST http://localhost:5001/v1/license/validate")
     print("  GET  http://localhost:5001/v1/license/status")

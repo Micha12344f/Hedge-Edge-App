@@ -315,6 +315,7 @@ const Accounts = () => {
         onUpdateRelationship={handleUpdateRelationship}
         onAccountClick={handleAccountClick}
         getConnectionStatus={getConnectionStatus}
+        getAccountSnapshot={getSnapshot}
       />
 
       {/* Select existing account dialog */}

@@ -9,6 +9,7 @@ import { Switch } from '@/components/ui/switch';
 import { CopierGroupCard } from '@/components/dashboard/CopierGroupCard';
 import { CreateCopierGroupModal } from '@/components/dashboard/CreateCopierGroupModal';
 import { ConfigureCopierGroupModal } from '@/components/dashboard/ConfigureCopierGroupModal';
+import { NotificationPreferencesPanel } from '@/components/dashboard/NotificationPreferencesPanel';
 import { useCopierGroupsContext } from '@/contexts/CopierGroupsContext';
 import type { CopierGroup } from '@/types/copier';
 import {
@@ -96,9 +97,14 @@ const TradeCopier = () => {
     deleteGroup,
     addGroup,
     updateGroup,
+    activityLog,
+    resetCircuitBreaker,
+    globalCopierEnabled,
   } = useCopierGroupsContext();
 
-  const [globalEnabled, setGlobalEnabled] = useState(true);
+  // Only non-archived accounts are valid for copier groups
+  const activeAccounts = useMemo(() => accounts.filter(a => !a.is_archived), [accounts]);
+
   const [searchQuery, setSearchQuery] = useState('');
   const [createOpen, setCreateOpen] = useState(false);
   const [configureGroup, setConfigureGroup] = useState<CopierGroup | null>(null);
@@ -116,7 +122,6 @@ const TradeCopier = () => {
   const handleConfigureSave = (updated: CopierGroup) => updateGroup(updated);
 
   const handleToggleGlobal = (enabled: boolean) => {
-    setGlobalEnabled(enabled);
     toggleGlobal(enabled);
   };
 
@@ -170,15 +175,15 @@ const TradeCopier = () => {
                   <Tooltip>
                     <TooltipTrigger asChild>
                       <div className="flex items-center gap-2">
-                        <Power className={`h-4 w-4 ${globalEnabled ? 'text-green-500' : 'text-muted-foreground'}`} />
+                        <Power className={`h-4 w-4 ${globalCopierEnabled ? 'text-green-500' : 'text-muted-foreground'}`} />
                         <Switch
-                          checked={globalEnabled}
+                          checked={globalCopierEnabled}
                           onCheckedChange={handleToggleGlobal}
                         />
                       </div>
                     </TooltipTrigger>
                     <TooltipContent>
-                      <p>{globalEnabled ? 'All copying active' : 'All copying paused'}</p>
+                      <p>{globalCopierEnabled ? 'All copying active' : 'All copying paused'}</p>
                     </TooltipContent>
                   </Tooltip>
                 </TooltipProvider>
@@ -200,10 +205,26 @@ const TradeCopier = () => {
                 </TooltipContent>
               </Tooltip>
             </TooltipProvider>
-            <Button onClick={() => setCreateOpen(true)} disabled={accounts.length < 2}>
-              <Plus className="mr-2 h-4 w-4" />
-              New Copier Group
-            </Button>
+            <TooltipProvider>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <span>
+                    <Button
+                      onClick={() => setCreateOpen(true)}
+                      disabled={loading || activeAccounts.length < 2}
+                    >
+                      <Plus className="mr-2 h-4 w-4" />
+                      New Copier Group
+                    </Button>
+                  </span>
+                </TooltipTrigger>
+                {!loading && activeAccounts.length < 2 && (
+                  <TooltipContent>
+                    <p>You need at least 2 active accounts to create a copier group</p>
+                  </TooltipContent>
+                )}
+              </Tooltip>
+            </TooltipProvider>
           </div>
         </div>
 
@@ -320,6 +341,57 @@ const TradeCopier = () => {
           </div>
         )}
 
+        {/* Live Activity Log */}
+        {groups.length > 0 && activityLog.length > 0 && (
+          <Card className="border-border/50 bg-card/50">
+            <CardHeader className="pb-3">
+              <CardTitle className="text-sm font-medium flex items-center gap-2">
+                <Activity className="h-4 w-4 text-primary" />
+                Recent Copy Activity
+                <Badge variant="outline" className="text-xs">{activityLog.length}</Badge>
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="space-y-1.5 max-h-48 overflow-y-auto">
+                {activityLog.slice(0, 20).map((entry) => (
+                  <div
+                    key={entry.id}
+                    className={`flex items-center justify-between text-xs px-2 py-1.5 rounded ${
+                      entry.status === 'failed'
+                        ? 'bg-red-500/10 text-red-400'
+                        : 'bg-muted/30 text-muted-foreground'
+                    }`}
+                  >
+                    <div className="flex items-center gap-2">
+                      {entry.status === 'success' ? (
+                        <CheckCircle2 className="h-3 w-3 text-green-500 flex-shrink-0" />
+                      ) : (
+                        <AlertTriangle className="h-3 w-3 text-red-500 flex-shrink-0" />
+                      )}
+                      <span className="font-medium">{entry.symbol}</span>
+                      <span className={entry.action === 'buy' ? 'text-green-400' : 'text-red-400'}>
+                        {entry.action.toUpperCase()}
+                      </span>
+                      <span>{entry.volume} lots</span>
+                    </div>
+                    <div className="flex items-center gap-3">
+                      <span>{entry.latency}ms</span>
+                      <span className="text-muted-foreground/60">
+                        {new Date(entry.timestamp).toLocaleTimeString()}
+                      </span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </CardContent>
+          </Card>
+        )}
+
+        {/* Notification Preferences */}
+        {groups.length > 0 && (
+          <NotificationPreferencesPanel />
+        )}
+
         {/* Empty search result */}
         {groups.length > 0 && filteredGroups.length === 0 && searchQuery && (
           <div className="text-center py-12">
@@ -385,10 +457,15 @@ const TradeCopier = () => {
 
               {/* CTA */}
               <div className="flex flex-col sm:flex-row items-center justify-center gap-4 mt-8 pt-6 border-t border-border/30">
-                {accounts.length < 2 ? (
+                {loading ? (
+                  <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                    <Activity className="h-4 w-4 animate-pulse text-primary" />
+                    Loading accounts...
+                  </div>
+                ) : activeAccounts.length < 2 ? (
                   <div className="flex items-center gap-2 text-sm text-muted-foreground">
                     <AlertTriangle className="h-4 w-4 text-yellow-500" />
-                    You need at least 2 accounts to create a copier group
+                    You need at least 2 active accounts to create a copier group
                   </div>
                 ) : (
                   <Button size="lg" className="group" onClick={() => setCreateOpen(true)}>
@@ -403,6 +480,7 @@ const TradeCopier = () => {
 
         {/* Create Modal */}
         <CreateCopierGroupModal
+          key={createOpen ? 'create-open' : 'create-closed'}
           open={createOpen}
           onOpenChange={setCreateOpen}
           accounts={accounts}

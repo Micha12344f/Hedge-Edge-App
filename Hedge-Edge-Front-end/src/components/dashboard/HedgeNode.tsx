@@ -11,10 +11,12 @@ import {
   Target,
   Shield,
   Flame,
-  ExternalLink
+  ExternalLink,
+  WifiOff
 } from 'lucide-react';
 
 import type { ConnectionStatus as CopierConnectionStatus } from '@/contexts/CopierGroupsContext';
+import type { ConnectionSnapshot } from '@/types/connections';
 
 interface HedgeNodeProps {
   account: TradingAccount;
@@ -23,6 +25,8 @@ interface HedgeNodeProps {
   isLinkSource?: boolean;
   /** Copier connection status for status-based node coloring */
   copierStatus?: CopierConnectionStatus;
+  /** Connection snapshot for real EA connection status */
+  connectionSnapshot?: ConnectionSnapshot | null;
   onClick?: () => void;
   onDetailsClick?: () => void;
   onDoubleClick?: () => void;
@@ -30,9 +34,9 @@ interface HedgeNodeProps {
   position?: { x: number; y: number };
 }
 
-type ConnectionStatus = 'connected' | 'lagging' | 'risk';
+type ConnectionStatus = 'connected' | 'lagging' | 'risk' | 'disconnected';
 
-export const HedgeNode = ({ account, isSelected, isDragging, isLinkSource, copierStatus = 'none', onClick, onDetailsClick, onDoubleClick, onMouseDown, position }: HedgeNodeProps) => {
+export const HedgeNode = ({ account, isSelected, isDragging, isLinkSource, copierStatus = 'none', connectionSnapshot, onClick, onDetailsClick, onDoubleClick, onMouseDown, position }: HedgeNodeProps) => {
   const profitTarget = Number(account.profit_target) || 0;
   const maxLoss = Number(account.max_loss) || 0;
   const maxDailyLoss = Number(account.max_daily_loss) || 0;
@@ -62,8 +66,15 @@ export const HedgeNode = ({ account, isSelected, isDragging, isLinkSource, copie
     ? Math.max(profitTarget - pnlPercent, 0)
     : null;
 
-  // Determine connection status based on account health
+  // Determine connection status based on real connection snapshot first, then account health
   const getConnectionStatus = (): ConnectionStatus => {
+    // For hedge accounts, check real EA connection status first
+    if (account.phase === 'live' && connectionSnapshot !== undefined) {
+      const realStatus = connectionSnapshot?.session.status;
+      if (!realStatus || realStatus === 'disconnected' || realStatus === 'idle') {
+        return 'disconnected';
+      }
+    }
     if (distanceToFail !== null && distanceToFail < 2) return 'risk';
     if (account.last_sync_at) {
       const lastSync = new Date(account.last_sync_at);
@@ -136,11 +147,18 @@ export const HedgeNode = ({ account, isSelected, isDragging, isLinkSource, copie
       label: 'Risk',
       pulse: true,
     },
+    disconnected: {
+      badge: 'bg-muted/30 text-muted-foreground border-muted-foreground/30',
+      icon: WifiOff,
+      label: 'Disconnected',
+      pulse: false,
+    },
   };
 
   const config = typeConfig[account.phase];
   const StatusIcon = statusConfig[connectionStatus].icon;
   const TypeIcon = config.icon;
+  const isNodeDisconnected = connectionStatus === 'disconnected';
 
   // Copier status border override
   const copierBorderClass = copierStatus === 'active' ? 'border-green-500/60'
@@ -169,8 +187,9 @@ export const HedgeNode = ({ account, isSelected, isDragging, isLinkSource, copie
         } : undefined}
         className={cn(
           'w-72 rounded-xl border-2 bg-card cursor-pointer select-none overflow-hidden',
-          copierBorderClass || config.border,
-          copierGlow,
+          copierBorderClass || (isNodeDisconnected ? 'border-muted-foreground/30' : config.border),
+          !isNodeDisconnected && copierGlow,
+          isNodeDisconnected && 'opacity-50',
           isSelected && 'ring-2 ring-offset-2 ring-offset-background ring-primary',
           isLinkSource && 'ring-2 ring-primary ring-offset-2 ring-offset-background'
         )}

@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import {
   Dialog,
   DialogContent,
@@ -21,7 +21,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { ScrollArea } from '@/components/ui/scroll-area';
 import { Separator } from '@/components/ui/separator';
 import {
   Crown,
@@ -99,6 +98,39 @@ export function CreateCopierGroupModal({
 
   // Risk settings (applied to all new followers as defaults)
   const [volumeSizing, setVolumeSizing] = useState<VolumeSizingMode>('equity-to-equity');
+
+  // ── Reset form state when dialog opens (ensures fresh state each time) ──
+
+  useEffect(() => {
+    if (open) {
+      if (editGroup) {
+        // Populate from the group being edited
+        setGroupName(editGroup.name || '');
+        setLeaderId(editGroup.leaderAccountId || '');
+        setSelectedFollowerIds(editGroup.followers.map(f => f.accountId) || []);
+      } else {
+        // Fresh create — reset everything
+        setGroupName('');
+        setLeaderId('');
+        setSelectedFollowerIds([]);
+        setVolumeSizing('equity-to-equity');
+        setLotMultiplier('1.0');
+        setRiskMultiplier('1.0');
+        setFixedLot('0.01');
+        setFixedRiskPercent('1.0');
+        setFixedRiskNominal('50');
+        setCopySL(true);
+        setCopyTP(true);
+        setReverseMode(false);
+        setProtectionMode('off');
+        setMinThreshold('');
+        setMaxThreshold('');
+        setSymbolSuffix('');
+        setSymbolBlacklist('');
+        setActiveTab('accounts');
+      }
+    }
+  }, [open, editGroup]);
   const [lotMultiplier, setLotMultiplier] = useState('1.0');
   const [riskMultiplier, setRiskMultiplier] = useState('1.0');
   const [fixedLot, setFixedLot] = useState('0.01');
@@ -272,7 +304,7 @@ export function CreateCopierGroupModal({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-2xl max-h-[85vh] flex flex-col">
+      <DialogContent className="max-w-2xl max-h-[85vh] flex flex-col overflow-hidden">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <Plus className="h-5 w-5 text-primary" />
@@ -283,8 +315,8 @@ export function CreateCopierGroupModal({
           </DialogDescription>
         </DialogHeader>
 
-        <Tabs value={activeTab} onValueChange={setActiveTab} className="flex-1 min-h-0">
-          <TabsList className="grid w-full grid-cols-4 bg-muted/50">
+        <Tabs value={activeTab} onValueChange={setActiveTab} className="flex-1 min-h-0 flex flex-col">
+          <TabsList className="grid w-full grid-cols-4 bg-muted/50 shrink-0">
             <TabsTrigger value="accounts" className="text-xs data-[state=active]:bg-primary/20 data-[state=active]:text-primary">
               <Users className="h-3.5 w-3.5 mr-1" />
               Accounts
@@ -303,7 +335,7 @@ export function CreateCopierGroupModal({
             </TabsTrigger>
           </TabsList>
 
-          <ScrollArea className="flex-1 mt-4 pr-2" style={{ maxHeight: 'calc(85vh - 260px)' }}>
+          <div className="flex-1 min-h-0 overflow-y-auto mt-4 pr-2">
             {/* ─── TAB 1: Accounts ─────────────────────────────── */}
             <TabsContent value="accounts" className="mt-0 space-y-5">
               {/* Group Name */}
@@ -589,10 +621,10 @@ export function CreateCopierGroupModal({
                 </>
               )}
             </TabsContent>
-          </ScrollArea>
+          </div>
         </Tabs>
 
-        <DialogFooter className="mt-4 pt-4 border-t border-border/30">
+        <DialogFooter className="mt-4 pt-4 border-t border-border/30 shrink-0">
           <Button variant="outline" onClick={() => onOpenChange(false)}>
             Cancel
           </Button>

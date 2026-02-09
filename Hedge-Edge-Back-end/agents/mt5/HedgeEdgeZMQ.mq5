@@ -496,6 +496,85 @@ void ProcessCommands()
          TimeToString(TimeCurrent(), TIME_DATE|TIME_SECONDS)
       );
    }
+   else if(action == "GET_HISTORY")
+   {
+      //--- Fetch closed deal history from the trade server
+      //--- Default: last 30 days.  Caller may pass "days" param.
+      string daysStr = ExtractJsonValue(request, "days");
+      int days = (int)StringToInteger(daysStr);
+      if(days <= 0) days = 30;
+      
+      datetime from = TimeCurrent() - days * 86400;
+      datetime to   = TimeCurrent();
+      
+      if(!HistorySelect(from, to))
+      {
+         response = "{\"success\":false,\"action\":\"GET_HISTORY\",\"error\":\"HistorySelect failed\",\"timestamp\":\"" + TimeToString(TimeCurrent(), TIME_DATE|TIME_SECONDS) + "\"}";
+      }
+      else
+      {
+         int totalDeals = HistoryDealsTotal();
+         
+         response = "{\"success\":true,\"action\":\"GET_HISTORY\",\"accountId\":\"" + IntegerToString(AccountInfoInteger(ACCOUNT_LOGIN)) + "\",\"deals\":[";
+         
+         bool first = true;
+         for(int i = 0; i < totalDeals; i++)
+         {
+            ulong dealTicket = HistoryDealGetTicket(i);
+            if(dealTicket == 0) continue;
+            
+            //--- Only include IN/OUT/INOUT deals (actual trades, not balance ops)
+            long dealEntry = HistoryDealGetInteger(dealTicket, DEAL_ENTRY);
+            long dealType  = HistoryDealGetInteger(dealTicket, DEAL_TYPE);
+            
+            //--- Skip balance, credit, corrections etc — only BUY and SELL
+            if(dealType != DEAL_TYPE_BUY && dealType != DEAL_TYPE_SELL) continue;
+            
+            double dealProfit     = HistoryDealGetDouble(dealTicket, DEAL_PROFIT);
+            double dealSwap       = HistoryDealGetDouble(dealTicket, DEAL_SWAP);
+            double dealCommission = HistoryDealGetDouble(dealTicket, DEAL_COMMISSION);
+            double dealVolume     = HistoryDealGetDouble(dealTicket, DEAL_VOLUME);
+            double dealPrice      = HistoryDealGetDouble(dealTicket, DEAL_PRICE);
+            string dealSymbol     = HistoryDealGetString(dealTicket, DEAL_SYMBOL);
+            long   dealPosition   = HistoryDealGetInteger(dealTicket, DEAL_POSITION_ID);
+            datetime dealTime     = (datetime)HistoryDealGetInteger(dealTicket, DEAL_TIME);
+            string dealComment    = HistoryDealGetString(dealTicket, DEAL_COMMENT);
+            
+            string entryStr = "OTHER";
+            if(dealEntry == DEAL_ENTRY_IN)    entryStr = "IN";
+            if(dealEntry == DEAL_ENTRY_OUT)   entryStr = "OUT";
+            if(dealEntry == DEAL_ENTRY_INOUT) entryStr = "INOUT";
+            
+            if(!first) response += ",";
+            first = false;
+            
+            response += "{";
+            response += "\"ticket\":" + IntegerToString(dealTicket) + ",";
+            response += "\"positionId\":" + IntegerToString(dealPosition) + ",";
+            response += "\"symbol\":\"" + dealSymbol + "\",";
+            response += "\"type\":\"" + (dealType == DEAL_TYPE_BUY ? "BUY" : "SELL") + "\",";
+            response += "\"entry\":\"" + entryStr + "\",";
+            response += "\"volume\":" + DoubleToString(dealVolume, 2) + ",";
+            response += "\"price\":" + DoubleToString(dealPrice, 5) + ",";
+            response += "\"profit\":" + DoubleToString(dealProfit, 2) + ",";
+            response += "\"swap\":" + DoubleToString(dealSwap, 2) + ",";
+            response += "\"commission\":" + DoubleToString(dealCommission, 2) + ",";
+            response += "\"time\":\"" + TimeToString(dealTime, TIME_DATE|TIME_SECONDS) + "\",";
+            response += "\"comment\":\"" + EscapeJson(dealComment) + "\"";
+            response += "}";
+         }
+         
+         response += "],\"timestamp\":\"" + TimeToString(TimeCurrent(), TIME_DATE|TIME_SECONDS) + "\"}";
+      }
+   }
+   else if(action == "OPEN_POSITION")
+   {
+      response = OpenPositionByCommand(request);
+   }
+   else if(action == "MODIFY_POSITION")
+   {
+      response = ModifyPositionByCommand(request);
+   }
    else
    {
       response = "{\"success\":false,\"action\":\"UNKNOWN\",\"error\":\"Unknown command: " + action + "\",\"timestamp\":\"" + TimeToString(TimeCurrent(), TIME_DATE|TIME_SECONDS) + "\"}";
@@ -857,6 +936,179 @@ string ExtractJsonValue(string json, string key)
       }
       return StringSubstr(json, valueStart, valueEnd - valueStart);
    }
+}
+
+//+------------------------------------------------------------------+
+//| Open position by command (Trade Copier)                            |
+//| JSON params: symbol, side (BUY/SELL), volume, sl, tp, magic,       |
+//|              comment, deviation                                    |
+//+------------------------------------------------------------------+
+string OpenPositionByCommand(string request)
+{
+   if(!g_isLicenseValid && !InpDevMode)
+      return "{\"success\":false,\"action\":\"OPEN_POSITION\",\"error\":\"License invalid\",\"timestamp\":\"" + TimeToString(TimeCurrent(), TIME_DATE|TIME_SECONDS) + "\"}";
+   
+   string symbol    = ExtractJsonValue(request, "symbol");
+   string side      = ExtractJsonValue(request, "side");
+   string volStr    = ExtractJsonValue(request, "volume");
+   string slStr     = ExtractJsonValue(request, "sl");
+   string tpStr     = ExtractJsonValue(request, "tp");
+   string magicStr  = ExtractJsonValue(request, "magic");
+   string commentIn = ExtractJsonValue(request, "comment");
+   string devStr    = ExtractJsonValue(request, "deviation");
+   
+   if(StringLen(symbol) == 0)
+      return "{\"success\":false,\"action\":\"OPEN_POSITION\",\"error\":\"Symbol is required\",\"timestamp\":\"" + TimeToString(TimeCurrent(), TIME_DATE|TIME_SECONDS) + "\"}";
+   
+   if(side != "BUY" && side != "SELL")
+      return "{\"success\":false,\"action\":\"OPEN_POSITION\",\"error\":\"Side must be BUY or SELL\",\"timestamp\":\"" + TimeToString(TimeCurrent(), TIME_DATE|TIME_SECONDS) + "\"}";
+   
+   double volume = StringToDouble(volStr);
+   if(volume <= 0)
+      return "{\"success\":false,\"action\":\"OPEN_POSITION\",\"error\":\"Volume must be positive\",\"timestamp\":\"" + TimeToString(TimeCurrent(), TIME_DATE|TIME_SECONDS) + "\"}";
+   
+   if(!SymbolSelect(symbol, true))
+      return "{\"success\":false,\"action\":\"OPEN_POSITION\",\"error\":\"Symbol not found: " + symbol + "\",\"timestamp\":\"" + TimeToString(TimeCurrent(), TIME_DATE|TIME_SECONDS) + "\"}";
+   
+   double lotStep = SymbolInfoDouble(symbol, SYMBOL_VOLUME_STEP);
+   double lotMin  = SymbolInfoDouble(symbol, SYMBOL_VOLUME_MIN);
+   double lotMax  = SymbolInfoDouble(symbol, SYMBOL_VOLUME_MAX);
+   
+   if(lotStep > 0)
+      volume = MathFloor(volume / lotStep) * lotStep;
+   if(volume < lotMin) volume = lotMin;
+   if(volume > lotMax) volume = lotMax;
+   
+   MqlTradeRequest tradeReq = {};
+   MqlTradeResult  tradeRes = {};
+   
+   tradeReq.action    = TRADE_ACTION_DEAL;
+   tradeReq.symbol    = symbol;
+   tradeReq.volume    = volume;
+   tradeReq.deviation = (devStr != "") ? (ulong)StringToInteger(devStr) : 10;
+   tradeReq.magic     = (magicStr != "") ? (ulong)StringToInteger(magicStr) : 123456;
+   tradeReq.comment   = (commentIn != "") ? commentIn : "HedgeEdge Copy";
+   
+   double sl = (slStr != "" && slStr != "null" && slStr != "0") ? StringToDouble(slStr) : 0;
+   double tp = (tpStr != "" && tpStr != "null" && tpStr != "0") ? StringToDouble(tpStr) : 0;
+   
+   if(side == "BUY")
+   {
+      tradeReq.type  = ORDER_TYPE_BUY;
+      tradeReq.price = SymbolInfoDouble(symbol, SYMBOL_ASK);
+   }
+   else
+   {
+      tradeReq.type  = ORDER_TYPE_SELL;
+      tradeReq.price = SymbolInfoDouble(symbol, SYMBOL_BID);
+   }
+   
+   tradeReq.sl = sl;
+   tradeReq.tp = tp;
+   
+   long fillType = SymbolInfoInteger(symbol, SYMBOL_FILLING_MODE);
+   if(fillType & SYMBOL_FILLING_IOC)
+      tradeReq.type_filling = ORDER_FILLING_IOC;
+   else if(fillType & SYMBOL_FILLING_FOK)
+      tradeReq.type_filling = ORDER_FILLING_FOK;
+   else
+      tradeReq.type_filling = ORDER_FILLING_RETURN;
+   
+   if(!OrderSend(tradeReq, tradeRes))
+   {
+      string err = StringFormat("OrderSend failed: retcode=%d, comment=%s", tradeRes.retcode, tradeRes.comment);
+      Print("OPEN_POSITION error: ", err);
+      return "{\"success\":false,\"action\":\"OPEN_POSITION\",\"error\":\"" + EscapeJson(err) + "\",\"retcode\":" + IntegerToString(tradeRes.retcode) + ",\"timestamp\":\"" + TimeToString(TimeCurrent(), TIME_DATE|TIME_SECONDS) + "\"}";
+   }
+   
+   if(tradeRes.retcode != TRADE_RETCODE_DONE && tradeRes.retcode != TRADE_RETCODE_PLACED)
+   {
+      string err = StringFormat("Order rejected: retcode=%d, comment=%s", tradeRes.retcode, tradeRes.comment);
+      Print("OPEN_POSITION rejected: ", err);
+      return "{\"success\":false,\"action\":\"OPEN_POSITION\",\"error\":\"" + EscapeJson(err) + "\",\"retcode\":" + IntegerToString(tradeRes.retcode) + ",\"timestamp\":\"" + TimeToString(TimeCurrent(), TIME_DATE|TIME_SECONDS) + "\"}";
+   }
+   
+   Print("OPEN_POSITION success: ", side, " ", DoubleToString(volume, 2), " ", symbol, 
+         " @ ", DoubleToString(tradeRes.price, 5), " ticket=", tradeRes.deal, " order=", tradeRes.order);
+   
+   return StringFormat(
+      "{\"success\":true,\"action\":\"OPEN_POSITION\",\"ticket\":%s,\"order\":%s,\"symbol\":\"%s\",\"side\":\"%s\",\"volume\":%.2f,\"price\":%.5f,\"sl\":%.5f,\"tp\":%.5f,\"retcode\":%d,\"timestamp\":\"%s\"}",
+      IntegerToString(tradeRes.deal),
+      IntegerToString(tradeRes.order),
+      symbol,
+      side,
+      volume,
+      tradeRes.price,
+      sl,
+      tp,
+      tradeRes.retcode,
+      TimeToString(TimeCurrent(), TIME_DATE|TIME_SECONDS)
+   );
+}
+
+//+------------------------------------------------------------------+
+//| Modify position SL/TP by command (Trade Copier)                    |
+//| JSON params: ticket, sl, tp                                        |
+//+------------------------------------------------------------------+
+string ModifyPositionByCommand(string request)
+{
+   if(!g_isLicenseValid && !InpDevMode)
+      return "{\"success\":false,\"action\":\"MODIFY_POSITION\",\"error\":\"License invalid\",\"timestamp\":\"" + TimeToString(TimeCurrent(), TIME_DATE|TIME_SECONDS) + "\"}";
+   
+   string ticketStr = ExtractJsonValue(request, "ticket");
+   string slStr     = ExtractJsonValue(request, "sl");
+   string tpStr     = ExtractJsonValue(request, "tp");
+   
+   ulong ticket = (ulong)StringToInteger(ticketStr);
+   if(ticket == 0)
+      return "{\"success\":false,\"action\":\"MODIFY_POSITION\",\"error\":\"Invalid ticket\",\"timestamp\":\"" + TimeToString(TimeCurrent(), TIME_DATE|TIME_SECONDS) + "\"}";
+   
+   if(!PositionSelectByTicket(ticket))
+      return "{\"success\":false,\"action\":\"MODIFY_POSITION\",\"error\":\"Position not found: " + ticketStr + "\",\"timestamp\":\"" + TimeToString(TimeCurrent(), TIME_DATE|TIME_SECONDS) + "\"}";
+   
+   string symbol = PositionGetString(POSITION_SYMBOL);
+   double currentSL = PositionGetDouble(POSITION_SL);
+   double currentTP = PositionGetDouble(POSITION_TP);
+   
+   double newSL = (slStr != "" && slStr != "null") ? StringToDouble(slStr) : currentSL;
+   double newTP = (tpStr != "" && tpStr != "null") ? StringToDouble(tpStr) : currentTP;
+   
+   if(MathAbs(newSL - currentSL) < 0.000001 && MathAbs(newTP - currentTP) < 0.000001)
+      return "{\"success\":true,\"action\":\"MODIFY_POSITION\",\"message\":\"No change needed\",\"ticket\":\"" + ticketStr + "\",\"timestamp\":\"" + TimeToString(TimeCurrent(), TIME_DATE|TIME_SECONDS) + "\"}";
+   
+   MqlTradeRequest tradeReq = {};
+   MqlTradeResult  tradeRes = {};
+   
+   tradeReq.action   = TRADE_ACTION_SLTP;
+   tradeReq.position = ticket;
+   tradeReq.symbol   = symbol;
+   tradeReq.sl       = newSL;
+   tradeReq.tp       = newTP;
+   
+   if(!OrderSend(tradeReq, tradeRes))
+   {
+      string err = StringFormat("Modify failed: retcode=%d, comment=%s", tradeRes.retcode, tradeRes.comment);
+      Print("MODIFY_POSITION error: ", err);
+      return "{\"success\":false,\"action\":\"MODIFY_POSITION\",\"error\":\"" + EscapeJson(err) + "\",\"ticket\":\"" + ticketStr + "\",\"retcode\":" + IntegerToString(tradeRes.retcode) + ",\"timestamp\":\"" + TimeToString(TimeCurrent(), TIME_DATE|TIME_SECONDS) + "\"}";
+   }
+   
+   if(tradeRes.retcode != TRADE_RETCODE_DONE)
+   {
+      string err = StringFormat("Modify rejected: retcode=%d, comment=%s", tradeRes.retcode, tradeRes.comment);
+      Print("MODIFY_POSITION rejected: ", err);
+      return "{\"success\":false,\"action\":\"MODIFY_POSITION\",\"error\":\"" + EscapeJson(err) + "\",\"ticket\":\"" + ticketStr + "\",\"retcode\":" + IntegerToString(tradeRes.retcode) + ",\"timestamp\":\"" + TimeToString(TimeCurrent(), TIME_DATE|TIME_SECONDS) + "\"}";
+   }
+   
+   Print("MODIFY_POSITION success: ticket=", ticketStr, " SL=", DoubleToString(newSL, 5), " TP=", DoubleToString(newTP, 5));
+   
+   return StringFormat(
+      "{\"success\":true,\"action\":\"MODIFY_POSITION\",\"ticket\":\"%s\",\"sl\":%.5f,\"tp\":%.5f,\"retcode\":%d,\"timestamp\":\"%s\"}",
+      ticketStr,
+      newSL,
+      newTP,
+      tradeRes.retcode,
+      TimeToString(TimeCurrent(), TIME_DATE|TIME_SECONDS)
+   );
 }
 
 //+------------------------------------------------------------------+

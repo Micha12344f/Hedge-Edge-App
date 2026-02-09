@@ -115,7 +115,7 @@ interface LaunchCredentials {
 }
 
 interface TerminalsAPI {
-  detect: () => Promise<DetectionResult>;
+  detect: (forceRefresh?: boolean) => Promise<DetectionResult>;
   detectDeep: () => Promise<DetectionResult>;
   launch: (executablePath: string, credentials?: LaunchCredentials) => Promise<{ success: boolean; error?: string }>;
 }
@@ -434,6 +434,98 @@ interface AgentChannelAPI {
   }>;
 }
 
+// ─── Trade Copier API ───────────────────────────────────────────────────────
+
+interface CopierGroupConfig {
+  id: string;
+  name: string;
+  status: 'active' | 'paused' | 'error';
+  leaderAccountId: string;
+  leaderAccountName: string;
+  leaderPlatform: string;
+  leaderPhase: string;
+  leaderSymbolSuffixRemove: string;
+  followers: Array<{
+    id: string;
+    accountId: string;
+    accountName: string;
+    platform: string;
+    phase: string;
+    status: string;
+    volumeSizing: string;
+    lotMultiplier: number;
+    riskMultiplier: number;
+    fixedLot: number;
+    fixedRiskPercent: number;
+    fixedRiskNominal: number;
+    copySL: boolean;
+    copyTP: boolean;
+    additionalSLPips: number;
+    additionalTPPips: number;
+    reverseMode: boolean;
+    symbolWhitelist: string[];
+    symbolBlacklist: string[];
+    symbolSuffix: string;
+    symbolAliases: Array<{ masterSymbol: string; slaveSymbol: string; lotMultiplier?: number }>;
+    protectionMode: string;
+    minThreshold: number;
+    maxThreshold: number;
+    delayMs: number;
+  }>;
+}
+
+interface CopierEventPayload {
+  type: 'statsUpdate' | 'activity' | 'copyError' | 'protectionTriggered';
+  data: unknown;
+}
+
+interface CopierFollowerStatsData {
+  tradesToday: number;
+  tradesTotal: number;
+  totalProfit: number;
+  avgLatency: number;
+  successRate: number;
+  failedCopies: number;
+  lastCopyTime: string | null;
+}
+
+interface CopierGroupStatsData {
+  groupId: string;
+  tradesToday: number;
+  tradesTotal: number;
+  totalProfit: number;
+  avgLatency: number;
+  activeFollowers: number;
+  totalFollowers: number;
+  followers: Record<string, CopierFollowerStatsData>;
+}
+
+interface CopierActivityData {
+  id: string;
+  groupId: string;
+  followerId: string;
+  timestamp: string;
+  type: string;
+  symbol: string;
+  action: string;
+  volume: number;
+  price: number;
+  latency: number;
+  status: string;
+  errorMessage?: string;
+}
+
+interface CopierAPI {
+  updateGroups: (groups: CopierGroupConfig[]) => Promise<{ success: boolean; error?: string }>;
+  updateAccountMap: (mapping: Record<string, string>) => Promise<{ success: boolean; error?: string }>;
+  setGlobalEnabled: (enabled: boolean) => Promise<{ success: boolean; error?: string }>;
+  getGroupStats: (groupId: string) => Promise<{ success: boolean; data?: CopierGroupStatsData; error?: string }>;
+  getActivityLog: (limit?: number) => Promise<{ success: boolean; data?: CopierActivityData[]; error?: string }>;
+  resetCircuitBreaker: (groupId: string, followerId: string) => Promise<{ success: boolean; error?: string }>;
+  isGlobalEnabled: () => Promise<{ success: boolean; data?: boolean; error?: string }>;
+  onCopierEvent: (callback: (event: CopierEventPayload) => void) => () => void;
+}
+
 // Electron API exposed via preload script
 interface ElectronAPI {
   getVersion: () => Promise<string>;
@@ -454,6 +546,7 @@ interface ElectronAPI {
   installer: InstallerAPI;
   mt5Whitelist: MT5WhitelistAPI;
   agentChannel: AgentChannelAPI;
+  copier: CopierAPI;
 }
 
 // Extend Window interface for Electron

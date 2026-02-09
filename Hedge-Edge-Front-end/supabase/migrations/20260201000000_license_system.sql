@@ -223,24 +223,8 @@ CREATE POLICY "Service role full access to logs"
     USING (auth.role() = 'service_role');
 
 -- ============================================================================
--- SEED DATA (Test Licenses)
+-- NOTE: Test seed data has been removed. Add real licenses via the admin API.
 -- ============================================================================
-
--- Insert test licenses for development
-INSERT INTO licenses (license_key, email, plan, max_devices, features, expires_at, notes)
-VALUES 
-    ('TEST-1234-5678-DEMO', 'demo@test.com', 'demo', 1, 
-     '["trade-copying", "hedge-detection"]'::jsonb, 
-     '2026-12-31'::timestamptz, 'Test demo license'),
-    
-    ('PROD-ABCD-EFGH-FULL', 'pro@hedge-edge.com', 'professional', 3, 
-     '["trade-copying", "hedge-detection", "multi-account", "analytics", "api-access"]'::jsonb, 
-     '2027-01-01'::timestamptz, 'Test professional license'),
-    
-    ('ENTE-RPRS-TEAM-PLAN', 'enterprise@company.com', 'enterprise', 50, 
-     '["trade-copying", "hedge-detection", "multi-account", "analytics", "api-access", "priority-support", "custom-integrations"]'::jsonb, 
-     '2028-01-01'::timestamptz, 'Test enterprise license')
-ON CONFLICT (license_key) DO NOTHING;
 
 -- ============================================================================
 -- COMMENTS

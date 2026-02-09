@@ -130,13 +130,7 @@ EL-001 (License Handler)
 
 ## 🧪 Test License Keys
 
-For development/testing, use these keys with the mock server:
-
-| Key | Plan | Devices |
-|-----|------|---------|
-| `TEST-1234-5678-DEMO` | Demo | 1 |
-| `PROD-ABCD-EFGH-FULL` | Professional | 3 |
-| `ENTE-RPRS-TEAM-PLAN` | Enterprise | 50 |
+Test license keys have been removed. Create real license keys via the admin API or Supabase dashboard.
 
 Start mock server: `python bin/license_api_server.py`
 

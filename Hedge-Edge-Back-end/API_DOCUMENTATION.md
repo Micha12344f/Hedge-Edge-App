@@ -38,7 +38,7 @@ Validates a license key and registers the device. Returns a session token for au
 
 ```json
 {
-  "licenseKey": "PROD-ABCD-EFGH-FULL",
+  "licenseKey": "YOUR-LICENSE-KEY-HERE",
   "deviceId": "a1b2c3d4e5f6g7h8i9j0k1l2m3n4o5p6",
   "platform": "mt5",
   "accountId": "12345678",
@@ -66,7 +66,7 @@ Validates a license key and registers the device. Returns a session token for au
   "plan": "professional",
   "features": ["trade-copying", "hedge-detection", "multi-account", "analytics", "api-access"],
   "expiresAt": "2027-01-01T00:00:00Z",
-  "email": "pro@hedge-edge.com",
+  "email": "user@example.com",
   "devicesUsed": 1,
   "maxDevices": 3
 }
@@ -176,7 +176,7 @@ Deactivates a device to free up a license slot for use on another device.
 
 ```json
 {
-  "licenseKey": "PROD-ABCD-EFGH-FULL",
+  "licenseKey": "YOUR-LICENSE-KEY-HERE",
   "deviceId": "a1b2c3d4e5f6g7h8i9j0k1l2m3n4o5p6"
 }
 ```

@@ -371,7 +371,7 @@ export const AddAccountModal = ({
   }, []);
 
   // Detect terminals
-  const detectTerminals = useCallback(async () => {
+  const detectTerminals = useCallback(async (forceRefresh: boolean = false) => {
     if (!isElectron()) {
       setTerminalError('Terminal detection only available in desktop mode');
       return;
@@ -381,7 +381,7 @@ export const AddAccountModal = ({
     setTerminalError(null);
 
     try {
-      const result: DetectionResult = await window.electronAPI!.terminals.detect();
+      const result: DetectionResult = await window.electronAPI!.terminals.detect(forceRefresh);
       
       if (result.success) {
         const filterType = platform.toLowerCase() as TerminalType;
@@ -401,6 +401,29 @@ export const AddAccountModal = ({
     }
   }, [platform]);
 
+  // Auto-poll terminal running status every 3s while on terminal selection step
+  // This ensures the modal reacts quickly when terminals start/stop
+  useEffect(() => {
+    if (step !== 'terminal' || platform === 'cTrader') return;
+
+    const pollInterval = setInterval(async () => {
+      if (!isElectron() || detectingTerminals) return;
+      try {
+        // Use default (cached) detect — running status is always refreshed even from cache
+        const result: DetectionResult = await window.electronAPI!.terminals.detect();
+        if (result.success) {
+          const filterType = platform.toLowerCase() as TerminalType;
+          const filtered = result.terminals.filter(t => t.type === filterType);
+          setTerminals(filtered);
+        }
+      } catch {
+        // Ignore polling errors silently
+      }
+    }, 3000);
+
+    return () => clearInterval(pollInterval);
+  }, [step, platform, detectingTerminals]);
+
   // Launch terminal
   const handleLaunchTerminal = async (terminal: DetectedTerminal) => {
     if (!isElectron()) return;
@@ -410,8 +433,8 @@ export const AddAccountModal = ({
       const result = await window.electronAPI!.terminals.launch(terminal.executablePath);
       if (result.success) {
         toast.success('Terminal launched', { description: `Starting ${terminal.name}...` });
-        // Re-detect after delay to update running status
-        setTimeout(() => detectTerminals(), 2000);
+        // Re-detect after delay with forceRefresh to update running status immediately
+        setTimeout(() => detectTerminals(true), 2000);
       } else {
         toast.error('Failed to launch', { description: result.error });
       }
@@ -636,7 +659,7 @@ export const AddAccountModal = ({
               Make sure {platform} is installed on this computer.
             </p>
             <div className="flex justify-center gap-2">
-              <Button variant="outline" size="sm" onClick={() => detectTerminals()}>
+              <Button variant="outline" size="sm" onClick={() => detectTerminals(true)}>
                 <RefreshCw className="h-4 w-4 mr-2" />
                 Retry
               </Button>
@@ -654,7 +677,7 @@ export const AddAccountModal = ({
               <Button
                 variant="ghost"
                 size="sm"
-                onClick={() => detectTerminals()}
+                onClick={() => detectTerminals(true)}
                 className="h-7 px-2 text-xs"
               >
                 <RefreshCw className="h-3 w-3 mr-1" />
@@ -676,12 +699,14 @@ export const AddAccountModal = ({
                 const isLaunching = launching === terminal.id;
 
                 return (
-                  <button
+                  <div
                     key={terminal.id}
-                    type="button"
+                    role="button"
+                    tabIndex={0}
                     onClick={() => setSelectedTerminal(terminal)}
+                    onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setSelectedTerminal(terminal); } }}
                     className={cn(
-                      "w-full p-4 rounded-xl border transition-all text-left",
+                      "w-full p-4 rounded-xl border transition-all text-left cursor-pointer",
                       "hover:bg-muted/30",
                       isSelected
                         ? "border-primary bg-primary/5"
@@ -755,7 +780,7 @@ export const AddAccountModal = ({
                         )}
                       </div>
                     </div>
-                  </button>
+                  </div>
                 );
               })}
             </div>

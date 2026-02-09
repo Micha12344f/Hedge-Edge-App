@@ -114,17 +114,12 @@ export const DashboardSidebar = () => {
                   allConnected ? "text-primary" : someConnected ? "text-yellow-500" : "text-muted-foreground"
                 )}>
                   {allConnected 
-                    ? `${connectedCount} Connected` 
+                    ? 'Connected' 
                     : someConnected 
-                    ? `${connectedCount}/${connectionIds.length} Connected`
+                    ? 'Partially Connected'
                     : 'No Connections'}
                 </p>
               </div>
-            )}
-            {collapsed && connectedCount > 0 && (
-              <Badge variant="secondary" className="text-[10px] px-1 min-w-[18px] justify-center">
-                {connectedCount}
-              </Badge>
             )}
           </div>
         </div>

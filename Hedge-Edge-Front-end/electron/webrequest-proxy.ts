@@ -18,6 +18,7 @@ import { URL } from 'url';
 import { EventEmitter } from 'events';
 import { licenseManager } from './license-manager.js';
 import { licenseStore } from './license-store.js';
+import { portManager } from './port-manager.js';
 
 // ============================================================================
 // Types
@@ -110,7 +111,10 @@ export class WebRequestProxy extends EventEmitter {
   // ==========================================================================
 
   /**
-   * Start the proxy server
+   * Start the proxy server.
+   * 
+   * IMPROVED: Retries with fallback ports on EADDRINUSE, and registers the
+   * actual port with the central PortManager for conflict tracking.
    */
   async start(): Promise<boolean> {
     if (this.server) {
@@ -118,39 +122,65 @@ export class WebRequestProxy extends EventEmitter {
       return true;
     }
 
+    // Use PortManager to find an available port with fallback
+    const allocatedPort = await portManager.allocateProxyPort(this.config.port);
+    if (allocatedPort === null) {
+      console.error(`[WebRequestProxy] No available port found in range. Cannot start proxy.`);
+      this.emit('error', new Error('No available port for WebRequest proxy'));
+      return false;
+    }
+    
+    // Update config to use the allocated port
+    const actualPort = allocatedPort;
+    if (actualPort !== this.config.port) {
+      console.log(`[WebRequestProxy] Preferred port ${this.config.port} unavailable, using fallback port ${actualPort}`);
+    }
+
     return new Promise((resolve) => {
       this.server = http.createServer((req, res) => {
         this.handleRequest(req, res);
       });
 
-      this.server.on('error', (err) => {
-        console.error('[WebRequestProxy] Server error:', err);
+      this.server.on('error', (err: NodeJS.ErrnoException) => {
+        console.error('[WebRequestProxy] Server error:', err.code, err.message);
+        
+        // Specific handling for EADDRINUSE (port stolen between allocate and listen)
+        if (err.code === 'EADDRINUSE') {
+          console.error(`[WebRequestProxy] Port ${actualPort} became unavailable after allocation — a race condition occurred`);
+          portManager.release(actualPort);
+        }
+        
+        this.server = null;
         this.emit('error', err);
         resolve(false);
       });
 
-      this.server.listen(this.config.port, this.config.host, () => {
+      this.server.listen(actualPort, this.config.host, () => {
+        this.config.port = actualPort;
         this.startTime = new Date();
-        console.log(`[WebRequestProxy] Server started on http://${this.config.host}:${this.config.port}`);
-        this.emit('started', { port: this.config.port, host: this.config.host });
+        portManager.markVerified(actualPort);
+        console.log(`[WebRequestProxy] Server started on http://${this.config.host}:${actualPort}`);
+        this.emit('started', { port: actualPort, host: this.config.host });
         resolve(true);
       });
     });
   }
 
   /**
-   * Stop the proxy server
+   * Stop the proxy server and release the port allocation.
    */
   async stop(): Promise<void> {
     if (!this.server) {
       return;
     }
 
+    const port = this.config.port;
     return new Promise((resolve) => {
       this.server!.close(() => {
         console.log('[WebRequestProxy] Server stopped');
         this.server = null;
         this.startTime = null;
+        portManager.release(port);
         this.emit('stopped');
         resolve();
       });
@@ -491,10 +521,12 @@ export class WebRequestProxy extends EventEmitter {
   }
 
   /**
-   * Set CORS headers
+   * Set CORS headers.
+   * Restricted to localhost origins only (was previously '*' which allowed
+   * any local process or browser-based XSS to probe the proxy).
    */
   private setCorsHeaders(res: http.ServerResponse): void {
-    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Access-Control-Allow-Origin', 'http://127.0.0.1');
     res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
     res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
   }
