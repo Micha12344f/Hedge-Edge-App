@@ -125,13 +125,6 @@ export function TradeHistoryProvider({ children }: { children: ReactNode }) {
         );
         if (closingDeals.length === 0) return;
 
-        // Sort chronologically by deal time
-        closingDeals.sort((a: any, b: any) => {
-          const ta = new Date(a.time).getTime();
-          const tb = new Date(b.time).getTime();
-          return ta - tb;
-        });
-
         const currentHistory = historyRef.current;
         const existingTrades = currentHistory[accountId] || [];
         const existingTickets = new Set(existingTrades.map(t => t.ticket).filter(Boolean));
@@ -146,8 +139,8 @@ export function TradeHistoryProvider({ children }: { children: ReactNode }) {
           const ticket = Number(deal.ticket) || undefined;
           if (ticket && existingTickets.has(ticket)) continue; // skip duplicate
 
-          const profit = Number(deal.profit) + Number(deal.swap || 0) + Number(deal.commission || 0);
-          runningPnL += profit;
+          const dealProfit = Number(deal.profit) + Number(deal.swap || 0) + Number(deal.commission || 0);
+          runningPnL += dealProfit;
 
           // Parse MQL5 time format "YYYY.MM.DD HH:MM:SS" → ISO
           const rawTime = String(deal.time || '');
@@ -155,7 +148,7 @@ export function TradeHistoryProvider({ children }: { children: ReactNode }) {
 
           newRecords.push({
             timestamp: isoTime || new Date().toISOString(),
-            profit,
+            profit: dealProfit,
             runningPnL,
             symbol: deal.symbol || 'UNKNOWN',
             volume: Number(deal.volume) || undefined,
@@ -188,7 +181,7 @@ export function TradeHistoryProvider({ children }: { children: ReactNode }) {
         saveTradeHistory(updatedHistory);
 
         console.log(
-          `[TradeHistory] Imported ${newRecords.length} historical deals for ${accountId} (total: ${mergedTrades.length})`,
+          `[TradeHistory] Imported ${newRecords.length} deals for ${accountId} (from ${closingDeals.length} closing deals, total: ${mergedTrades.length})`,
         );
         return;
       }
@@ -280,7 +273,7 @@ export function TradeHistoryProvider({ children }: { children: ReactNode }) {
     const api = (window as any).electronAPI?.trading;
     if (!api?.getHistory) return false;
     try {
-      const result = await api.getHistory(login, 30);
+      const result = await api.getHistory(login, 3650);
       return result?.success ?? false;
     } catch (err) {
       console.warn('[TradeHistory] requestHistoryForAccount failed:', err);

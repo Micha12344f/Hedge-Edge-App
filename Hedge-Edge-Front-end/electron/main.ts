@@ -42,7 +42,7 @@ import {
   getAgentLogPath,
 } from './agent-supervisor.js';
 
-import { detectTerminals, detectTerminalsDeep, launchTerminal, invalidateTerminalCache } from './terminal-detector.js';
+import { detectTerminals, detectTerminalsDeep, launchTerminal } from './terminal-detector.js';
 import { licenseStore } from './license-store.js';
 import { licenseManager } from './license-manager.js';
 import { webRequestProxy } from './webrequest-proxy.js';
@@ -63,6 +63,21 @@ import {
   type AgentCommand,
 } from './agent-channel-reader.js';
 import { CopierEngine } from './copier-engine.js';
+import { dailyLimitTracker, type AccountMetrics as DailyAccountMetrics, type DailyLimitResult } from './daily-limit-tracker.js';
+import {
+  SessionManager,
+  EA_STALENESS_THRESHOLD_MS,
+  type ConnectionPlatform,
+  type ConnectionRole,
+  type ConnectionStatus,
+  type ConnectionEndpoint,
+  type ConnectionMetrics,
+  type ConnectionPosition,
+  type ConnectionSession,
+  type ConnectionSnapshot,
+  type ConnectionSnapshotMap,
+  type PersistedSession,
+} from './session-manager.js';
 
 // ============================================================================
 // Trade Copier Engine (initialized after agentChannelReader is ready)
@@ -73,138 +88,24 @@ let copierEngine: CopierEngine | null = null;
 // Connection Session Manager (In-Memory State)
 // ============================================================================
 
-type ConnectionPlatform = 'mt5' | 'ctrader';
-type ConnectionRole = 'local' | 'vps' | 'cloud';
-type ConnectionStatus = 'disconnected' | 'connecting' | 'connected' | 'error' | 'reconnecting';
+// Session manager — all connection types and state are defined in session-manager.ts
+const sessionMgr = new SessionManager();
 
-interface ConnectionEndpoint {
-  host: string;
-  port: number;
-  secure?: boolean;
-}
-
-interface ConnectionMetrics {
-  balance: number;
-  equity: number;
-  profit: number;
-  positionCount: number;
-  margin?: number;
-  freeMargin?: number;
-  marginLevel?: number;
-}
-
-interface ConnectionPosition {
-  ticket: number;
-  symbol: string;
-  type: 'buy' | 'sell';
-  volume: number;
-  openPrice: number;
-  currentPrice: number;
-  profit: number;
-  stopLoss?: number;
-  takeProfit?: number;
-  openTime: string;
-  magic?: number;
-  comment?: string;
-}
-
-interface ConnectionSession {
-  id: string;
-  accountId: string;
-  platform: ConnectionPlatform;
-  role: ConnectionRole;
-  endpoint?: ConnectionEndpoint;
-  status: ConnectionStatus;
-  lastUpdate: string;
-  lastConnected?: string;
-  error?: string;
-  reconnectAttempts?: number;
-  autoReconnect?: boolean;
-  // Internal: stored credentials for auto-reconnect (never exposed via IPC)
-  _credentials?: { login: string; password: string; server: string };
-  // Internal: ZeroMQ terminal ID for multi-account routing
-  _terminalId?: string;
-}
-
-interface ConnectionSnapshot {
-  session: ConnectionSession;
-  metrics?: ConnectionMetrics;
-  positions?: ConnectionPosition[];
-  timestamp: string;
-}
-
-type ConnectionSnapshotMap = Record<string, ConnectionSnapshot>;
-
-// EA/cBot heartbeat configuration
-// If no fresh data from EA/cBot within this threshold, consider it disconnected
-const EA_STALENESS_THRESHOLD_MS = 5000; // 5 seconds - detect disconnection quickly (EAs heartbeat every 1-2s)
-
-// In-memory connection sessions
-const connectionSessions: Map<string, ConnectionSession> = new Map();
-const connectionMetrics: Map<string, ConnectionMetrics> = new Map();
-const connectionPositions: Map<string, ConnectionPosition[]> = new Map();
-// Track last time we received fresh data from EA/cBot per account
-const lastEADataTimestamp: Map<string, Date> = new Map();
+// Convenience aliases for the state maps (used extensively throughout main.ts)
+const connectionSessions = sessionMgr.sessions;
+const connectionMetrics = sessionMgr.metrics;
+const connectionPositions = sessionMgr.positions;
+const lastEADataTimestamp = sessionMgr.lastEADataTimestamp;
 
 // ============================================================================
 // Connection Session Persistence & Auto-Reconnect
 // ============================================================================
 
-/**
- * Persisted session data (without sensitive credentials)
- * Stored in electron-store or JSON file for reconnection on restart
- */
-interface PersistedSession {
-  accountId: string;
-  platform: ConnectionPlatform;
-  role: ConnectionRole;
-  login: string;
-  server: string;
-  lastConnected?: string;
-}
+// PersistedSession type is imported from session-manager.ts
 
-// File path for persisted sessions
-const SESSIONS_FILE = path.join(app.getPath('userData'), 'connection-sessions.json');
-
-/**
- * Load persisted sessions from disk
- */
-async function loadPersistedSessions(): Promise<PersistedSession[]> {
-  try {
-    const data = await fsPromises.readFile(SESSIONS_FILE, 'utf-8');
-    return JSON.parse(data);
-  } catch (error) {
-    // File doesn't exist or is invalid - return empty
-    return [];
-  }
-}
-
-/**
- * Save sessions to disk (without passwords)
- */
-async function savePersistedSessions(): Promise<void> {
-  const sessions: PersistedSession[] = [];
-  
-  for (const [accountId, session] of connectionSessions) {
-    if (session._credentials) {
-      sessions.push({
-        accountId,
-        platform: session.platform,
-        role: session.role,
-        login: session._credentials.login,
-        server: session._credentials.server,
-        lastConnected: session.lastConnected,
-      });
-    }
-  }
-  
-  try {
-    await fsPromises.writeFile(SESSIONS_FILE, JSON.stringify(sessions, null, 2), 'utf-8');
-    console.log('[Main] Saved', sessions.length, 'connection sessions to disk');
-  } catch (error) {
-    console.error('[Main] Failed to save sessions:', error);
-  }
-}
+// Persistence delegated to SessionManager
+const loadPersistedSessions = () => sessionMgr.loadPersistedSessions();
+const savePersistedSessions = () => sessionMgr.savePersistedSessions();
 
 /**
  * Auto-reconnect accounts via ZeroMQ
@@ -319,8 +220,7 @@ async function autoReconnectFromZMQ(): Promise<void> {
  * Get a sanitized session (without internal credentials)
  */
 function getSanitizedSession(session: ConnectionSession): ConnectionSession {
-  const { _credentials, ...sanitized } = session;
-  return sanitized;
+  return sessionMgr.getSanitizedSession(session);
 }
 
 /**
@@ -369,8 +269,26 @@ function buildAllSnapshots(): ConnectionSnapshotMap {
   for (const [accountId, session] of connectionSessions) {
     const snapshot = buildSnapshot(accountId);
     if (snapshot) {
-      // Single canonical key per connection (e.g., "mt5-11789976")
+      // Primary key: connection session ID (e.g., "mt5-11789976" or Supabase UUID)
       snapshots[accountId] = snapshot;
+
+      // Alias keys so the frontend can look up by raw MT5 login number
+      // (e.g., "11789976") or by the Supabase account UUID without relying
+      // on the slower mt5Login fallback search.
+      const mt5Login = (snapshot.session as any)?.mt5Login;
+      if (mt5Login && mt5Login !== '0' && mt5Login !== accountId) {
+        // Only add alias if no other session already owns that key
+        if (!snapshots[mt5Login]) {
+          snapshots[mt5Login] = snapshot;
+        }
+      }
+      // Also alias by stored credentials login when different from above
+      const credLogin = session._credentials?.login;
+      if (credLogin && credLogin !== '0' && credLogin !== accountId && credLogin !== mt5Login) {
+        if (!snapshots[credLogin]) {
+          snapshots[credLogin] = snapshot;
+        }
+      }
     }
   }
   return snapshots;
@@ -391,58 +309,39 @@ function pushConnectionUpdate(window: BrowserWindow): void {
 }
 
 /**
- * Update metrics from heartbeat event (now includes positions for real-time updates)
+ * Update metrics from heartbeat event.
+ * 
+ * OPTIMISED: Instead of re-parsing the raw heartbeat data (which duplicates
+ * the work already done by agent-channel-reader's silent cache), we read the
+ * freshly-cached snapshot. This eliminates ~40 lines of redundant field-by-field
+ * mapping and ensures a single source of truth.
  */
-function updateMetricsFromHeartbeat(terminalId: string, event: unknown): void {
-  const heartbeat = event as { 
-    data?: { 
-      balance?: number; 
-      equity?: number; 
-      profit?: number; 
-      margin?: number;
-      freeMargin?: number;
-      positionCount?: number;
-      positions?: Array<{
-        id: string;
-        symbol: string;
-        side: string;
-        volumeLots: number;
-        entryPrice: number;
-        currentPrice: number;
-        profit: number;
-        stopLoss: number | null;
-        takeProfit: number | null;
-        swap: number;
-        commission: number;
-        openTime: string;
-        comment: string;
-      }>;
-    } 
-  };
-  if (heartbeat?.data) {
-    const metrics = connectionMetrics.get(terminalId) || {
-      balance: 0,
-      equity: 0,
-      profit: 0,
-      positionCount: 0,
+function updateMetricsFromHeartbeat(terminalId: string, _event: unknown): void {
+  // agent-channel-reader already cached the heartbeat data into its lastSnapshots map.
+  // Read the canonical snapshot and project into ConnectionMetrics/ConnectionPosition.
+  const session = connectionSessions.get(terminalId);
+  const resolvedTerminalId = session?._terminalId || terminalId;
+  const snapshot = agentChannelReader.getLastSnapshot(resolvedTerminalId);
+
+  lastEADataTimestamp.set(terminalId, new Date());
+
+  if (snapshot) {
+    const metrics: ConnectionMetrics = {
+      balance: snapshot.balance ?? 0,
+      equity: snapshot.equity ?? 0,
+      profit: snapshot.floatingPnL ?? 0,
+      positionCount: snapshot.positions?.length ?? 0,
+      margin: snapshot.margin,
+      freeMargin: snapshot.freeMargin,
+      marginLevel: snapshot.marginLevel,
     };
-    
-    if (heartbeat.data.balance !== undefined) metrics.balance = heartbeat.data.balance;
-    if (heartbeat.data.equity !== undefined) metrics.equity = heartbeat.data.equity;
-    if (heartbeat.data.profit !== undefined) metrics.profit = heartbeat.data.profit;
-    if (heartbeat.data.positionCount !== undefined) metrics.positionCount = heartbeat.data.positionCount;
-    if (heartbeat.data.margin !== undefined) (metrics as any).margin = heartbeat.data.margin;
-    if (heartbeat.data.freeMargin !== undefined) (metrics as any).freeMargin = heartbeat.data.freeMargin;
-    
     connectionMetrics.set(terminalId, metrics);
-    lastEADataTimestamp.set(terminalId, new Date());
-    
-    // Update positions from heartbeat if provided (for real-time position updates)
-    if (heartbeat.data.positions && heartbeat.data.positions.length >= 0) {
-      const positions: ConnectionPosition[] = heartbeat.data.positions.map((p) => ({
+
+    if (snapshot.positions) {
+      const positions: ConnectionPosition[] = snapshot.positions.map(p => ({
         ticket: parseInt(p.id) || 0,
         symbol: p.symbol,
-        type: p.side === 'BUY' ? 'buy' : 'sell',
+        type: (p.side === 'BUY' ? 'buy' : 'sell') as 'buy' | 'sell',
         volume: p.volumeLots,
         openPrice: p.entryPrice,
         currentPrice: p.currentPrice,
@@ -455,6 +354,17 @@ function updateMetricsFromHeartbeat(terminalId: string, event: unknown): void {
       }));
       connectionPositions.set(terminalId, positions);
     }
+    
+    // Update daily limit tracker with latest metrics (for EOD detection)
+    const dailyMetrics: DailyAccountMetrics = {
+      balance: snapshot.balance ?? 0,
+      equity: snapshot.equity ?? 0,
+      floatingPnL: snapshot.floatingPnL ?? 0,
+      positionCount: snapshot.positions?.length ?? 0,
+      serverTime: snapshot.serverTime,
+      serverTimeUnix: snapshot.serverTimeUnix,
+    };
+    dailyLimitTracker.updateMetrics(terminalId, dailyMetrics);
   }
 }
 
@@ -588,17 +498,7 @@ function updateSessionStatus(
   status: ConnectionStatus, 
   error?: string
 ): void {
-  const session = connectionSessions.get(accountId);
-  if (session) {
-    session.status = status;
-    session.lastUpdate = new Date().toISOString();
-    session.error = error;
-    if (status === 'connected') {
-      session.lastConnected = session.lastUpdate;
-      session.reconnectAttempts = 0;
-    }
-    connectionSessions.set(accountId, session);
-  }
+  sessionMgr.updateSessionStatus(accountId, status, error);
 }
 
 /**
@@ -698,6 +598,21 @@ async function connectAccount(params: {
   autoReconnect?: boolean;
 }): Promise<{ success: boolean; error?: string }> {
   const { accountId, platform, role, credentials, endpoint, autoReconnect } = params;
+
+  // ── Deduplicate: remove any auto-discovered session for the same login ──
+  // Auto-discovery creates sessions keyed by terminalId ("mt5-{login}").
+  // When the user manually connects via the UI the key is a Supabase UUID.
+  // Drop the auto-discovered duplicate so only one session tracks this terminal.
+  for (const [key, existing] of connectionSessions) {
+    if (key === accountId) continue; // don't remove our own future entry
+    if (existing._credentials?.login === credentials.login) {
+      console.log(`[Main] Removing duplicate session ${key} (same login ${credentials.login}) in favour of ${accountId}`);
+      connectionSessions.delete(key);
+      connectionMetrics.delete(key);
+      connectionPositions.delete(key);
+      lastEADataTimestamp.delete(key);
+    }
+  }
 
   // Create or update session
   const session: ConnectionSession = {
@@ -844,8 +759,11 @@ function disconnectAccount(accountId: string, reason?: string): { success: boole
     return { success: false, error: 'Session not found' };
   }
 
-  // Clear credentials
-  delete session._credentials;
+  // Preserve credentials when autoReconnect is enabled so the health-check
+  // reconnect scan can still match this session by login number.
+  if (!session.autoReconnect) {
+    delete session._credentials;
+  }
   session.status = 'disconnected';
   session.lastUpdate = new Date().toISOString();
   session.error = reason;
@@ -998,12 +916,18 @@ function startHealthCheckTimer(window: BrowserWindow): void {
         for (const terminalId of connectedTerminals) {
           if (connectionSessions.has(terminalId)) continue;
           // Check if any existing session already points to this terminal
+          // OR already tracks the same MT5 login (prevents duplicate sessions
+          // when the user manually connected with a Supabase UUID key).
+          const snapshot = agentChannelReader.getLastSnapshot(terminalId);
+          const discoveredLogin = snapshot ? String(snapshot.accountId || '') : '';
+
           const alreadyTracked = Array.from(connectionSessions.values()).some(
-            s => s._terminalId === terminalId
+            s =>
+              s._terminalId === terminalId ||
+              (discoveredLogin && s._credentials?.login === discoveredLogin),
           );
           if (alreadyTracked) continue;
           
-          const snapshot = agentChannelReader.getLastSnapshot(terminalId);
           if (snapshot && snapshot.accountId && snapshot.accountId !== '0') {
             const session: ConnectionSession = {
               id: terminalId,
@@ -1040,9 +964,11 @@ function startHealthCheckTimer(window: BrowserWindow): void {
             const snapshot = agentChannelReader.getLastSnapshot(terminalId);
             if (!snapshot) continue;
             
-            // Verify snapshot is fresh (from newly opened terminal, not old cache)
+            // Verify snapshot is reasonably fresh (not ancient cache from a
+            // long-dead terminal).  Use a generous 30 s window so we don't
+            // miss a terminal that just restarted.
             const snapshotAge = Date.now() - new Date(snapshot.timestamp).getTime();
-            if (snapshotAge > EA_STALENESS_THRESHOLD_MS * 2) continue;
+            if (snapshotAge > 30_000) continue;
             
             const login = session._credentials?.login || '';
             const snapshotLogin = String(snapshot.accountId || '');
@@ -1594,6 +1520,14 @@ async function createWindow() {
     ? "script-src 'self' 'unsafe-inline' 'unsafe-eval'"
     : "script-src 'self'";
 
+  const workerSrc = isDev
+    ? "worker-src 'self' blob:"
+    : "worker-src 'self'";
+
+  const connectSrc = isDev
+    ? "connect-src 'self' https://*.supabase.co wss://*.supabase.co ws://localhost:* http://localhost:*"
+    : "connect-src 'self' https://*.supabase.co wss://*.supabase.co";
+
   mainWindow.webContents.session.webRequest.onHeadersReceived((details, callback) => {
     callback({
       responseHeaders: {
@@ -1601,11 +1535,12 @@ async function createWindow() {
         'Content-Security-Policy': [
           "default-src 'self'",
           scriptSrc,
+          workerSrc,
           "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
           "font-src 'self' https://fonts.gstatic.com",
           "img-src 'self' data: https: blob:",
           // Only allow Supabase for auth - all trading data flows via IPC
-          "connect-src 'self' https://*.supabase.co wss://*.supabase.co",
+          connectSrc,
           "frame-ancestors 'none'",
           "base-uri 'self'",
           "form-action 'self'",
@@ -1658,7 +1593,6 @@ async function createWindow() {
     copierEngine.on('statsUpdate', (data: unknown) => forwardCopierEvent('statsUpdate', data));
     copierEngine.on('activity', (data: unknown) => forwardCopierEvent('activity', data));
     copierEngine.on('copyError', (data: unknown) => forwardCopierEvent('copyError', data));
-    copierEngine.on('protectionTriggered', (data: unknown) => forwardCopierEvent('protectionTriggered', data));
   }
 
   mainWindow.on('closed', () => {
@@ -2383,7 +2317,7 @@ function setupIpcHandlers() {
   // Detect installed trading terminals (MT4/MT5/cTrader)
   // Pass forceRefresh=true to bypass 30s cache (e.g. user clicks Refresh)
   ipcMain.handle('terminals:detect', async (_event, forceRefresh?: unknown) => {
-    return detectTerminals(forceRefresh === true);
+    return detectTerminals();
   });
 
   // Deep scan for terminals (SLOW - scans entire system)
@@ -2587,7 +2521,7 @@ function setupIpcHandlers() {
     if (typeof terminalId !== 'string') {
       return { success: false, error: 'Invalid terminal ID' };
     }
-    const numDays = typeof days === 'number' && days > 0 ? days : 30;
+    const numDays = typeof days === 'number' && days > 0 ? days : 3650;
     try {
       const deals = await agentChannelReader.fetchTradeHistory(terminalId, numDays);
       return { success: true, count: deals.length };
@@ -2603,7 +2537,7 @@ function setupIpcHandlers() {
     for (const termId of terminals) {
       if (agentChannelReader.isTerminalConnected(termId)) {
         try {
-          const deals = await agentChannelReader.fetchTradeHistory(termId, 30);
+          const deals = await agentChannelReader.fetchTradeHistory(termId, 3650);
           results[termId] = deals.length;
         } catch {
           results[termId] = 0;
@@ -2858,6 +2792,145 @@ function setupIpcHandlers() {
         error: error instanceof Error ? error.message : 'Failed to refresh' 
       };
     }
+  });
+
+  // -------------------------------------------------------------------------
+  // Daily Limit Tracking Handlers (EOD-based dynamic daily limits)
+  // -------------------------------------------------------------------------
+
+  /**
+   * Calculate daily limit for an account based on broker server EOD
+   * Returns the limit calculated from the current day's starting balance (not initial account size)
+   */
+  ipcMain.handle('dailyLimit:calculate', (_event, params: unknown) => {
+    if (!params || typeof params !== 'object') {
+      return { success: false, error: 'Invalid parameters' };
+    }
+    
+    const p = params as { accountId?: string; maxDailyLossPercent?: number };
+    if (!p.accountId || typeof p.accountId !== 'string') {
+      return { success: false, error: 'Account ID is required' };
+    }
+    if (typeof p.maxDailyLossPercent !== 'number' || p.maxDailyLossPercent <= 0) {
+      return { success: false, error: 'maxDailyLossPercent must be a positive number' };
+    }
+    
+    // Get current metrics from the snapshot
+    const snapshot = agentChannelReader.getLastSnapshot(p.accountId);
+    if (!snapshot) {
+      // Try to find by session terminal ID
+      const session = connectionSessions.get(p.accountId);
+      const resolvedTerminalId = session?._terminalId;
+      const resolvedSnapshot = resolvedTerminalId 
+        ? agentChannelReader.getLastSnapshot(resolvedTerminalId) 
+        : null;
+      
+      if (!resolvedSnapshot) {
+        return { success: false, error: 'No snapshot data available for account' };
+      }
+      
+      const metrics: DailyAccountMetrics = {
+        balance: resolvedSnapshot.balance ?? 0,
+        equity: resolvedSnapshot.equity ?? 0,
+        floatingPnL: resolvedSnapshot.floatingPnL ?? 0,
+        positionCount: resolvedSnapshot.positions?.length ?? 0,
+        serverTime: resolvedSnapshot.serverTime,
+        serverTimeUnix: resolvedSnapshot.serverTimeUnix,
+      };
+      
+      const result = dailyLimitTracker.calculateDailyLimit(
+        p.accountId,
+        p.maxDailyLossPercent,
+        metrics
+      );
+      return { success: true, data: result };
+    }
+    
+    const metrics: DailyAccountMetrics = {
+      balance: snapshot.balance ?? 0,
+      equity: snapshot.equity ?? 0,
+      floatingPnL: snapshot.floatingPnL ?? 0,
+      positionCount: snapshot.positions?.length ?? 0,
+      serverTime: snapshot.serverTime,
+      serverTimeUnix: snapshot.serverTimeUnix,
+    };
+    
+    const result = dailyLimitTracker.calculateDailyLimit(
+      p.accountId,
+      p.maxDailyLossPercent,
+      metrics
+    );
+    return { success: true, data: result };
+  });
+
+  /**
+   * Get day-start state for an account
+   */
+  ipcMain.handle('dailyLimit:getState', (_event, accountId: unknown) => {
+    if (typeof accountId !== 'string' || !accountId) {
+      return { success: false, error: 'Account ID is required' };
+    }
+    
+    const state = dailyLimitTracker.getAccountState(accountId);
+    if (!state) {
+      return { success: false, error: 'No daily limit state for this account' };
+    }
+    
+    return { success: true, data: state };
+  });
+
+  /**
+   * Manually reset day-start balance (e.g., after deposit/withdrawal)
+   */
+  ipcMain.handle('dailyLimit:reset', (_event, accountId: unknown) => {
+    if (typeof accountId !== 'string' || !accountId) {
+      return { success: false, error: 'Account ID is required' };
+    }
+    
+    // Get current metrics
+    const snapshot = agentChannelReader.getLastSnapshot(accountId);
+    if (!snapshot) {
+      const session = connectionSessions.get(accountId);
+      const resolvedTerminalId = session?._terminalId;
+      const resolvedSnapshot = resolvedTerminalId 
+        ? agentChannelReader.getLastSnapshot(resolvedTerminalId) 
+        : null;
+      
+      if (!resolvedSnapshot) {
+        return { success: false, error: 'No snapshot data available' };
+      }
+      
+      const metrics: DailyAccountMetrics = {
+        balance: resolvedSnapshot.balance ?? 0,
+        equity: resolvedSnapshot.equity ?? 0,
+        floatingPnL: resolvedSnapshot.floatingPnL ?? 0,
+        positionCount: resolvedSnapshot.positions?.length ?? 0,
+        serverTime: resolvedSnapshot.serverTime,
+        serverTimeUnix: resolvedSnapshot.serverTimeUnix,
+      };
+      
+      dailyLimitTracker.resetDayStart(accountId, metrics);
+      return { success: true };
+    }
+    
+    const metrics: DailyAccountMetrics = {
+      balance: snapshot.balance ?? 0,
+      equity: snapshot.equity ?? 0,
+      floatingPnL: snapshot.floatingPnL ?? 0,
+      positionCount: snapshot.positions?.length ?? 0,
+      serverTime: snapshot.serverTime,
+      serverTimeUnix: snapshot.serverTimeUnix,
+    };
+    
+    dailyLimitTracker.resetDayStart(accountId, metrics);
+    return { success: true };
+  });
+
+  /**
+   * Get all tracked account IDs
+   */
+  ipcMain.handle('dailyLimit:getAllAccounts', () => {
+    return { success: true, data: dailyLimitTracker.getAllAccountIds() };
   });
 
   // -------------------------------------------------------------------------
@@ -3750,6 +3823,30 @@ function setupIpcHandlers() {
       return { success: false, error: error instanceof Error ? error.message : 'Failed to reset circuit breaker' };
     }
   });
+
+  ipcMain.handle('copier:getHedgePnLByLeader', async () => {
+    if (!copierEngine) {
+      return { success: true, data: {} };
+    }
+    try {
+      const data = copierEngine.getHedgePnLByLeader();
+      return { success: true, data };
+    } catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : 'Failed to get hedge P/L by leader' };
+    }
+  });
+
+  ipcMain.handle('copier:getDebugState', async () => {
+    if (!copierEngine) {
+      return { success: true, data: { message: 'Copier engine not initialized' } };
+    }
+    try {
+      const data = copierEngine.getDebugState();
+      return { success: true, data };
+    } catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : 'Failed to get debug state' };
+    }
+  });
 }
 
 // ============================================================================
@@ -3850,9 +3947,18 @@ app.whenReady().then(async () => {
   // Initialize trade copier engine
   try {
     copierEngine = new CopierEngine(agentChannelReader);
-    console.log('[Main] Trade copier engine initialized');
+    await copierEngine.start();
+    console.log('[Main] Trade copier engine initialized and started');
   } catch (error) {
     console.error('[Main] Failed to initialize copier engine:', error);
+  }
+
+  // Initialize daily limit tracker (EOD-based daily drawdown calculation)
+  try {
+    await dailyLimitTracker.initialize();
+    console.log('[Main] Daily limit tracker initialized');
+  } catch (error) {
+    console.error('[Main] Failed to initialize daily limit tracker:', error);
   }
 
   // Create the main window

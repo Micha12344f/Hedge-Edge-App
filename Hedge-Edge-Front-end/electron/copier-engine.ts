@@ -23,15 +23,7 @@ import type { AgentChannelReader } from './agent-channel-reader.js';
 // Types (mirrors src/types/copier.ts for main process usage)
 // ============================================================================
 
-export type VolumeSizingMode =
-  | 'equity-to-equity'
-  | 'lot-multiplier'
-  | 'risk-multiplier'
-  | 'fixed-lot'
-  | 'fixed-risk-percent'
-  | 'fixed-risk-nominal';
-
-export type AccountProtectionMode = 'off' | 'balance-based' | 'equity-based';
+export type VolumeSizingMode = 'lot-multiplier';
 
 export interface FollowerConfig {
   id: string;
@@ -42,23 +34,15 @@ export interface FollowerConfig {
   status: 'active' | 'paused' | 'error' | 'pending';
   volumeSizing: VolumeSizingMode;
   lotMultiplier: number;
-  riskMultiplier: number;
-  fixedLot: number;
-  fixedRiskPercent: number;
-  fixedRiskNominal: number;
-  copySL: boolean;
-  copyTP: boolean;
-  additionalSLPips: number;
-  additionalTPPips: number;
   reverseMode: boolean;
   symbolWhitelist: string[];
   symbolBlacklist: string[];
   symbolSuffix: string;
   symbolAliases: Array<{ masterSymbol: string; slaveSymbol: string; lotMultiplier?: number }>;
-  protectionMode: AccountProtectionMode;
-  minThreshold: number;
-  maxThreshold: number;
-  delayMs: number;
+  magicNumberWhitelist: number[];
+  magicNumberBlacklist: number[];
+  /** Balance snapshot at group creation time (for hedge P/L calculation) */
+  baselineBalance?: number;
   stats: FollowerStats;
 }
 
@@ -102,7 +86,7 @@ export interface CopierActivityEntry {
   groupId: string;
   followerId: string;
   timestamp: string;
-  type: 'open' | 'close' | 'modify' | 'error' | 'protection-triggered';
+  type: 'open' | 'close' | 'modify' | 'error';
   symbol: string;
   action: 'buy' | 'sell';
   volume: number;
@@ -168,9 +152,17 @@ export class CopierEngine extends EventEmitter {
   // This bridges the gap between frontend account IDs and ZMQ terminal IDs
   private accountMap: Map<string, string> = new Map();
   
+  // Debounce timer for saveCorrelations — batches rapid-fire saves (e.g. during copy bursts)
+  private saveCorrelationsTimer: ReturnType<typeof setTimeout> | null = null;
+  private static readonly SAVE_DEBOUNCE_MS = 5000; // 5 seconds
+  
   // File paths for persistence
   private correlationFilePath: string;
   private activityFilePath: string;
+  private followerStatsFilePath: string;
+  
+  // Persisted follower stats (keyed by followerId)
+  private persistedFollowerStats: Map<string, FollowerStats> = new Map();
   
   // Event listener cleanup
   private boundHandlers: Array<{ event: string; handler: (...args: unknown[]) => void }> = [];
@@ -182,6 +174,7 @@ export class CopierEngine extends EventEmitter {
     const userDataPath = app.getPath('userData');
     this.correlationFilePath = path.join(userDataPath, 'copier-correlations.json');
     this.activityFilePath = path.join(userDataPath, 'copier-activity.json');
+    this.followerStatsFilePath = path.join(userDataPath, 'copier-follower-stats.json');
   }
   
   // ========================================================================
@@ -194,14 +187,15 @@ export class CopierEngine extends EventEmitter {
   async start(): Promise<void> {
     console.log('[CopierEngine] Starting...');
     
-    // Load persisted correlations and activity
+    // Load persisted correlations, activity, and follower stats
     await this.loadCorrelations();
     await this.loadActivity();
+    await this.loadFollowerStats();
     
     // Subscribe to trade events from the channel reader
     this.subscribeToEvents();
     
-    console.log('[CopierEngine] Started. Groups:', this.groups.size, 'Global:', this.globalEnabled);
+    console.log('[CopierEngine] Started. Groups:', this.groups.size, 'Global:', this.globalEnabled, 'PersistedStats:', this.persistedFollowerStats.size);
   }
   
   /**
@@ -219,6 +213,7 @@ export class CopierEngine extends EventEmitter {
     // Persist state
     await this.saveCorrelations();
     await this.saveActivity();
+    await this.saveFollowerStats();
     
     console.log('[CopierEngine] Stopped');
   }
@@ -233,9 +228,81 @@ export class CopierEngine extends EventEmitter {
   updateGroups(groups: CopierGroup[]): void {
     this.groups.clear();
     for (const group of groups) {
+      // ENFORCE reverse mode on every follower — this is a hedge copier.
+      // Regardless of what the UI sends, reverse mode must always be true.
+      for (const follower of group.followers) {
+        if (!follower.reverseMode) {
+          console.warn(`[CopierEngine] Forcing reverseMode=true for follower ${follower.accountName} (was false)`);
+          follower.reverseMode = true;
+        }
+        // Restore persisted stats for this follower (e.g. totalProfit survives app restart)
+        const persistedStats = this.persistedFollowerStats.get(follower.id);
+        if (persistedStats) {
+          console.log(`[CopierEngine] Restoring persisted stats for follower ${follower.id}: totalProfit=${persistedStats.totalProfit}`);
+          follower.stats = { ...follower.stats, ...persistedStats };
+        }
+      }
       this.groups.set(group.id, group);
     }
-    console.log(`[CopierEngine] Groups updated: ${groups.length} groups`);
+    console.log(`[CopierEngine] Groups updated: ${groups.length} groups, accountMap has ${this.accountMap.size} entries`);
+    // Push config to all follower EAs (only works if accountMap is populated)
+    this.pushConfigToAllFollowers();
+  }
+
+  /**
+   * Push SET_CONFIG + PAUSE/RESUME to every follower EA that has a known
+   * terminal ID in the accountMap.  Called from updateGroups() and also
+   * from updateAccountMap() to handle the race where groups arrive before
+   * accounts are resolved.
+   */
+  private pushConfigToAllFollowers(): void {
+    if (this.accountMap.size === 0) {
+      console.log('[CopierEngine] pushConfigToAllFollowers: accountMap empty — skipping (will retry when map is populated)');
+      return;
+    }
+    let pushed = 0;
+    let skipped = 0;
+    for (const [, group] of this.groups) {
+      for (const follower of group.followers) {
+        const terminalId = this.accountMap.get(follower.accountId);
+        if (!terminalId) {
+          skipped++;
+          console.log(`[CopierEngine] No terminal mapping for follower ${follower.accountName} (accountId=${follower.accountId})`);
+          continue;
+        }
+
+        const lotMultiplier = follower.lotMultiplier ?? 1.0;
+
+        this.channelReader.sendCommand(terminalId, {
+          action: 'SET_CONFIG',
+          params: {
+            invertTrades: true,     // Always enforced
+            lotMultiplier,
+          },
+        }).then(result => {
+          if (result.success) {
+            console.log(`[CopierEngine] ✅ Pushed config → ${follower.accountName} (${terminalId}): lots=x${lotMultiplier}`);
+          } else {
+            console.warn(`[CopierEngine] ❌ Failed config push → ${follower.accountName} (${terminalId}):`, result.error);
+          }
+        }).catch(err => {
+          console.warn(`[CopierEngine] ❌ SET_CONFIG error for ${follower.accountName} (${terminalId}):`, err);
+        });
+
+        // Also send PAUSE/RESUME based on follower status
+        if (follower.status === 'paused') {
+          this.channelReader.sendCommand(terminalId, { action: 'PAUSE' }).then(r => {
+            console.log(`[CopierEngine] PAUSE → ${follower.accountName}: ${r.success ? 'ok' : r.error}`);
+          }).catch(() => {});
+        } else if (follower.status === 'active') {
+          this.channelReader.sendCommand(terminalId, { action: 'RESUME' }).then(r => {
+            console.log(`[CopierEngine] RESUME → ${follower.accountName}: ${r.success ? 'ok' : r.error}`);
+          }).catch(() => {});
+        }
+        pushed++;
+      }
+    }
+    console.log(`[CopierEngine] pushConfigToAllFollowers: pushed=${pushed}, skipped=${skipped}`);
   }
   
   /**
@@ -264,6 +331,13 @@ export class CopierEngine extends EventEmitter {
     }
     console.log(`[CopierEngine] Account map updated: ${this.accountMap.size} entries`, 
       Object.fromEntries(this.accountMap));
+    
+    // Re-push config now that we know terminal IDs — handles the race
+    // where updateGroups() fired before updateAccountMap() was called.
+    if (this.groups.size > 0) {
+      console.log('[CopierEngine] Account map populated — re-pushing config to followers');
+      this.pushConfigToAllFollowers();
+    }
   }
   
   /**
@@ -299,6 +373,107 @@ export class CopierEngine extends EventEmitter {
     const group = this.groups.get(groupId);
     if (!group) return null;
     return this.computeGroupStats(group);
+  }
+  
+  /**
+   * Get hedge P/L attributed to each leader (prop) account.
+   * 
+   * Each CopierGroup has one leaderAccountId (the prop account) and N followers
+   * (hedge accounts). The follower stats.totalProfit is the realised P/L from
+   * trades copied FROM that specific leader.  This method aggregates those by
+   * leader so the UI can show per-account attributed hedge P/L.
+   * 
+   * Additionally includes **floating (unrealised) P/L** from currently open
+   * positions on each follower terminal.  Without this, the Hedge P/L would
+   * stay at $0 while hedge positions are still open.
+   * 
+   * Returns: Record<leaderAccountId, totalHedgeProfit (realised + floating)>
+   */
+  getHedgePnLByLeader(): Record<string, number> {
+    const result: Record<string, number> = {};
+    console.log(`[CopierEngine] getHedgePnLByLeader called, groups count: ${this.groups.size}`);
+    for (const [groupId, group] of this.groups) {
+      const leaderId = group.leaderAccountId;
+      if (result[leaderId] === undefined) result[leaderId] = 0;
+      for (const follower of group.followers) {
+        // Realised P/L from closed trades
+        const realisedPnL = follower.stats.totalProfit;
+        
+        // Floating P/L from currently open positions on this follower's terminal
+        let floatingPnL = 0;
+        const followerTerminalId = this.getTerminalIdForAccount(follower.accountId);
+        if (followerTerminalId) {
+          const snapshot = this.channelReader.getLastSnapshot(followerTerminalId);
+          if (snapshot?.positions) {
+            for (const pos of snapshot.positions) {
+              floatingPnL += (pos.profit ?? 0) + (pos.swap ?? 0) + (pos.commission ?? 0);
+            }
+          }
+        }
+        
+        const total = realisedPnL + floatingPnL;
+        console.log(
+          `[CopierEngine] Group ${groupId}: leader=${leaderId}, follower=${follower.id}, ` +
+          `realised=${realisedPnL}, floating=${floatingPnL}, total=${total}`,
+        );
+        result[leaderId] += total;
+      }
+    }
+    console.log('[CopierEngine] getHedgePnLByLeader result:', result);
+    return result;
+  }
+  
+  /**
+   * Return internal debug state for diagnostics from the renderer DevTools.
+   */
+  getDebugState(): Record<string, unknown> {
+    const groups: Record<string, unknown>[] = [];
+    for (const [id, group] of this.groups) {
+      groups.push({
+        id,
+        name: group.name,
+        status: group.status,
+        leaderAccountId: group.leaderAccountId,
+        leaderAccountName: group.leaderAccountName,
+        followers: group.followers.map(f => ({
+          id: f.id,
+          accountId: f.accountId,
+          accountName: f.accountName,
+          status: f.status,
+          reverseMode: f.reverseMode,
+          stats: { ...f.stats },
+        })),
+      });
+    }
+    
+    const correlations: Record<string, unknown[]> = {};
+    for (const [ticket, corrs] of this.correlations) {
+      correlations[ticket] = corrs.map(c => ({
+        groupId: c.groupId,
+        followerId: c.followerId,
+        followerAccountId: c.followerAccountId,
+        followerTicket: c.followerTicket,
+        symbol: c.symbol,
+        side: c.side,
+        volume: c.volume,
+      }));
+    }
+    
+    const accountMap: Record<string, string> = {};
+    for (const [k, v] of this.accountMap) {
+      accountMap[k] = v;
+    }
+    
+    return {
+      globalEnabled: this.globalEnabled,
+      groupCount: this.groups.size,
+      correlationCount: this.correlations.size,
+      accountMapSize: this.accountMap.size,
+      groups,
+      correlations,
+      accountMap,
+      persistedStatsCount: this.persistedFollowerStats.size,
+    };
   }
   
   // ========================================================================
@@ -340,6 +515,15 @@ export class CopierEngine extends EventEmitter {
     };
     this.channelReader.on('accountUpdate', onAccountUpdate);
     this.boundHandlers.push({ event: 'accountUpdate', handler: onAccountUpdate as (...args: unknown[]) => void });
+    
+    // When a terminal connects/reconnects, push current config to it
+    const onTerminalConnected = (terminalId: string) => {
+      console.log(`[CopierEngine] Terminal connected: ${terminalId} — pushing config`);
+      // Small delay to let the bridge fully stabilise
+      setTimeout(() => this.pushConfigToAllFollowers(), 1000);
+    };
+    this.channelReader.on('terminalConnected', onTerminalConnected);
+    this.boundHandlers.push({ event: 'terminalConnected', handler: onTerminalConnected as (...args: unknown[]) => void });
   }
   
   // ========================================================================
@@ -349,7 +533,9 @@ export class CopierEngine extends EventEmitter {
   private async handleLeaderPositionOpened(terminalId: string, event: unknown): Promise<void> {
     if (!this.globalEnabled) return;
     
-    const eventData = event as {
+    // ZmqEvent wraps position data inside .data — unwrap it
+    const zmqEvent = event as { data?: Record<string, unknown> };
+    const eventData = (zmqEvent.data || event) as {
       position?: number;
       symbol?: string;
       type?: 'BUY' | 'SELL';
@@ -357,6 +543,7 @@ export class CopierEngine extends EventEmitter {
       price?: number;
       stopLoss?: number;
       takeProfit?: number;
+      magic?: number;
     };
     
     if (!eventData.position || !eventData.symbol || !eventData.type) {
@@ -374,31 +561,20 @@ export class CopierEngine extends EventEmitter {
       for (const follower of group.followers) {
         if (follower.status !== 'active') continue;
         
-        // Apply symbol filtering
-        const mappedSymbol = this.mapSymbol(eventData.symbol, group, follower);
-        if (!mappedSymbol) continue; // Filtered out
-        
-        // Apply delay if configured
-        if (follower.delayMs > 0) {
-          await this.delay(follower.delayMs);
-        }
-        
-        // Check account protection
-        if (!this.checkAccountProtection(follower)) {
-          this.addActivity({
-            groupId: group.id,
-            followerId: follower.id,
-            type: 'protection-triggered',
-            symbol: mappedSymbol,
-            action: eventData.type === 'BUY' ? 'buy' : 'sell',
-            volume: 0,
-            price: 0,
-            latency: 0,
-            status: 'failed',
-            errorMessage: `Account protection triggered (${follower.protectionMode})`,
-          });
+        // Skip followers whose terminals are slave EAs — they copy trades
+        // autonomously via ZMQ PUB/SUB and do NOT need the Electron copier
+        // to duplicate the execution (that would cause double trading).
+        const followerTid = this.getTerminalIdForAccount(follower.accountId);
+        if (followerTid && this.channelReader.isSlaveTerminal(followerTid)) {
           continue;
         }
+        
+        // 1. Magic number filtering (Heron processing step 1)
+        if (!this.checkMagicNumberFilter(eventData.magic, follower)) continue;
+        
+        // Apply symbol filtering (steps 2-6: blacklist → whitelist → aliases → suffix → auto-map)
+        const mappedSymbol = this.mapSymbol(eventData.symbol, group, follower);
+        if (!mappedSymbol) continue; // Filtered out
         
         // Check circuit breaker
         const failures = this.followerFailures.get(follower.id) || 0;
@@ -423,15 +599,16 @@ export class CopierEngine extends EventEmitter {
           continue;
         }
         
-        // Determine side (respect reverse mode)
+        // ALWAYS reverse — this is a hedge copier; reverse mode is mandatory.
+        // When copying between hedge accounts and other account types the
+        // follower MUST take the opposite side to directly offset the leader.
         let side: 'BUY' | 'SELL' = eventData.type;
-        if (follower.reverseMode) {
-          side = side === 'BUY' ? 'SELL' : 'BUY';
-        }
+        const isReversed = true; // Hardcoded: hedge copier always reverses
+        side = side === 'BUY' ? 'SELL' : 'BUY';
         
-        // Compute SL/TP
-        const sl = this.computeStopLoss(eventData, follower, side);
-        const tp = this.computeTakeProfit(eventData, follower, side);
+        // SL/TP copying is disabled — always pass 0
+        const sl = 0;
+        const tp = 0;
         
         // Execute the copy
         await this.executeCopy(group, follower, {
@@ -448,18 +625,65 @@ export class CopierEngine extends EventEmitter {
   }
   
   private async handleLeaderPositionClosed(terminalId: string, event: unknown): Promise<void> {
-    if (!this.globalEnabled) return;
+    console.log(`[CopierEngine] handleLeaderPositionClosed called: terminalId=${terminalId}, event=`, event);
+    if (!this.globalEnabled) {
+      console.log('[CopierEngine] handleLeaderPositionClosed: globalEnabled is false, returning');
+      return;
+    }
     
-    const eventData = event as {
+    // ZmqEvent wraps position data inside .data — unwrap it
+    const zmqEvent = event as { data?: Record<string, unknown> };
+    const eventData = (zmqEvent.data || event) as {
       position?: number;
       symbol?: string;
       profit?: number;
+      swap?: number;
+      commission?: number;
+      entry?: string;
     };
     
-    if (!eventData.position) return;
+    if (!eventData.position) {
+      console.log('[CopierEngine] handleLeaderPositionClosed: no position in event, returning');
+      return;
+    }
+    
+    // ── Follower close detection ────────────────────────────────────────
+    // The slave EA (HE_Hedge) copies trades directly via ZMQ, bypassing the
+    // Electron copier engine.  When a follower (hedge) position closes, the
+    // channel reader emits 'positionClosed' for that follower terminal too.
+    // We detect it here and attribute the realised profit to the follower.
+    if (eventData.entry === 'OUT') {
+      for (const [, group] of this.groups) {
+        if (group.status !== 'active') continue;
+        for (const follower of group.followers) {
+          if (follower.status !== 'active') continue;
+          if (this.isTerminalForAccount(terminalId, follower.accountId)) {
+            const closedProfit =
+              (eventData.profit || 0) +
+              (eventData.swap || 0) +
+              (eventData.commission || 0);
+            console.log(
+              `[CopierEngine] Follower position closed on terminal ${terminalId}: ` +
+              `profit=${eventData.profit}, swap=${eventData.swap}, commission=${eventData.commission}, ` +
+              `total=${closedProfit}, follower=${follower.id}, prevTotal=${follower.stats.totalProfit}`,
+            );
+            follower.stats.totalProfit += closedProfit;
+            follower.stats.tradesTotal++;
+            follower.stats.tradesToday++;
+            follower.stats.lastCopyTime = new Date().toISOString();
+            this.persistedFollowerStats.set(follower.id, { ...follower.stats });
+            this.debouncedSaveFollowerStats();
+            this.emitStatsUpdate();
+            // Don't return — also continue with leader-close logic below
+            // (in case this terminal also happens to be a leader for another group)
+          }
+        }
+      }
+    }
     
     const leaderTicket = String(eventData.position);
     const correlationsForTicket = this.correlations.get(leaderTicket);
+    console.log(`[CopierEngine] handleLeaderPositionClosed: leaderTicket=${leaderTicket}, correlations found=${correlationsForTicket?.length ?? 0}`);
     
     if (!correlationsForTicket || correlationsForTicket.length === 0) return;
     
@@ -476,6 +700,21 @@ export class CopierEngine extends EventEmitter {
       
       const startTime = Date.now();
       
+      // Get the follower's floating P/L BEFORE closing (this is the actual hedge P/L)
+      let followerProfit = 0;
+      const followerSnapshot = this.channelReader.getLastSnapshot(followerTerminalId);
+      console.log(`[CopierEngine] Close: followerTerminalId=${followerTerminalId}, snapshot exists=${!!followerSnapshot}, positions=${followerSnapshot?.positions?.length ?? 0}`);
+      if (followerSnapshot?.positions) {
+        const followerPosition = followerSnapshot.positions.find(
+          p => String(p.id) === String(correlation.followerTicket)
+        );
+        console.log(`[CopierEngine] Looking for ticket ${correlation.followerTicket}, found=${!!followerPosition}`);
+        if (followerPosition) {
+          followerProfit = followerPosition.profit + (followerPosition.swap || 0) + (followerPosition.commission || 0);
+          console.log(`[CopierEngine] Follower position profit=${followerPosition.profit}, swap=${followerPosition.swap}, commission=${followerPosition.commission}, total=${followerProfit}`);
+        }
+      }
+      
       try {
         const result = await this.channelReader.closePosition(
           followerTerminalId,
@@ -485,7 +724,7 @@ export class CopierEngine extends EventEmitter {
         const latency = Date.now() - startTime;
         
         if (result.success) {
-          this.updateFollowerStats(follower, latency, true, eventData.profit || 0);
+          this.updateFollowerStats(follower, latency, true, followerProfit);
           this.addActivity({
             groupId: group.id,
             followerId: follower.id,
@@ -520,13 +759,15 @@ export class CopierEngine extends EventEmitter {
     // Remove correlations for this leader ticket
     this.correlations.delete(leaderTicket);
     this.emitStatsUpdate();
-    this.saveCorrelations().catch(() => {});
+    this.debouncedSaveCorrelations();
   }
   
   private async handleLeaderPositionModified(terminalId: string, event: unknown): Promise<void> {
     if (!this.globalEnabled) return;
     
-    const eventData = event as {
+    // ZmqEvent wraps position data inside .data — unwrap it
+    const zmqEvent = event as { data?: Record<string, unknown> };
+    const eventData = (zmqEvent.data || event) as {
       position?: number;
       symbol?: string;
       stopLoss?: number;
@@ -548,44 +789,7 @@ export class CopierEngine extends EventEmitter {
       const follower = group.followers.find(f => f.id === correlation.followerId);
       if (!follower || follower.status !== 'active') continue;
       
-      // Only modify if SL/TP copying is enabled
-      if (!follower.copySL && !follower.copyTP) continue;
-      
-      const followerTerminalId = this.getTerminalIdForAccount(correlation.followerAccountId);
-      if (!followerTerminalId) continue;
-      
-      // Compute new SL/TP for the follower (considering reverse mode and additional pips)
-      const side = correlation.side;
-      const sl = follower.copySL ? this.computeStopLoss(eventData, follower, side) : undefined;
-      const tp = follower.copyTP ? this.computeTakeProfit(eventData, follower, side) : undefined;
-      
-      const startTime = Date.now();
-      
-      try {
-        const result = await this.channelReader.modifyPosition(
-          followerTerminalId,
-          correlation.followerTicket,
-          sl,
-          tp
-        );
-        
-        const latency = Date.now() - startTime;
-        
-        this.addActivity({
-          groupId: group.id,
-          followerId: follower.id,
-          type: 'modify',
-          symbol: correlation.symbol,
-          action: side === 'BUY' ? 'buy' : 'sell',
-          volume: correlation.volume,
-          price: 0,
-          latency,
-          status: result.success ? 'success' : 'failed',
-          errorMessage: result.error,
-        });
-      } catch (error) {
-        console.error(`[CopierEngine] Modify position failed:`, error);
-      }
+      // SL/TP copying is disabled — skip modifications
     }
   }
   
@@ -761,7 +965,7 @@ export class CopierEngine extends EventEmitter {
     } finally {
       this.followerLocks.delete(lockKey);
       this.emitStatsUpdate();
-      this.saveCorrelations().catch(() => {});
+      this.debouncedSaveCorrelations();
     }
   }
   
@@ -772,46 +976,11 @@ export class CopierEngine extends EventEmitter {
   private computeVolume(
     leaderVolumeLots: number,
     follower: FollowerConfig,
-    leaderTerminalId: string,
-    followerAccountId: string
+    _leaderTerminalId: string,
+    _followerAccountId: string
   ): number {
-    const followerTerminalId = this.getTerminalIdForAccount(followerAccountId);
-    
-    switch (follower.volumeSizing) {
-      case 'equity-to-equity': {
-        const leaderMetrics = this.leaderMetrics.get(leaderTerminalId);
-        const followerM = followerTerminalId ? this.followerMetrics.get(followerTerminalId) : null;
-        if (!leaderMetrics || !followerM || leaderMetrics.equity <= 0) {
-          return leaderVolumeLots; // Fallback to 1:1
-        }
-        return leaderVolumeLots * (followerM.equity / leaderMetrics.equity);
-      }
-      
-      case 'lot-multiplier':
-        return leaderVolumeLots * follower.lotMultiplier;
-      
-      case 'risk-multiplier':
-        // Approximate: apply multiplier to the leader volume as a proxy
-        return leaderVolumeLots * follower.riskMultiplier;
-      
-      case 'fixed-lot':
-        return follower.fixedLot;
-      
-      case 'fixed-risk-percent': {
-        const followerM = followerTerminalId ? this.followerMetrics.get(followerTerminalId) : null;
-        if (!followerM || followerM.equity <= 0) return follower.fixedLot || 0.01;
-        // Simplified: risk% of equity → volume. Full implementation needs SL distance and pip value.
-        return (followerM.equity * follower.fixedRiskPercent / 100) / 1000;
-      }
-      
-      case 'fixed-risk-nominal': {
-        // Fixed $ risk → volume. Simplified without SL distance.
-        return follower.fixedRiskNominal / 1000;
-      }
-      
-      default:
-        return leaderVolumeLots;
-    }
+    // Always lot-multiplier based
+    return leaderVolumeLots * follower.lotMultiplier;
   }
   
   // ========================================================================
@@ -821,6 +990,14 @@ export class CopierEngine extends EventEmitter {
   /**
    * Map leader symbol to follower symbol based on configuration.
    * Returns null if symbol should be filtered out.
+   * 
+   * Processing order (per Heron Copier docs):
+   *   1. Magic Number Filter (done before this method)
+   *   2. Symbol Blacklist
+   *   3. Symbol Whitelist
+   *   4. Symbol Aliases (highest priority mapping)
+   *   5. Symbol Suffix (only applied if not matched by alias)
+   *   6. Auto-map fallback (keep original symbol)
    */
   private mapSymbol(leaderSymbol: string, group: CopierGroup, follower: FollowerConfig): string | null {
     // Remove leader suffix if configured
@@ -829,15 +1006,7 @@ export class CopierEngine extends EventEmitter {
       baseSymbol = baseSymbol.slice(0, -group.leaderSymbolSuffixRemove.length);
     }
     
-    // Check whitelist (if non-empty, only whitelisted symbols pass)
-    if (follower.symbolWhitelist.length > 0) {
-      const inWhitelist = follower.symbolWhitelist.some(
-        s => s.toUpperCase() === baseSymbol.toUpperCase() || s.toUpperCase() === leaderSymbol.toUpperCase()
-      );
-      if (!inWhitelist) return null;
-    }
-    
-    // Check blacklist
+    // Step 2: Check blacklist FIRST (if symbol is blacklisted, skip)
     if (follower.symbolBlacklist.length > 0) {
       const inBlacklist = follower.symbolBlacklist.some(
         s => s.toUpperCase() === baseSymbol.toUpperCase() || s.toUpperCase() === leaderSymbol.toUpperCase()
@@ -845,7 +1014,15 @@ export class CopierEngine extends EventEmitter {
       if (inBlacklist) return null;
     }
     
-    // Check aliases
+    // Step 3: Check whitelist (if non-empty, only whitelisted symbols pass)
+    if (follower.symbolWhitelist.length > 0) {
+      const inWhitelist = follower.symbolWhitelist.some(
+        s => s.toUpperCase() === baseSymbol.toUpperCase() || s.toUpperCase() === leaderSymbol.toUpperCase()
+      );
+      if (!inWhitelist) return null;
+    }
+    
+    // Step 4: Check aliases (highest priority mapping, prevents suffix from being applied)
     for (const alias of follower.symbolAliases) {
       if (alias.masterSymbol.toUpperCase() === baseSymbol.toUpperCase() ||
           alias.masterSymbol.toUpperCase() === leaderSymbol.toUpperCase()) {
@@ -853,7 +1030,7 @@ export class CopierEngine extends EventEmitter {
       }
     }
     
-    // Apply follower suffix
+    // Step 5: Apply follower suffix (only if no alias matched)
     return baseSymbol + (follower.symbolSuffix || '');
   }
   
@@ -861,73 +1038,57 @@ export class CopierEngine extends EventEmitter {
   // SL / TP Computation
   // ========================================================================
   
+  /**
+   * Compute stop loss for follower position.
+   * SL/TP copying is disabled — always returns 0.
+   */
   private computeStopLoss(
-    eventData: { stopLoss?: number; type?: string },
-    follower: FollowerConfig,
-    followerSide: 'BUY' | 'SELL'
+    _eventData: { stopLoss?: number; takeProfit?: number; type?: string; digits?: number },
+    _follower: FollowerConfig,
+    _followerSide: 'BUY' | 'SELL',
+    _isReversed: boolean = false
   ): number {
-    if (!follower.copySL || !eventData.stopLoss || eventData.stopLoss === 0) return 0;
-    
-    let sl = eventData.stopLoss;
-    
-    // Apply additional pips (1 pip ≈ 0.0001 for forex)
-    const pipValue = 0.0001; // Simplified - should ideally use symbol info
-    if (follower.additionalSLPips !== 0) {
-      if (followerSide === 'BUY') {
-        sl -= follower.additionalSLPips * pipValue; // Wider SL
-      } else {
-        sl += follower.additionalSLPips * pipValue;
-      }
-    }
-    
-    return sl;
+    return 0;
   }
   
+  /**
+   * Compute take profit for follower position.
+   * SL/TP copying is disabled — always returns 0.
+   */
   private computeTakeProfit(
-    eventData: { takeProfit?: number; type?: string },
-    follower: FollowerConfig,
-    followerSide: 'BUY' | 'SELL'
+    _eventData: { stopLoss?: number; takeProfit?: number; type?: string; digits?: number },
+    _follower: FollowerConfig,
+    _followerSide: 'BUY' | 'SELL',
+    _isReversed: boolean = false
   ): number {
-    if (!follower.copyTP || !eventData.takeProfit || eventData.takeProfit === 0) return 0;
-    
-    let tp = eventData.takeProfit;
-    
-    const pipValue = 0.0001;
-    if (follower.additionalTPPips !== 0) {
-      if (followerSide === 'BUY') {
-        tp += follower.additionalTPPips * pipValue;
-      } else {
-        tp -= follower.additionalTPPips * pipValue;
-      }
-    }
-    
-    return tp;
+    return 0;
   }
   
   // ========================================================================
-  // Account Protection
+  // Magic Number Filtering
   // ========================================================================
   
-  private checkAccountProtection(follower: FollowerConfig): boolean {
-    if (follower.protectionMode === 'off') return true;
+  /**
+   * Check if a trade's magic number passes the follower's magic number filter.
+   * Follows Heron Copier logic:
+   *   - If whitelist is non-empty, only whitelisted magic numbers pass
+   *   - Blacklisted magic numbers are always rejected
+   *   - If both exist, whitelist takes priority (must be in whitelist AND not in blacklist)
+   *   - If neither exist (both empty), all trades pass
+   */
+  private checkMagicNumberFilter(magic: number | undefined, follower: FollowerConfig): boolean {
+    const magicNum = magic ?? 0;
+    const whitelist = follower.magicNumberWhitelist || [];
+    const blacklist = follower.magicNumberBlacklist || [];
     
-    const followerTerminalId = this.getTerminalIdForAccount(follower.accountId);
-    if (!followerTerminalId) return true; // Can't check, allow
+    // If no filters configured, allow all
+    if (whitelist.length === 0 && blacklist.length === 0) return true;
     
-    const metrics = this.followerMetrics.get(followerTerminalId);
-    if (!metrics) return true;
+    // If whitelist exists, magic must be in it
+    if (whitelist.length > 0 && !whitelist.includes(magicNum)) return false;
     
-    const value = follower.protectionMode === 'balance-based' ? metrics.balance : metrics.equity;
-    
-    if (follower.minThreshold > 0 && value < follower.minThreshold) {
-      console.warn(`[CopierEngine] Protection: ${follower.accountName} ${follower.protectionMode} ${value} < min ${follower.minThreshold}`);
-      return false;
-    }
-    
-    if (follower.maxThreshold > 0 && value > follower.maxThreshold) {
-      console.warn(`[CopierEngine] Protection: ${follower.accountName} ${follower.protectionMode} ${value} > max ${follower.maxThreshold}`);
-      return false;
-    }
+    // If blacklisted, reject
+    if (blacklist.length > 0 && blacklist.includes(magicNum)) return false;
     
     return true;
   }
@@ -937,11 +1098,13 @@ export class CopierEngine extends EventEmitter {
   // ========================================================================
   
   private updateFollowerStats(follower: FollowerConfig, latencyMs: number, success: boolean, profit?: number): void {
+    console.log(`[CopierEngine] updateFollowerStats: follower=${follower.id}, success=${success}, profit=${profit}, currentTotal=${follower.stats.totalProfit}`);
     if (success) {
       follower.stats.tradesToday++;
       follower.stats.tradesTotal++;
       if (profit != null) {
         follower.stats.totalProfit += profit;
+        console.log(`[CopierEngine] Updated totalProfit to ${follower.stats.totalProfit}`);
       }
       follower.stats.lastCopyTime = new Date().toISOString();
       
@@ -954,6 +1117,10 @@ export class CopierEngine extends EventEmitter {
     
     const attempts = follower.stats.tradesTotal + follower.stats.failedCopies;
     follower.stats.successRate = attempts > 0 ? (follower.stats.tradesTotal / attempts) * 100 : 0;
+    
+    // Persist follower stats (debounced)
+    this.persistedFollowerStats.set(follower.id, { ...follower.stats });
+    this.debouncedSaveFollowerStats();
   }
   
   private computeGroupStats(group: CopierGroup): GroupStats {
@@ -966,7 +1133,18 @@ export class CopierEngine extends EventEmitter {
     for (const f of group.followers) {
       tradesToday += f.stats.tradesToday;
       tradesTotal += f.stats.tradesTotal;
+      // Realised P/L
       totalProfit += f.stats.totalProfit;
+      // Floating P/L from open positions
+      const followerTerminalId = this.getTerminalIdForAccount(f.accountId);
+      if (followerTerminalId) {
+        const snapshot = this.channelReader.getLastSnapshot(followerTerminalId);
+        if (snapshot?.positions) {
+          for (const pos of snapshot.positions) {
+            totalProfit += (pos.profit ?? 0) + (pos.swap ?? 0) + (pos.commission ?? 0);
+          }
+        }
+      }
       avgLatency += f.stats.avgLatency;
       if (f.status === 'active') activeFollowers++;
     }
@@ -986,9 +1164,16 @@ export class CopierEngine extends EventEmitter {
   }
   
   private emitStatsUpdate(): void {
-    const groupStats: Record<string, GroupStats> = {};
+    const groupStats: Record<string, GroupStats & { followers: Record<string, FollowerStats>; totalFailedCopies: number }> = {};
     for (const [id, group] of this.groups) {
-      groupStats[id] = this.computeGroupStats(group);
+      const stats = this.computeGroupStats(group);
+      const followers: Record<string, FollowerStats> = {};
+      let totalFailed = 0;
+      for (const f of group.followers) {
+        followers[f.id] = { ...f.stats };
+        totalFailed += f.stats.failedCopies;
+      }
+      groupStats[id] = { ...stats, followers, totalFailedCopies: totalFailed };
     }
     this.emit('statsUpdate', groupStats);
   }
@@ -1124,6 +1309,21 @@ export class CopierEngine extends EventEmitter {
     }
   }
   
+  /**
+   * Debounced save — coalesces rapid correlation changes into a single disk write.
+   * Called on every trade copy/close instead of saveCorrelations() directly,
+   * preventing N sequential writes during a burst of N trades.
+   */
+  private debouncedSaveCorrelations(): void {
+    if (this.saveCorrelationsTimer) {
+      clearTimeout(this.saveCorrelationsTimer);
+    }
+    this.saveCorrelationsTimer = setTimeout(() => {
+      this.saveCorrelationsTimer = null;
+      this.saveCorrelations().catch(() => {});
+    }, CopierEngine.SAVE_DEBOUNCE_MS);
+  }
+  
   private async loadActivity(): Promise<void> {
     try {
       const data = await fs.readFile(this.activityFilePath, 'utf-8');
@@ -1140,6 +1340,46 @@ export class CopierEngine extends EventEmitter {
     } catch (error) {
       console.error('[CopierEngine] Failed to save activity:', error);
     }
+  }
+  
+  // Debounce timer for saveFollowerStats
+  private saveFollowerStatsTimer: ReturnType<typeof setTimeout> | null = null;
+  
+  private async loadFollowerStats(): Promise<void> {
+    try {
+      const data = await fs.readFile(this.followerStatsFilePath, 'utf-8');
+      const parsed = JSON.parse(data) as Record<string, FollowerStats>;
+      this.persistedFollowerStats.clear();
+      for (const [key, value] of Object.entries(parsed)) {
+        this.persistedFollowerStats.set(key, value);
+      }
+      console.log(`[CopierEngine] Loaded ${this.persistedFollowerStats.size} follower stats entries`);
+    } catch {
+      // File doesn't exist or is invalid — start fresh
+    }
+  }
+  
+  private async saveFollowerStats(): Promise<void> {
+    try {
+      const obj: Record<string, FollowerStats> = {};
+      for (const [key, value] of this.persistedFollowerStats) {
+        obj[key] = value;
+      }
+      await fs.writeFile(this.followerStatsFilePath, JSON.stringify(obj, null, 2), 'utf-8');
+      console.log(`[CopierEngine] Saved ${this.persistedFollowerStats.size} follower stats entries`);
+    } catch (error) {
+      console.error('[CopierEngine] Failed to save follower stats:', error);
+    }
+  }
+  
+  private debouncedSaveFollowerStats(): void {
+    if (this.saveFollowerStatsTimer) {
+      clearTimeout(this.saveFollowerStatsTimer);
+    }
+    this.saveFollowerStatsTimer = setTimeout(() => {
+      this.saveFollowerStatsTimer = null;
+      this.saveFollowerStats().catch(() => {});
+    }, CopierEngine.SAVE_DEBOUNCE_MS);
   }
   
   // ========================================================================
@@ -1174,6 +1414,11 @@ export class CopierEngine extends EventEmitter {
    * Graceful shutdown - persist state and clean up
    */
   shutdown(): void {
+    // Flush any pending debounced save, then do a final immediate save
+    if (this.saveCorrelationsTimer) {
+      clearTimeout(this.saveCorrelationsTimer);
+      this.saveCorrelationsTimer = null;
+    }
     this.saveCorrelations().catch(() => {});
     this.saveActivity().catch(() => {});
     console.log('[CopierEngine] Shutdown complete - state persisted');

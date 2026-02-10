@@ -17,6 +17,17 @@ __pycache__/
 *.log
 logs/
 
+# Compiled binaries
+*.ex5
+*.dll
+*.exe
+*.so
+*.dylib
+
+# PyInstaller / standalone builds
+standalone/
+*.spec
+
 # OS
 .DS_Store
 Thumbs.db

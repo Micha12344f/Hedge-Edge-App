@@ -45,6 +45,7 @@ import {
   ZmqPosition,
   DEFAULT_ZMQ_CONFIG,
 } from './zmq-bridge.js';
+import { Position } from './shared-types.js';
 import {
   NamedPipeClient,
   createNamedPipeClient,
@@ -90,28 +91,20 @@ export interface AgentSnapshot {
   isPaused: boolean;
   lastError: string | null;
   positions: AgentPosition[];
+  /** Broker server time for EOD tracking (string format) */
+  serverTime?: string;
+  /** Broker server time as Unix timestamp */
+  serverTimeUnix?: number;
 }
 
-export interface AgentPosition {
-  id: string;
-  symbol: string;
-  volume: number;
-  volumeLots: number;
-  side: 'BUY' | 'SELL';
-  entryPrice: number;
-  currentPrice: number;
-  stopLoss: number | null;
-  takeProfit: number | null;
-  profit: number;
-  swap: number;
-  commission: number;
-  openTime: string;
-  comment: string;
-}
+// AgentPosition is now a type alias for the canonical Position (from shared-types.ts).
+// This eliminates redundant field-by-field mapping in conversion functions since
+// ZmqPosition and AgentPosition are structurally identical.
+export type AgentPosition = Position;
 
 export interface AgentCommand {
-  action: 'PAUSE' | 'RESUME' | 'CLOSE_ALL' | 'CLOSE_POSITION' | 'STATUS';
-  params?: Record<string, string | number>;
+  action: 'PAUSE' | 'RESUME' | 'CLOSE_ALL' | 'CLOSE_POSITION' | 'STATUS' | 'SET_CONFIG';
+  params?: Record<string, string | number | boolean>;
   timestamp?: string;
 }
 
@@ -477,6 +470,16 @@ export interface EARegistration {
   startTime: string;
   terminalPath: string;
   eaVersion: string;
+  /** v3+: EA role — 'master' publishes events, 'slave' copies trades */
+  role?: 'master' | 'slave';
+  /** v3+: Whether the EA has CURVE encryption enabled */
+  curveEnabled?: boolean;
+  /** v3+: Server public key for CURVE (Z85-encoded, 40 chars) — only for master */
+  curvePublicKey?: string;
+  /** v3+: Whether the EA uses discrete event publishing (not snapshot diffing) */
+  eventDriven?: boolean;
+  /** v3+: Version string e.g. "3.0" */
+  version?: string;
 }
 
 export interface TerminalConfig {
@@ -633,23 +636,36 @@ export class AgentChannelReader extends EventEmitter {
           const reg = JSON.parse(content) as EARegistration;
           
           // Validate required fields
-          if (!reg.login || !reg.dataPort || !reg.commandPort) {
-            console.warn(`[AgentChannelReader] Invalid registration file ${file}: missing required fields`);
+          // Slave EAs only have commandPort (no PUB socket / dataPort)
+          if (!reg.login || !reg.commandPort) {
+            console.warn(`[AgentChannelReader] Invalid registration file ${file}: missing required fields (login or commandPort)`);
             return null;
           }
           
-          // Validate port range and pairing
-          if (!portManager.isValidPort(reg.dataPort) || !portManager.isValidPort(reg.commandPort)) {
-            console.warn(`[AgentChannelReader] Invalid port numbers in ${file}: data=${reg.dataPort}, cmd=${reg.commandPort}`);
+          // Validate port range
+          if (!portManager.isValidPort(reg.commandPort)) {
+            console.warn(`[AgentChannelReader] Invalid command port in ${file}: cmd=${reg.commandPort}`);
             return null;
           }
           
-          if (reg.commandPort !== reg.dataPort + 1) {
-            console.warn(`[AgentChannelReader] Non-adjacent port pair in ${file}: data=${reg.dataPort}, cmd=${reg.commandPort} (expected ${reg.dataPort + 1})`);
-            // Continue anyway — EA might have custom config, but warn
+          // For master EAs, also validate dataPort
+          if (reg.role !== 'slave') {
+            if (!reg.dataPort) {
+              console.warn(`[AgentChannelReader] Master registration file ${file} missing dataPort`);
+              return null;
+            }
+            if (!portManager.isValidPort(reg.dataPort)) {
+              console.warn(`[AgentChannelReader] Invalid data port in ${file}: data=${reg.dataPort}`);
+              return null;
+            }
+            if (reg.commandPort !== reg.dataPort + 1) {
+              console.warn(`[AgentChannelReader] Non-adjacent port pair in ${file}: data=${reg.dataPort}, cmd=${reg.commandPort} (expected ${reg.dataPort + 1})`);
+              // Continue anyway — EA might have custom config, but warn
+            }
           }
           
-          console.log(`[AgentChannelReader] 📋 EA registered: login=${reg.login} broker=${reg.broker} ports=${reg.dataPort}/${reg.commandPort} auto=${reg.autoPort}`);
+          const portInfo = reg.dataPort ? `${reg.dataPort}/${reg.commandPort}` : `cmd=${reg.commandPort}`;
+          console.log(`[AgentChannelReader] 📋 EA registered: login=${reg.login} broker=${reg.broker} role=${reg.role || 'unknown'} ports=${portInfo}`);
           return { ...reg, _filePath: filePath };
         } catch (err) {
           console.warn(`[AgentChannelReader] Failed to read registration file ${file}:`, err instanceof Error ? err.message : err);
@@ -716,7 +732,8 @@ export class AgentChannelReader extends EventEmitter {
       // Phase 1: Read EA registration files (primary discovery)
       // Registration files are cleaned of stale entries inside readEARegistrationFiles()
       // ═══════════════════════════════════════════════════════════════
-      let candidates: Array<{ dataPort: number; commandPort: number; name: string; source: 'registration' | 'fallback' }> = [];
+      let candidates: Array<{ dataPort: number; commandPort: number; name: string; source: 'registration' | 'fallback'; role?: 'master' | 'slave'; curveEnabled?: boolean; curveServerKey?: string }> = [];
+      let slaveCandidates: Array<{ commandPort: number; name: string; source: 'registration'; role: 'slave'; curveEnabled?: boolean }> = [];
       const discoveredPorts = new Set<number>();
       
       try {
@@ -727,11 +744,29 @@ export class AgentChannelReader extends EventEmitter {
           
           for (const reg of registrations) {
             const name = `mt5-${reg.login}`;
+            
+            // Slave EAs: command-only (no PUB socket)
+            if (reg.role === 'slave' && !reg.dataPort) {
+              slaveCandidates.push({
+                commandPort: reg.commandPort,
+                name,
+                source: 'registration',
+                role: 'slave',
+                curveEnabled: reg.curveEnabled,
+              });
+              discoveredPorts.add(reg.commandPort);
+              continue;
+            }
+            
+            // Master EAs: full PUB/SUB + REQ/REP
             candidates.push({
               dataPort: reg.dataPort,
               commandPort: reg.commandPort,
               name,
               source: 'registration',
+              role: reg.role,
+              curveEnabled: reg.curveEnabled,
+              curveServerKey: reg.curvePublicKey,
             });
             discoveredPorts.add(reg.dataPort);
           }
@@ -776,11 +811,12 @@ export class AgentChannelReader extends EventEmitter {
       // Remove candidates that already have active bridges
       candidates = candidates.filter(c => !alreadyConnected.has(c.name));
       
-      if (candidates.length === 0) {
+      if (candidates.length === 0 && slaveCandidates.length === 0) {
         console.log(`[AgentChannelReader] All known ports already connected (${connectedTerminals.length} terminal(s))`);
         return connectedTerminals;
       }
       
+      if (candidates.length > 0) {
       console.log(`[AgentChannelReader] TCP-probing ${candidates.length} port(s) (${discoveredPorts.size} from registration, ${candidates.length - discoveredPorts.size} fallback)`);
       const scanResults = await portManager.discoverLivePorts(candidates);
       const livePorts = scanResults.filter(r => r.alive);
@@ -790,10 +826,7 @@ export class AgentChannelReader extends EventEmitter {
         console.log(`[AgentChannelReader] Skipping ${deadPorts.length} dead port(s): ${deadPorts.map(d => d.dataPort).join(', ')}`);
       }
       
-      if (livePorts.length === 0) {
-        console.log('[AgentChannelReader] No live ports found');
-        return connectedTerminals;
-      }
+      if (livePorts.length > 0) {
       
       // ═══════════════════════════════════════════════════════════════
       // Phase 3: Connect ONLY to live ports (no zombie bridges)
@@ -810,6 +843,9 @@ export class AgentChannelReader extends EventEmitter {
           const connected = await this.connectMT5(scanResult.terminalId, {
             dataPort: scanResult.dataPort,
             commandPort: scanResult.commandPort,
+            role: scanResult.role,
+            curveEnabled: scanResult.curveEnabled,
+            curveServerKey: scanResult.curveServerKey,
           });
           return { scanResult, connected };
         } catch (error) {
@@ -868,6 +904,54 @@ export class AgentChannelReader extends EventEmitter {
         }
       }
       
+      } // end if (livePorts.length > 0)
+      } // end if (candidates.length > 0)
+      
+      // ═══════════════════════════════════════════════════════════════
+      // Phase 6: Connect to SLAVE EAs (command-only, no PUB socket)
+      // Slaves only expose a REP socket for app commands & STATUS queries.
+      // We TCP-probe their commandPort and connect with polling.
+      // ═══════════════════════════════════════════════════════════════
+      slaveCandidates = slaveCandidates.filter(c => !alreadyConnected.has(c.name));
+      
+      if (slaveCandidates.length > 0) {
+        console.log(`[AgentChannelReader] Probing ${slaveCandidates.length} slave EA(s) (command-only)...`);
+        
+        const slaveProbes = await Promise.all(
+          slaveCandidates.map(async (c) => {
+            const alive = await portManager.tcpProbe(c.commandPort);
+            return { ...c, alive };
+          })
+        );
+        
+        for (const slave of slaveProbes) {
+          if (!slave.alive) {
+            console.log(`[AgentChannelReader] Slave ${slave.name} command port ${slave.commandPort} not responding, skipping`);
+            continue;
+          }
+          
+          try {
+            portManager.allocate(slave.commandPort, 'zmq-command', slave.name);
+            portManager.markVerified(slave.commandPort);
+            
+            const connected = await this.connectMT5Slave(slave.name, {
+              commandPort: slave.commandPort,
+              curveEnabled: slave.curveEnabled,
+            });
+            
+            if (connected) {
+              console.log(`[AgentChannelReader] ✅ Slave EA detected on ${slave.name} (command port ${slave.commandPort})`);
+              connectedTerminals.push(slave.name);
+            } else {
+              portManager.release(slave.commandPort);
+            }
+          } catch (error) {
+            console.warn(`[AgentChannelReader] Failed to connect slave ${slave.name}:`, error instanceof Error ? error.message : error);
+            portManager.release(slave.commandPort);
+          }
+        }
+      }
+      
       console.log(`[AgentChannelReader] Scan complete: ${connectedTerminals.length} terminal(s) connected`);
     } finally {
       // Always release the scan lock
@@ -882,6 +966,14 @@ export class AgentChannelReader extends EventEmitter {
    * even if the underlying bridge.stop() throws.
    */
   private async safeDisconnectMT5(terminalId: string): Promise<void> {
+    // Clean up slave polling timer if present
+    const slavePollKey = `slave-${terminalId}`;
+    const pollTimer = this.pollingIntervals.get(slavePollKey);
+    if (pollTimer) {
+      clearInterval(pollTimer);
+      this.pollingIntervals.delete(slavePollKey);
+    }
+    
     try {
       await this.disconnectMT5(terminalId);
     } catch (error) {
@@ -995,15 +1087,23 @@ export class AgentChannelReader extends EventEmitter {
       dataPort?: number;
       commandPort?: number;
       host?: string;
+      /** Role of the EA (master or slave) — affects bridge config */
+      role?: 'master' | 'slave';
+      /** Enable CURVE encryption */
+      curveEnabled?: boolean;
+      /** Server public key for CURVE (from registration file) */
+      curveServerKey?: string;
     } = {}
   ): Promise<boolean> {
     const dataPort = options.dataPort || AgentChannelReader.DEFAULT_ZMQ_DATA_PORT;
     const commandPort = options.commandPort || AgentChannelReader.DEFAULT_ZMQ_COMMAND_PORT;
     const host = options.host || '127.0.0.1';
+    const role = options.role || 'unknown';
     
-    console.log(`[AgentChannelReader] Connecting to MT5 via ZeroMQ (event-driven)...`);
+    console.log(`[AgentChannelReader] Connecting to MT5 via ZeroMQ (event-driven, role: ${role})...`);
     console.log(`  Data endpoint: tcp://${host}:${dataPort}`);
     console.log(`  Command endpoint: tcp://${host}:${commandPort}`);
+    if (options.curveEnabled) console.log(`  CURVE: enabled`);
     
     // Check ZMQ availability first
     if (!this.zmqAvailable) {
@@ -1027,6 +1127,13 @@ export class AgentChannelReader extends EventEmitter {
     try {
       const bridge = createZmqBridgeForPorts(dataPort, commandPort, host);
       
+      // Apply v3 config (role, CURVE)
+      (bridge as any).config.role = role;
+      if (options.curveEnabled && options.curveServerKey) {
+        (bridge as any).config.curveEnabled = true;
+        (bridge as any).config.curveServerKey = options.curveServerKey;
+      }
+      
       // Set up event-driven handlers
       this.setupEventDrivenHandlers(bridge, terminalId);
       
@@ -1036,7 +1143,7 @@ export class AgentChannelReader extends EventEmitter {
       if (started) {
         this.zmqBridges.set(terminalId, bridge);
         this.terminalConfigs.set(terminalId, config);
-        console.log(`[AgentChannelReader] ✅ Connected to MT5 ${terminalId} via ZeroMQ (event-driven)`);
+        console.log(`[AgentChannelReader] ✅ Connected to MT5 ${terminalId} via ZeroMQ (event-driven, role: ${role})`);
         return true;
       } else {
         console.error(`[AgentChannelReader] Failed to start ZMQ bridge for ${terminalId}`);
@@ -1045,6 +1152,242 @@ export class AgentChannelReader extends EventEmitter {
     } catch (error) {
       console.error(`[AgentChannelReader] Error connecting to MT5 ${terminalId}:`, error);
       return false;
+    }
+  }
+  
+  /**
+   * Connect to an MT5 SLAVE EA via command-only ZMQ (REP socket).
+   * Slave EAs don't have a PUB socket — they only expose a REP socket
+   * for app commands (STATUS, PAUSE, RESUME, CLOSE_ALL, etc.).
+   * We create a bridge with only a REQ socket and poll STATUS periodically.
+   */
+  async connectMT5Slave(
+    terminalId: string,
+    options: {
+      commandPort: number;
+      host?: string;
+      curveEnabled?: boolean;
+      curveServerKey?: string;
+      pollIntervalMs?: number;
+    }
+  ): Promise<boolean> {
+    const commandPort = options.commandPort;
+    const host = options.host || '127.0.0.1';
+    const pollIntervalMs = options.pollIntervalMs || 5000; // Poll every 5s
+    
+    // ─── CRITICAL: Clean up any existing bridge/polling for this slave ───
+    // Without this, every reconnect scan leaks a ZMQ REQ socket + poll timer
+    if (this.zmqBridges.has(terminalId)) {
+      console.log(`[AgentChannelReader] Cleaning up existing slave bridge for ${terminalId} before reconnect`);
+      await this.safeDisconnectMT5(terminalId);
+    }
+    
+    console.log(`[AgentChannelReader] Connecting to MT5 SLAVE via command-only ZMQ...`);
+    console.log(`  Command endpoint: tcp://${host}:${commandPort}`);
+    
+    if (!this.zmqAvailable) {
+      await this.checkZmqAvailability();
+    }
+    if (!this.zmqAvailable) {
+      console.error('[AgentChannelReader] ZeroMQ not available - install zeromq package');
+      return false;
+    }
+    
+    const config: TerminalConfig = {
+      terminalId,
+      platform: 'MT5',
+      commandPort,
+      host,
+      mode: 'zmq',
+    };
+    
+    try {
+      // Create a bridge with a dummy dataPort (we won't use the SUB socket)
+      // The bridge's REQ socket on commandPort is what we actually use
+      const bridge = createZmqBridgeForPorts(0, commandPort, host);
+      (bridge as any).config.role = 'slave';  // Mark as slave so isConnected/isAlive work correctly
+      
+      // Override start() behavior — only connect command socket, skip data socket
+      // We do this by directly initializing the zmq module and command socket
+      const zmq = await import(/* webpackIgnore: true */ 'zeromq');
+      (bridge as any).zmq = zmq;
+      (bridge as any).isRunning = true;
+      
+      // Create only the REQ socket (no SUB socket for slaves)
+      const reqSocket = new zmq.Request();
+      reqSocket.sendTimeout = 5000;
+      reqSocket.receiveTimeout = 5000;
+      reqSocket.linger = 0;
+      
+      const endpoint = `tcp://${host}:${commandPort}`;
+      reqSocket.connect(endpoint);
+      (bridge as any).reqSocket = reqSocket;
+      (bridge as any).status.commandSocket = 'connected';
+      
+      console.log(`[AgentChannelReader] Slave command socket connected to ${endpoint}`);
+      
+      // Try initial STATUS to verify the slave is responding
+      this.zmqBridges.set(terminalId, bridge);
+      this.terminalConfigs.set(terminalId, config);
+      
+      // Fetch initial state
+      const initialState = await this.fetchSlaveState(bridge, terminalId);
+      if (!initialState) {
+        console.warn(`[AgentChannelReader] Slave ${terminalId} didn't respond to STATUS, disconnecting`);
+        await this.safeDisconnectMT5(terminalId);
+        return false;
+      }
+      
+      // Start periodic polling for slave account state
+      const pollTimer = setInterval(async () => {
+        try {
+          // Check if bridge still exists (may have been disconnected)
+          if (!this.zmqBridges.has(terminalId)) {
+            clearInterval(pollTimer);
+            this.pollingIntervals.delete(`slave-${terminalId}`);
+            return;
+          }
+          await this.fetchSlaveState(bridge, terminalId);
+        } catch (err) {
+          console.warn(`[AgentChannelReader] Slave poll error for ${terminalId}:`, err instanceof Error ? err.message : err);
+        }
+      }, pollIntervalMs);
+      
+      this.pollingIntervals.set(`slave-${terminalId}`, pollTimer);
+      
+      console.log(`[AgentChannelReader] ✅ Connected to slave ${terminalId} (poll every ${pollIntervalMs}ms)`);
+      return true;
+    } catch (error) {
+      console.error(`[AgentChannelReader] Error connecting to slave ${terminalId}:`, error);
+      return false;
+    }
+  }
+  
+  /**
+   * Fetch account state from a slave EA via STATUS command
+   */
+  private async fetchSlaveState(bridge: ZmqBridge, terminalId: string): Promise<AgentSnapshot | null> {
+    try {
+      const response = await bridge.sendCommand({ action: 'STATUS' });
+      const data = (response as any);
+      
+      if (!data || (!data.broker && !data.accountId)) {
+        return null;
+      }
+      
+      // Mark the bridge as alive so isAlive() returns true for slaves
+      // (slaves don't receive PUB/SUB events, only polled STATUS responses)
+      bridge.markAlive();
+      
+      const snapshot: AgentSnapshot = {
+        timestamp: data.timestamp || new Date().toISOString(),
+        platform: 'MT5',
+        accountId: data.accountId || '0',
+        broker: data.broker || 'Unknown',
+        server: data.server,
+        balance: data.balance ?? 0,
+        equity: data.equity ?? 0,
+        margin: data.margin ?? 0,
+        freeMargin: data.freeMargin ?? 0,
+        marginLevel: data.marginLevel ?? 0,
+        floatingPnL: data.floatingPnL ?? 0,
+        currency: data.currency || 'USD',
+        leverage: data.leverage ?? 0,
+        status: data.status || 'Active',
+        isLicenseValid: data.isLicenseValid ?? true,
+        isPaused: data.isPaused ?? false,
+        lastError: data.lastError ?? null,
+        positions: (data.positions || []).map((p: any) => ({
+          id: p.id,
+          symbol: p.symbol,
+          volume: p.volume,
+          volumeLots: p.volumeLots,
+          side: p.side,
+          entryPrice: p.entryPrice,
+          currentPrice: p.currentPrice,
+          stopLoss: p.stopLoss,
+          takeProfit: p.takeProfit,
+          profit: p.profit,
+          swap: p.swap,
+          commission: p.commission,
+          openTime: p.openTime,
+          comment: p.comment,
+        })),
+      };
+      
+      const isNew = !this.lastSnapshots.has(terminalId);
+      const previousSnapshot = this.lastSnapshots.get(terminalId);
+      this.lastSnapshots.set(terminalId, snapshot);
+      
+      if (isNew) {
+        // First time — emit connection event so UI sees the account
+        this.notifyListeners(terminalId, snapshot);
+        this.emit('accountUpdate', terminalId, snapshot);
+        this.emit('terminalConnected', terminalId, 'MT5');
+        console.log(`[AgentChannelReader] Slave state loaded: ${snapshot.accountId} @ ${snapshot.broker}`);
+      } else if (previousSnapshot) {
+        // ── Diff positions to detect opens/closes on the slave terminal ──
+        // Slave EAs don't have a PUB socket, so the only way to detect
+        // trade events is by comparing successive STATUS poll results.
+        const oldPositions = previousSnapshot.positions || [];
+        const newPositions = snapshot.positions || [];
+        const oldIds = new Set(oldPositions.map(p => p.id));
+        const newIds = new Set(newPositions.map(p => p.id));
+
+        // Positions present before but missing now → closed
+        for (const pos of oldPositions) {
+          if (!newIds.has(pos.id)) {
+            const closedEvent = {
+              type: 'POSITION_CLOSED',
+              eventIndex: 0,
+              timestamp: snapshot.timestamp,
+              platform: 'MT5',
+              accountId: snapshot.accountId,
+              data: {
+                position: Number(pos.id) || 0,
+                symbol: pos.symbol,
+                volume: pos.volumeLots ?? pos.volume,
+                price: pos.currentPrice,
+                profit: pos.profit,
+                swap: pos.swap ?? 0,
+                commission: pos.commission ?? 0,
+                type: pos.side as 'BUY' | 'SELL',
+                entry: 'OUT' as const,
+              },
+            };
+            console.log(`[AgentChannelReader] Slave position closed (poll diff): ${pos.symbol} #${pos.id} profit=${pos.profit}`);
+            this.emit('positionClosed', terminalId, closedEvent);
+          }
+        }
+
+        // Positions absent before but present now → opened
+        for (const pos of newPositions) {
+          if (!oldIds.has(pos.id)) {
+            const openedEvent = {
+              type: 'POSITION_OPENED',
+              eventIndex: 0,
+              timestamp: snapshot.timestamp,
+              platform: 'MT5',
+              accountId: snapshot.accountId,
+              data: {
+                position: Number(pos.id) || 0,
+                symbol: pos.symbol,
+                volume: pos.volumeLots ?? pos.volume,
+                price: pos.entryPrice,
+                type: pos.side as 'BUY' | 'SELL',
+                entry: 'IN' as const,
+              },
+            };
+            console.log(`[AgentChannelReader] Slave position opened (poll diff): ${pos.symbol} #${pos.id}`);
+            this.emit('positionOpened', terminalId, openedEvent);
+          }
+        }
+      }
+      
+      return snapshot;
+    } catch (error) {
+      console.warn(`[AgentChannelReader] Failed to fetch slave state for ${terminalId}:`, error instanceof Error ? error.message : error);
+      return null;
     }
   }
   
@@ -1161,22 +1504,7 @@ export class AgentChannelReader extends EventEmitter {
       isLicenseValid: ctraderSnapshot.isLicenseValid,
       isPaused: ctraderSnapshot.isPaused,
       lastError: ctraderSnapshot.lastError,
-      positions: ctraderSnapshot.positions.map(p => ({
-        id: p.id,
-        symbol: p.symbol,
-        volume: p.volume,
-        volumeLots: p.volumeLots,
-        side: p.side,
-        entryPrice: p.entryPrice,
-        currentPrice: p.currentPrice,
-        stopLoss: p.stopLoss,
-        takeProfit: p.takeProfit,
-        profit: p.profit,
-        swap: p.swap,
-        commission: p.commission,
-        openTime: p.openTime,
-        comment: p.comment,
-      })),
+      positions: ctraderSnapshot.positions, // Same canonical Position type — no mapping needed
     };
   }
   
@@ -1201,7 +1529,7 @@ export class AgentChannelReader extends EventEmitter {
       // Delay to avoid blocking the command queue during initial connection
       // handshake (STATUS, PING etc. need to go through first)
       setTimeout(() => {
-        bridge.getHistory(30).then((result) => {
+        bridge.getHistory(3650).then((result) => {
           const deals = result.deals;
           if (deals && deals.length > 0) {
             const emitId = result.accountId ? `mt5-${result.accountId}` : terminalId;
@@ -1243,12 +1571,8 @@ export class AgentChannelReader extends EventEmitter {
           if (heartbeatData.margin !== undefined) existingSnapshot.margin = heartbeatData.margin;
           if (heartbeatData.freeMargin !== undefined) existingSnapshot.freeMargin = heartbeatData.freeMargin;
           if (heartbeatData.positions && heartbeatData.positions.length >= 0) {
-            existingSnapshot.positions = heartbeatData.positions.map(p => ({
-              id: p.id, symbol: p.symbol, volume: p.volume, volumeLots: p.volumeLots,
-              side: p.side, entryPrice: p.entryPrice, currentPrice: p.currentPrice,
-              stopLoss: p.stopLoss, takeProfit: p.takeProfit, profit: p.profit,
-              swap: p.swap, commission: p.commission, openTime: p.openTime, comment: p.comment,
-            }));
+            // Same canonical Position type — pass through directly
+            existingSnapshot.positions = heartbeatData.positions;
           }
           existingSnapshot.timestamp = event.timestamp;
           this.lastSnapshots.set(terminalId, existingSnapshot);
@@ -1318,6 +1642,8 @@ export class AgentChannelReader extends EventEmitter {
   
   /**
    * Convert ZMQ event (from event-driven mode) to AgentSnapshot
+   * Since ZmqPosition === AgentPosition (via shared Position type),
+   * positions are passed through directly without field-by-field mapping.
    */
   private convertZmqEventToSnapshot(event: ZmqEvent): AgentSnapshot {
     const data = event.data as ZmqAccountData;
@@ -1339,22 +1665,7 @@ export class AgentChannelReader extends EventEmitter {
       isLicenseValid: data.isLicenseValid,
       isPaused: data.isPaused,
       lastError: data.lastError,
-      positions: data.positions.map(p => ({
-        id: p.id,
-        symbol: p.symbol,
-        volume: p.volume,
-        volumeLots: p.volumeLots,
-        side: p.side,
-        entryPrice: p.entryPrice,
-        currentPrice: p.currentPrice,
-        stopLoss: p.stopLoss,
-        takeProfit: p.takeProfit,
-        profit: p.profit,
-        swap: p.swap,
-        commission: p.commission,
-        openTime: p.openTime,
-        comment: p.comment,
-      })),
+      positions: data.positions, // Same type — no mapping needed
     };
   }
   
@@ -1415,6 +1726,7 @@ export class AgentChannelReader extends EventEmitter {
   
   /**
    * Convert ZMQ snapshot to AgentSnapshot format
+   * Positions pass through directly (same canonical type).
    */
   private convertZmqSnapshot(zmqSnapshot: ZmqSnapshot): AgentSnapshot {
     return {
@@ -1434,22 +1746,7 @@ export class AgentChannelReader extends EventEmitter {
       isLicenseValid: zmqSnapshot.isLicenseValid,
       isPaused: zmqSnapshot.isPaused,
       lastError: zmqSnapshot.lastError,
-      positions: zmqSnapshot.positions.map(p => ({
-        id: p.id,
-        symbol: p.symbol,
-        volume: p.volume,
-        volumeLots: p.volumeLots,
-        side: p.side,
-        entryPrice: p.entryPrice,
-        currentPrice: p.currentPrice,
-        stopLoss: p.stopLoss,
-        takeProfit: p.takeProfit,
-        profit: p.profit,
-        swap: p.swap,
-        commission: p.commission,
-        openTime: p.openTime,
-        comment: p.comment,
-      })),
+      positions: zmqSnapshot.positions, // Same type — no mapping needed
     };
   }
   
@@ -1511,8 +1808,13 @@ export class AgentChannelReader extends EventEmitter {
    * Fetch trade history on demand for a specific terminal.
    * Returns the deals array from the bridge, or empty array on failure.
    */
-  async fetchTradeHistory(terminalId: string, days: number = 30): Promise<any[]> {
-    const bridge = this.zmqBridges.get(terminalId);
+  async fetchTradeHistory(terminalId: string, days: number = 3650): Promise<any[]> {
+    // Try exact key first, then with mt5- prefix (callers may pass raw login)
+    let bridge = this.zmqBridges.get(terminalId);
+    if (!bridge && !terminalId.startsWith('mt5-') && !terminalId.startsWith('ctrader-')) {
+      bridge = this.zmqBridges.get(`mt5-${terminalId}`) || this.zmqBridges.get(`ctrader-${terminalId}`);
+      if (bridge) terminalId = `mt5-${terminalId}`;
+    }
     if (!bridge || !bridge.isConnected()) {
       console.warn(`[AgentChannelReader] Cannot fetch history: terminal ${terminalId} not connected via ZMQ`);
       return [];
@@ -1544,7 +1846,11 @@ export class AgentChannelReader extends EventEmitter {
    */
   isTerminalConnected(terminalId: string): boolean {
     const bridge = this.zmqBridges.get(terminalId);
-    if (bridge) return bridge.isAlive();
+    if (bridge) {
+      // For slave bridges, isAlive() now checks command-only connectivity
+      // and lastMessageReceivedAt set by polling (markAlive).
+      return bridge.isAlive();
+    }
     
     const pipeClient = this.pipeClients.get(terminalId);
     if (pipeClient) return pipeClient.isConnected();
@@ -1633,6 +1939,16 @@ export class AgentChannelReader extends EventEmitter {
   }
   
   /**
+   * Check if a terminal is a slave (command-only, no PUB socket).
+   * Slave EAs copy trades autonomously — the app should only track P/L,
+   * not attempt to duplicate the copy execution.
+   */
+  isSlaveTerminal(terminalId: string): boolean {
+    const bridge = this.zmqBridges.get(terminalId) as any;
+    return bridge?.config?.role === 'slave';
+  }
+  
+  /**
    * Read snapshot immediately
    */
   async readSnapshot(terminalId: string): Promise<ChannelReaderResult> {
@@ -1652,11 +1968,18 @@ export class AgentChannelReader extends EventEmitter {
   ): Promise<{ success: boolean; response?: AgentResponse; error?: string }> {
     // Try ZMQ first if available
     const bridge = this.zmqBridges.get(terminalId);
+    if (!bridge) {
+      const knownKeys = [...this.zmqBridges.keys()].join(', ');
+      console.warn(`[AgentChannelReader] sendCommand(${command.action}): no ZMQ bridge for "${terminalId}" (known bridges: ${knownKeys || 'none'})`);
+    } else if (!bridge.isConnected()) {
+      console.warn(`[AgentChannelReader] sendCommand(${command.action}): bridge for "${terminalId}" exists but not connected`);
+    }
     if (bridge && bridge.isConnected()) {
       try {
         const zmqCommand: ZmqCommand = {
-          action: command.action,
+          action: command.action as ZmqCommand['action'],
           positionId: command.params?.positionId as string,
+          params: command.params as Record<string, unknown>,
         };
         
         const response = await bridge.sendCommand(zmqCommand);

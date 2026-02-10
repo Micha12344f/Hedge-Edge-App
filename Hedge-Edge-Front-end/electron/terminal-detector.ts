@@ -743,20 +743,10 @@ async function updateRunningStatus(terminals: DetectedTerminal[]): Promise<void>
 // ============================================================================
 
 /**
- * Invalidate the terminal detection cache.
- * Call this before detectTerminals() to force a fresh scan.
- */
-export function invalidateTerminalCache(): void {
-  cachedTerminals = null;
-  cacheTimestamp = 0;
-}
-
-/**
  * Detect all installed trading terminals using fast scan
- * Results are cached for 30 seconds to reduce repeated scans.
- * @param forceRefresh - If true, bypass cache and always do a fresh scan
+ * Results are cached for 30 seconds to reduce repeated scans
  */
-export async function detectTerminals(forceRefresh: boolean = false): Promise<DetectionResult> {
+export async function detectTerminals(): Promise<DetectionResult> {
   if (process.platform !== 'win32') {
     return {
       success: false,
@@ -765,11 +755,10 @@ export async function detectTerminals(forceRefresh: boolean = false): Promise<De
     };
   }
   
-  // Check cache first (skip if forceRefresh)
+  // Check cache first
   const now = Date.now();
-  if (!forceRefresh && cachedTerminals && (now - cacheTimestamp) < CACHE_TTL_MS) {
-    // Cache hit — but still refresh running status (fast, just Get-Process)
-    await updateRunningStatus(cachedTerminals);
+  if (cachedTerminals && (now - cacheTimestamp) < CACHE_TTL_MS) {
+    // Return cached results silently
     return {
       success: true,
       terminals: cachedTerminals,

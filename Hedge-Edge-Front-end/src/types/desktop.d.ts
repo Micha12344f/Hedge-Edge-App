@@ -454,28 +454,16 @@ interface CopierGroupConfig {
     status: string;
     volumeSizing: string;
     lotMultiplier: number;
-    riskMultiplier: number;
-    fixedLot: number;
-    fixedRiskPercent: number;
-    fixedRiskNominal: number;
-    copySL: boolean;
-    copyTP: boolean;
-    additionalSLPips: number;
-    additionalTPPips: number;
     reverseMode: boolean;
     symbolWhitelist: string[];
     symbolBlacklist: string[];
     symbolSuffix: string;
     symbolAliases: Array<{ masterSymbol: string; slaveSymbol: string; lotMultiplier?: number }>;
-    protectionMode: string;
-    minThreshold: number;
-    maxThreshold: number;
-    delayMs: number;
   }>;
 }
 
 interface CopierEventPayload {
-  type: 'statsUpdate' | 'activity' | 'copyError' | 'protectionTriggered';
+  type: 'statsUpdate' | 'activity' | 'copyError';
   data: unknown;
 }
 
@@ -523,7 +511,39 @@ interface CopierAPI {
   getActivityLog: (limit?: number) => Promise<{ success: boolean; data?: CopierActivityData[]; error?: string }>;
   resetCircuitBreaker: (groupId: string, followerId: string) => Promise<{ success: boolean; error?: string }>;
   isGlobalEnabled: () => Promise<{ success: boolean; data?: boolean; error?: string }>;
+  getHedgePnLByLeader: () => Promise<{ success: boolean; data?: Record<string, number>; error?: string }>;
   onCopierEvent: (callback: (event: CopierEventPayload) => void) => () => void;
+}
+
+// ─── Daily Limit API ───────────────────────────────────────────────────────
+
+interface DailyLimitResult {
+  dailyStartBalance: number;
+  currentEquity: number;
+  dailyLimitAmount: number;
+  dailyLimitPercent: number;
+  usedAmount: number;
+  remainingAmount: number;
+  isEODTriggered: boolean;
+  serverDay: string;
+  lastUpdate: number;
+}
+
+interface DailyAccountState {
+  dailyStartBalance: number;
+  currentEquity: number;
+  currentBalance: number;
+  serverDay: string;
+  serverTimeUnix: number;
+  highWaterMark: number;
+  lastUpdate: number;
+}
+
+interface DailyLimitAPI {
+  calculate: (accountId: string, dailyLimitPercent: number) => Promise<{ success: boolean; data?: DailyLimitResult; error?: string }>;
+  getState: (accountId: string) => Promise<{ success: boolean; data?: DailyAccountState; error?: string }>;
+  reset: (accountId: string) => Promise<{ success: boolean; error?: string }>;
+  getAllAccounts: () => Promise<{ success: boolean; data?: Record<string, DailyAccountState>; error?: string }>;
 }
 
 // Electron API exposed via preload script
@@ -547,6 +567,7 @@ interface ElectronAPI {
   mt5Whitelist: MT5WhitelistAPI;
   agentChannel: AgentChannelAPI;
   copier: CopierAPI;
+  dailyLimit: DailyLimitAPI;
 }
 
 // Extend Window interface for Electron

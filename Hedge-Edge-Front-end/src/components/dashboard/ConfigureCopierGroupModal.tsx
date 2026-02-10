@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import {
   Dialog,
   DialogContent,
@@ -21,7 +21,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { ScrollArea } from '@/components/ui/scroll-area';
 import { Separator } from '@/components/ui/separator';
 import {
   Accordion,
@@ -33,7 +32,6 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/comp
 import {
   Crown,
   Users,
-  Shield,
   ArrowRightLeft,
   Settings,
   Repeat2,
@@ -48,24 +46,16 @@ import {
   Timer,
   Hash,
   ArrowRight,
+  ChevronDown,
 } from 'lucide-react';
-import type { CopierGroup, FollowerConfig, VolumeSizingMode, AccountProtectionMode } from '@/types/copier';
+import type { CopierGroup, FollowerConfig, VolumeSizingMode } from '@/types/copier';
+import type { TradingAccount } from '@/hooks/useTradingAccounts';
+import { getSuggestedLotMultiplier } from '@/lib/lot-multiplier';
 
 // ─── Config constants ───────────────────────────────────────────────────────
 
 const volumeOptions: { value: VolumeSizingMode; label: string; hint: string }[] = [
-  { value: 'equity-to-equity',    label: 'Equity-to-Equity',    hint: 'Same risk % as leader based on equity ratio' },
   { value: 'lot-multiplier',      label: 'Lot Multiplier',      hint: 'Multiply leader lot size by a factor' },
-  { value: 'risk-multiplier',     label: 'Risk Multiplier',     hint: 'Multiply equity ratio by a factor' },
-  { value: 'fixed-lot',           label: 'Fixed Lot',           hint: 'Use a fixed lot size for every trade' },
-  { value: 'fixed-risk-percent',  label: 'Fixed Risk %',        hint: 'Risk a fixed % of equity (requires SL)' },
-  { value: 'fixed-risk-nominal',  label: 'Fixed Risk $',        hint: 'Risk a fixed $ amount (requires SL)' },
-];
-
-const protectionOptions: { value: AccountProtectionMode; label: string; hint: string }[] = [
-  { value: 'off',           label: 'Off',            hint: 'No account protection monitoring' },
-  { value: 'balance-based', label: 'Balance-based',   hint: 'Monitor closed P&L only' },
-  { value: 'equity-based',  label: 'Equity-based',    hint: 'Monitor balance + floating P&L in real-time' },
 ];
 
 const statusConfig: Record<string, { color: string; icon: typeof CircleDot; label: string }> = {
@@ -86,51 +76,30 @@ const phaseConfig: Record<string, { className: string; label: string }> = {
 interface FollowerFormState {
   volumeSizing: VolumeSizingMode;
   lotMultiplier: string;
-  riskMultiplier: string;
-  fixedLot: string;
-  fixedRiskPercent: string;
-  fixedRiskNominal: string;
-  copySL: boolean;
-  copyTP: boolean;
-  additionalSLPips: string;
-  additionalTPPips: string;
   reverseMode: boolean;
-  delayMs: string;
   symbolSuffix: string;
   symbolAliases: string;       // "DJ30.cash=US30|0.1;SpotCrude=WTI|10"
   symbolBlacklist: string;     // "-DJ30;-USDJPY" or "+BTCUSD;+ETHUSD"
   magicNumberFilter: string;   // "+111111;+222222;-333333"
-  protectionMode: AccountProtectionMode;
-  minThreshold: string;
-  maxThreshold: string;
 }
 
 function followerToForm(f: FollowerConfig): FollowerFormState {
   return {
-    volumeSizing: f.volumeSizing,
+    volumeSizing: 'lot-multiplier',
     lotMultiplier: String(f.lotMultiplier),
-    riskMultiplier: String(f.riskMultiplier),
-    fixedLot: String(f.fixedLot),
-    fixedRiskPercent: String(f.fixedRiskPercent),
-    fixedRiskNominal: String(f.fixedRiskNominal),
-    copySL: f.copySL,
-    copyTP: f.copyTP,
-    additionalSLPips: String(f.additionalSLPips),
-    additionalTPPips: String(f.additionalTPPips),
-    reverseMode: f.reverseMode,
-    delayMs: String(f.delayMs),
+    reverseMode: true, // Always true — this copier only reverses (hedges) trades
     symbolSuffix: f.symbolSuffix,
     symbolAliases: f.symbolAliases
       .map(a => `${a.masterSymbol}=${a.slaveSymbol}${a.lotMultiplier ? `|${a.lotMultiplier}` : ''}`)
       .join(';'),
     symbolBlacklist: [
-      ...f.symbolWhitelist.map(s => `+${s}`),
-      ...f.symbolBlacklist.map(s => `-${s}`),
+      ...(f.symbolWhitelist || []).map(s => `+${s}`),
+      ...(f.symbolBlacklist || []).map(s => `-${s}`),
     ].join(';'),
-    magicNumberFilter: '',
-    protectionMode: f.protectionMode,
-    minThreshold: f.minThreshold > 0 ? String(f.minThreshold) : '',
-    maxThreshold: f.maxThreshold > 0 ? String(f.maxThreshold) : '',
+    magicNumberFilter: [
+      ...(f.magicNumberWhitelist || []).map(n => `+${n}`),
+      ...(f.magicNumberBlacklist || []).map(n => `-${n}`),
+    ].join(';'),
   };
 }
 
@@ -165,26 +134,36 @@ function formToFollowerPatch(form: FollowerFormState): Partial<FollowerConfig> {
       else symbolBlacklist.push(entry); // default to blacklist
     });
 
+  // Parse magic number filter
+  const magicNumberWhitelist: number[] = [];
+  const magicNumberBlacklist: number[] = [];
+  form.magicNumberFilter
+    .split(';')
+    .map(s => s.trim())
+    .filter(Boolean)
+    .forEach(entry => {
+      if (entry.startsWith('+')) {
+        const num = parseInt(entry.slice(1));
+        if (!isNaN(num)) magicNumberWhitelist.push(num);
+      } else if (entry.startsWith('-')) {
+        const num = parseInt(entry.slice(1));
+        if (!isNaN(num)) magicNumberBlacklist.push(num);
+      } else {
+        const num = parseInt(entry);
+        if (!isNaN(num)) magicNumberBlacklist.push(num); // default to blacklist
+      }
+    });
+
   return {
-    volumeSizing: form.volumeSizing,
+    volumeSizing: 'lot-multiplier' as const,
     lotMultiplier: parseFloat(form.lotMultiplier) || 1,
-    riskMultiplier: parseFloat(form.riskMultiplier) || 1,
-    fixedLot: parseFloat(form.fixedLot) || 0.01,
-    fixedRiskPercent: parseFloat(form.fixedRiskPercent) || 1,
-    fixedRiskNominal: parseFloat(form.fixedRiskNominal) || 50,
-    copySL: form.copySL,
-    copyTP: form.copyTP,
-    additionalSLPips: parseFloat(form.additionalSLPips) || 0,
-    additionalTPPips: parseFloat(form.additionalTPPips) || 0,
-    reverseMode: form.reverseMode,
-    delayMs: parseInt(form.delayMs) || 0,
+    reverseMode: true, // Always true — this copier only reverses (hedges) trades
     symbolSuffix: form.symbolSuffix,
     symbolAliases,
     symbolWhitelist,
     symbolBlacklist,
-    protectionMode: form.protectionMode,
-    minThreshold: parseFloat(form.minThreshold) || 0,
-    maxThreshold: parseFloat(form.maxThreshold) || 0,
+    magicNumberWhitelist,
+    magicNumberBlacklist,
   };
 }
 
@@ -195,6 +174,8 @@ interface ConfigureCopierGroupModalProps {
   onOpenChange: (open: boolean) => void;
   group: CopierGroup | null;
   onSave: (updated: CopierGroup) => void;
+  /** All trading accounts — used to compute suggested lot multiplier */
+  accounts?: TradingAccount[];
 }
 
 // ─── Component ──────────────────────────────────────────────────────────────
@@ -204,12 +185,41 @@ export function ConfigureCopierGroupModal({
   onOpenChange,
   group,
   onSave,
+  accounts,
 }: ConfigureCopierGroupModalProps) {
   const [activeTab, setActiveTab] = useState('general');
   const [groupName, setGroupName] = useState('');
   const [leaderSuffixRemove, setLeaderSuffixRemove] = useState('');
   const [followerForms, setFollowerForms] = useState<Record<string, FollowerFormState>>({});
   const [expandedFollower, setExpandedFollower] = useState<string>('');
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const [showScrollDown, setShowScrollDown] = useState(false);
+
+  // ── Scroll tracking ────────────────────────────────────────────
+
+  const checkScroll = useCallback(() => {
+    const el = scrollRef.current;
+    if (!el) { setShowScrollDown(false); return; }
+    const hasMore = el.scrollHeight - el.scrollTop - el.clientHeight > 40;
+    setShowScrollDown(hasMore);
+  }, []);
+
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    el.addEventListener('scroll', checkScroll, { passive: true });
+    // Recheck on resize or content changes
+    const ro = new ResizeObserver(checkScroll);
+    ro.observe(el);
+    checkScroll();
+    return () => { el.removeEventListener('scroll', checkScroll); ro.disconnect(); };
+  }, [checkScroll, activeTab, expandedFollower]);
+
+  const scrollDown = useCallback(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    el.scrollBy({ top: 300, behavior: 'smooth' });
+  }, []);
 
   // ── Initialise state from group ────────────────────────────────
 
@@ -263,6 +273,12 @@ export function ConfigureCopierGroupModal({
 
   if (!group) return null;
 
+  // Compute suggested lot multiplier from leader account's costs
+  const leaderAccount = accounts?.find(a => a.id === group.leaderAccountId);
+  const lotSuggestion = leaderAccount && accounts
+    ? getSuggestedLotMultiplier(leaderAccount, accounts)
+    : null;
+
   // ── Render ─────────────────────────────────────────────────────
 
   const lpc = phaseConfig[group.leaderPhase] || phaseConfig.evaluation;
@@ -298,7 +314,13 @@ export function ConfigureCopierGroupModal({
             </TabsTrigger>
           </TabsList>
 
-          <ScrollArea className="flex-1 mt-4 pr-2" style={{ maxHeight: 'calc(90vh - 240px)' }}>
+          <div className="relative flex-1 min-h-0 mt-4">
+            <div
+              ref={scrollRef}
+              onScroll={checkScroll}
+              className="overflow-y-auto pr-2"
+              style={{ maxHeight: 'calc(90vh - 240px)' }}
+            >
             {/* ─── TAB: General ─────────────────────────────────── */}
             <TabsContent value="general" className="mt-0 space-y-5">
               {/* Group Name */}
@@ -411,12 +433,6 @@ export function ConfigureCopierGroupModal({
                               Reverse
                             </Badge>
                           )}
-                          {form.protectionMode !== 'off' && (
-                            <Badge variant="outline" className="text-[10px] bg-primary/10 text-primary border-primary/30">
-                              <Shield className="h-3 w-3 mr-0.5" />
-                              Protected
-                            </Badge>
-                          )}
                         </div>
                       </AccordionTrigger>
                       <AccordionContent className="px-4 pb-4 pt-1">
@@ -424,6 +440,7 @@ export function ConfigureCopierGroupModal({
                           follower={follower}
                           form={form}
                           onUpdate={(patch) => updateFollower(follower.id, patch)}
+                          lotSuggestion={lotSuggestion}
                         />
                       </AccordionContent>
                     </AccordionItem>
@@ -445,8 +462,8 @@ export function ConfigureCopierGroupModal({
                 </div>
                 <div className="p-4 rounded-lg border border-border/40 bg-muted/20">
                   <p className="text-xs text-muted-foreground mb-1">Missed Hedges</p>
-                  <p className={`text-2xl font-bold ${group.totalFailedCopies === 0 ? 'text-green-500' : 'text-yellow-500'}`}>
-                    {group.totalFailedCopies}
+                  <p className={`text-2xl font-bold ${(group.totalFailedCopies ?? 0) === 0 ? 'text-green-500' : 'text-yellow-500'}`}>
+                    {group.totalFailedCopies ?? 0}
                   </p>
                 </div>
                 <div className="p-4 rounded-lg border border-border/40 bg-muted/20">
@@ -473,11 +490,11 @@ export function ConfigureCopierGroupModal({
                   {group.followers.map(f => (
                     <div key={f.id} className="grid grid-cols-6 gap-2 px-3 py-2.5 text-xs border-b border-border/20 last:border-0 hover:bg-muted/10">
                       <span className="col-span-2 font-medium truncate">{f.accountName}</span>
-                      <span className="text-right text-muted-foreground">{f.stats.tradesToday}</span>
+                      <span className="text-right text-muted-foreground">{f.stats.tradesTotal}</span>
                     <span className={`text-right ${f.stats.failedCopies === 0 ? 'text-green-500' : 'text-yellow-500'}`}>
                       {f.stats.failedCopies}
                       </span>
-                      <span className="text-right text-muted-foreground">{f.stats.successRate}%</span>
+                      <span className="text-right text-muted-foreground">{Math.round(f.stats.successRate)}%</span>
                       <span className={`text-right font-medium ${f.stats.totalProfit >= 0 ? 'text-green-500' : 'text-red-500'}`}>
                         {f.stats.totalProfit >= 0 ? '+' : ''}${Math.abs(f.stats.totalProfit).toFixed(2)}
                       </span>
@@ -486,7 +503,22 @@ export function ConfigureCopierGroupModal({
                 </div>
               </div>
             </TabsContent>
-          </ScrollArea>
+            </div>
+
+            {/* Scroll-down indicator with fade */}
+            {showScrollDown && (
+              <>
+                <div className="pointer-events-none absolute bottom-0 left-0 right-2 h-12 bg-gradient-to-t from-background to-transparent z-[5]" />
+                <button
+                  onClick={scrollDown}
+                  className="absolute bottom-2 left-1/2 -translate-x-1/2 z-10 flex items-center gap-1.5 px-3 py-1.5 rounded-full border border-primary/40 bg-background/90 backdrop-blur-sm text-primary shadow-lg shadow-primary/10 hover:bg-primary/10 hover:border-primary/60 transition-all duration-200 text-[11px] font-medium"
+                >
+                  <ChevronDown className="h-3.5 w-3.5 animate-bounce" />
+                  Scroll for more
+                </button>
+              </>
+            )}
+          </div>
         </Tabs>
 
         <DialogFooter className="mt-4 pt-4 border-t border-border/30">
@@ -510,10 +542,12 @@ function FollowerConfigPanel({
   follower,
   form,
   onUpdate,
+  lotSuggestion,
 }: {
   follower: FollowerConfig;
   form: FollowerFormState;
   onUpdate: (patch: Partial<FollowerFormState>) => void;
+  lotSuggestion?: { suggested: number; costToRecover: number; evalFee: number; archivedHedgePnL: number; maxDrawdownDecimal: number; accountSize: number } | null;
 }) {
   return (
     <div className="space-y-5">
@@ -524,70 +558,42 @@ function FollowerConfigPanel({
           <Label className="font-semibold text-sm">Volume Sizing</Label>
         </div>
 
-        <Select
-          value={form.volumeSizing}
-          onValueChange={(v) => onUpdate({ volumeSizing: v as VolumeSizingMode })}
-        >
-          <SelectTrigger className="text-xs">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            {volumeOptions.map(opt => (
-              <SelectItem key={opt.value} value={opt.value}>
-                <div className="flex flex-col">
-                  <span className="text-xs">{opt.label}</span>
-                  <span className="text-[10px] text-muted-foreground">{opt.hint}</span>
-                </div>
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-
-        {/* Dynamic volume field */}
-        {form.volumeSizing === 'lot-multiplier' && (
-          <div className="space-y-1">
+        <div className="space-y-1">
+          <div className="flex items-center justify-between">
             <Label className="text-xs">Lot Multiplier</Label>
-            <Input type="number" step="0.1" className="text-xs" value={form.lotMultiplier} onChange={e => onUpdate({ lotMultiplier: e.target.value })} />
-            <p className="text-[10px] text-muted-foreground">1.0 = same size, 0.5 = half, 2.0 = double leader lot size</p>
+            {lotSuggestion && lotSuggestion.suggested > 0 && (
+              <TooltipProvider>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <button
+                      type="button"
+                      onClick={() => onUpdate({ lotMultiplier: String(lotSuggestion.suggested) })}
+                      className="flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[9px] font-medium bg-primary/15 text-primary border border-primary/30 hover:bg-primary/25 transition-colors cursor-pointer"
+                    >
+                      <Zap className="h-2.5 w-2.5" />
+                      Suggested: {lotSuggestion.suggested}
+                    </button>
+                  </TooltipTrigger>
+                  <TooltipContent className="max-w-xs">
+                    <p className="text-xs">
+                      Cost to recover: ${lotSuggestion.costToRecover.toLocaleString()}<br />
+                      (Fee: ${lotSuggestion.evalFee.toLocaleString()}
+                      {lotSuggestion.archivedHedgePnL > 0 && <> + Hedge losses: ${lotSuggestion.archivedHedgePnL.toLocaleString()}</>})<br />
+                      ÷ ({(lotSuggestion.maxDrawdownDecimal * 100).toFixed(0)}% × ${lotSuggestion.accountSize.toLocaleString()})
+                      = {lotSuggestion.suggested}
+                    </p>
+                  </TooltipContent>
+                </Tooltip>
+              </TooltipProvider>
+            )}
           </div>
-        )}
-        {form.volumeSizing === 'risk-multiplier' && (
-          <div className="space-y-1">
-            <Label className="text-xs">Risk Multiplier</Label>
-            <Input type="number" step="0.1" className="text-xs" value={form.riskMultiplier} onChange={e => onUpdate({ riskMultiplier: e.target.value })} />
-            <p className="text-[10px] text-muted-foreground">Multiplied against equity-to-equity ratio. 1.0 = same risk as E2E</p>
-          </div>
-        )}
-        {form.volumeSizing === 'fixed-lot' && (
-          <div className="space-y-1">
-            <Label className="text-xs">Fixed Lot Size</Label>
-            <Input type="number" step="0.01" className="text-xs" value={form.fixedLot} onChange={e => onUpdate({ fixedLot: e.target.value })} />
-            <p className="text-[10px] text-muted-foreground">Every copied trade uses exactly this lot size</p>
-          </div>
-        )}
-        {form.volumeSizing === 'fixed-risk-percent' && (
-          <div className="space-y-1">
-            <Label className="text-xs">Risk Percentage (%)</Label>
-            <Input type="number" step="0.1" className="text-xs" value={form.fixedRiskPercent} onChange={e => onUpdate({ fixedRiskPercent: e.target.value })} />
-            <p className="text-[10px] text-muted-foreground">
-              Lot size calculated to risk this % of equity. <strong>Requires leader trade to have a stop loss.</strong>
-            </p>
-          </div>
-        )}
-        {form.volumeSizing === 'fixed-risk-nominal' && (
-          <div className="space-y-1">
-            <Label className="text-xs">Risk Amount ($)</Label>
-            <Input type="number" step="1" className="text-xs" value={form.fixedRiskNominal} onChange={e => onUpdate({ fixedRiskNominal: e.target.value })} />
-            <p className="text-[10px] text-muted-foreground">
-              Lot size calculated to risk exactly this $ amount. <strong>Requires leader trade to have a stop loss.</strong>
-            </p>
-          </div>
-        )}
-        {form.volumeSizing === 'equity-to-equity' && (
+          <Input type="number" step="0.01" className="text-xs" value={form.lotMultiplier} onChange={e => onUpdate({ lotMultiplier: e.target.value })} />
           <p className="text-[10px] text-muted-foreground">
-            Lot size automatically calculated to maintain the same risk percentage as the leader based on equity ratio.
+            {lotSuggestion && lotSuggestion.suggested > 0
+              ? `Auto-sized to recover $${lotSuggestion.costToRecover.toLocaleString()} in costs`
+              : '1.0 = same size, 0.5 = half, 2.0 = double leader lot size'}
           </p>
-        )}
+        </div>
       </div>
 
       <Separator />
@@ -599,61 +605,16 @@ function FollowerConfigPanel({
           <Label className="font-semibold text-sm">Trade Copy Settings</Label>
         </div>
 
-        {/* SL / TP toggles */}
-        <div className="grid grid-cols-2 gap-3">
-          <div className="flex items-center justify-between gap-2 p-2.5 rounded-lg border border-border/40 bg-muted/20">
-            <Label className="text-xs">Copy SL from Leader</Label>
-            <Switch checked={form.copySL} onCheckedChange={v => onUpdate({ copySL: v })} />
-          </div>
-          <div className="flex items-center justify-between gap-2 p-2.5 rounded-lg border border-border/40 bg-muted/20">
-            <Label className="text-xs">Copy TP from Leader</Label>
-            <Switch checked={form.copyTP} onCheckedChange={v => onUpdate({ copyTP: v })} />
-          </div>
-        </div>
-
-        {/* Additional TP/SL pips */}
-        <div className="grid grid-cols-2 gap-3">
-          <div className="space-y-1">
-            <Label className="text-xs">Additional SL (pips)</Label>
-            <Input type="number" step="1" className="text-xs" value={form.additionalSLPips} onChange={e => onUpdate({ additionalSLPips: e.target.value })} placeholder="0" />
-            <p className="text-[10px] text-muted-foreground">Buffer added to SL for spread differences</p>
-          </div>
-          <div className="space-y-1">
-            <Label className="text-xs">Additional TP (pips)</Label>
-            <Input type="number" step="1" className="text-xs" value={form.additionalTPPips} onChange={e => onUpdate({ additionalTPPips: e.target.value })} placeholder="0" />
-            <p className="text-[10px] text-muted-foreground">Buffer added to TP for spread differences</p>
-          </div>
-        </div>
-
-        {/* Reverse Mode */}
-        <div className="flex items-center justify-between gap-3 p-2.5 rounded-lg border border-border/40 bg-muted/20">
+        {/* Reverse Mode — Always ON (hedging only) */}
+        <div className="flex items-center justify-between gap-3 p-2.5 rounded-lg border border-purple-500/30 bg-purple-500/10">
           <div className="flex items-center gap-2">
             <Repeat2 className="h-4 w-4 text-purple-500" />
             <div>
-              <Label className="text-xs font-medium">Reverse Mode</Label>
-              <p className="text-[10px] text-muted-foreground">Copy trades in opposite direction for hedging</p>
+              <Label className="text-xs font-medium">Reverse Mode (Always On)</Label>
+              <p className="text-[10px] text-muted-foreground">All trades are automatically reversed for hedging. This cannot be disabled.</p>
             </div>
           </div>
-          <Switch checked={form.reverseMode} onCheckedChange={v => onUpdate({ reverseMode: v })} />
-        </div>
-
-        {/* Delay */}
-        <div className="space-y-1">
-          <div className="flex items-center gap-2">
-            <Timer className="h-3.5 w-3.5 text-muted-foreground" />
-            <Label className="text-xs">Max Delay (milliseconds)</Label>
-            <TooltipProvider>
-              <Tooltip>
-                <TooltipTrigger>
-                  <Info className="h-3 w-3 text-muted-foreground" />
-                </TooltipTrigger>
-                <TooltipContent className="max-w-xs">
-                  <p>Random delay applied from 0ms to this value before copying each trade. Useful to avoid detection on some platforms.</p>
-                </TooltipContent>
-              </Tooltip>
-            </TooltipProvider>
-          </div>
-          <Input type="number" step="100" className="text-xs" value={form.delayMs} onChange={e => onUpdate({ delayMs: e.target.value })} placeholder="0" />
+          <Switch checked={true} disabled className="data-[state=checked]:bg-purple-500 opacity-100" />
         </div>
       </div>
 
@@ -780,76 +741,6 @@ function FollowerConfigPanel({
             <Badge variant="outline" className="text-[10px]">6. Auto-map</Badge>
           </div>
         </div>
-      </div>
-
-      <Separator />
-
-      {/* ── Section 4: Account Protection ─────────────────────── */}
-      <div className="space-y-3">
-        <div className="flex items-center gap-2">
-          <Shield className="h-4 w-4 text-primary" />
-          <Label className="font-semibold text-sm">Account Protection</Label>
-        </div>
-
-        <Select
-          value={form.protectionMode}
-          onValueChange={(v) => onUpdate({ protectionMode: v as AccountProtectionMode })}
-        >
-          <SelectTrigger className="text-xs">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            {protectionOptions.map(opt => (
-              <SelectItem key={opt.value} value={opt.value}>
-                <div className="flex flex-col">
-                  <span className="text-xs">{opt.label}</span>
-                  <span className="text-[10px] text-muted-foreground">{opt.hint}</span>
-                </div>
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-
-        {form.protectionMode !== 'off' && (
-          <>
-            <div className="grid grid-cols-2 gap-3">
-              <div className="space-y-1">
-                <Label className="text-xs">Minimum Threshold ($)</Label>
-                <Input
-                  type="number"
-                  className="text-xs"
-                  value={form.minThreshold}
-                  onChange={e => onUpdate({ minThreshold: e.target.value })}
-                  placeholder="e.g. 96000"
-                />
-                <p className="text-[10px] text-muted-foreground">
-                  Close all & stop if {form.protectionMode === 'balance-based' ? 'balance' : 'equity'} drops below
-                </p>
-              </div>
-              <div className="space-y-1">
-                <Label className="text-xs">Maximum Threshold ($)</Label>
-                <Input
-                  type="number"
-                  className="text-xs"
-                  value={form.maxThreshold}
-                  onChange={e => onUpdate({ maxThreshold: e.target.value })}
-                  placeholder="e.g. 110000"
-                />
-                <p className="text-[10px] text-muted-foreground">
-                  Close all & stop if {form.protectionMode === 'balance-based' ? 'balance' : 'equity'} rises above
-                </p>
-              </div>
-            </div>
-
-            {/* Prop firm tip */}
-            <div className="p-3 rounded-lg bg-primary/5 border border-primary/20">
-              <p className="text-[10px] text-muted-foreground">
-                <strong>Prop Firm Tip:</strong> For a $100k account with 4% max DD and 10% profit target, set min to $96,000 and max to $110,000.
-                Use <strong>equity-based</strong> for real-time protection against floating losses.
-              </p>
-            </div>
-          </>
-        )}
       </div>
     </div>
   );

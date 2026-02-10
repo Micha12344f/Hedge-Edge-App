@@ -99,6 +99,12 @@ export interface ScanResult {
   source: 'registration' | 'fallback';
   alive: boolean;
   reason?: string;
+  /** v3+: EA role (master or slave) from registration file */
+  role?: 'master' | 'slave';
+  /** v3+: CURVE encryption enabled */
+  curveEnabled?: boolean;
+  /** v3+: Server public key for CURVE */
+  curveServerKey?: string;
 }
 
 export interface PortManagerConfig {
@@ -474,16 +480,19 @@ export class PortManager extends EventEmitter {
           const cleanContent = content.replace(/^\uFEFF/, '').replace(/\0/g, '').trim();
           const reg = JSON.parse(cleanContent);
 
-          if (!reg.dataPort) continue;
+          if (!reg.dataPort && !reg.commandPort) continue;
+
+          // Determine which port to probe: dataPort for masters, commandPort for slaves
+          const probePort = reg.dataPort || reg.commandPort;
 
           const stat = await fs.stat(filePath);
           const fileAge = Date.now() - stat.mtimeMs;
 
           // Only clean if BOTH stale AND port is dead
           if (fileAge > this.config.maxRegistrationAgeMs) {
-            const alive = await this.tcpProbe(reg.dataPort);
+            const alive = await this.tcpProbe(probePort);
             if (!alive) {
-              console.log(`[PortManager] Cleaning stale registration: ${file} (age: ${Math.round(fileAge / 1000)}s, port ${reg.dataPort} dead)`);
+              console.log(`[PortManager] Cleaning stale registration: ${file} (age: ${Math.round(fileAge / 1000)}s, port ${probePort} dead)`);
               await fs.unlink(filePath);
               cleaned.push(file);
             }
@@ -559,7 +568,7 @@ export class PortManager extends EventEmitter {
    * @returns Array of ScanResults indicating which are alive
    */
   async discoverLivePorts(
-    candidates: Array<{ dataPort: number; commandPort: number; name: string; source: 'registration' | 'fallback' }>
+    candidates: Array<{ dataPort: number; commandPort: number; name: string; source: 'registration' | 'fallback'; role?: 'master' | 'slave'; curveEnabled?: boolean; curveServerKey?: string }>
   ): Promise<ScanResult[]> {
     const results: ScanResult[] = [];
 
@@ -583,6 +592,9 @@ export class PortManager extends EventEmitter {
         source: probe.source,
         alive: probe.alive,
         reason: probe.reason,
+        role: probe.role,
+        curveEnabled: probe.curveEnabled,
+        curveServerKey: probe.curveServerKey,
       });
     }
 

@@ -280,7 +280,7 @@ const tradingAPI = {
    * @param terminalId The MT5 login / terminal ID
    * @param days Number of days of history to fetch (default 30)
    */
-  getHistory: async (terminalId: string, days: number = 30): Promise<any> => {
+  getHistory: async (terminalId: string, days: number = 3650): Promise<any> => {
     try {
       return await ipcRenderer.invoke('trading:getHistory', String(terminalId), days);
     } catch (err) {
@@ -1201,23 +1201,11 @@ interface CopierGroupConfig {
     status: string;
     volumeSizing: string;
     lotMultiplier: number;
-    riskMultiplier: number;
-    fixedLot: number;
-    fixedRiskPercent: number;
-    fixedRiskNominal: number;
-    copySL: boolean;
-    copyTP: boolean;
-    additionalSLPips: number;
-    additionalTPPips: number;
     reverseMode: boolean;
     symbolWhitelist: string[];
     symbolBlacklist: string[];
     symbolSuffix: string;
     symbolAliases: Array<{ masterSymbol: string; slaveSymbol: string; lotMultiplier?: number }>;
-    protectionMode: string;
-    minThreshold: number;
-    maxThreshold: number;
-    delayMs: number;
   }>;
 }
 
@@ -1323,15 +1311,30 @@ const copierAPI = {
   },
 
   /**
+   * Get hedge P/L attributed to each leader (prop) account.
+   * Returns Record<leaderAccountId, totalHedgeProfit> from successfully copied trades only.
+   */
+  getHedgePnLByLeader: (): Promise<{ success: boolean; data?: Record<string, number>; error?: string }> => {
+    return ipcRenderer.invoke('copier:getHedgePnLByLeader');
+  },
+
+  /**
+   * Get internal copier debug state (correlations, groups, account map)
+   */
+  getDebugState: (): Promise<{ success: boolean; data?: Record<string, unknown>; error?: string }> => {
+    return ipcRenderer.invoke('copier:getDebugState');
+  },
+
+  /**
    * Subscribe to real-time copier events (stats, activity, errors)
    * Returns an unsubscribe function
    */
   onCopierEvent: (callback: (event: {
-    type: 'statsUpdate' | 'activity' | 'copyError' | 'protectionTriggered';
+    type: 'statsUpdate' | 'activity' | 'copyError';
     data: unknown;
   }) => void): () => void => {
     const handler = (_event: unknown, payload: {
-      type: 'statsUpdate' | 'activity' | 'copyError' | 'protectionTriggered';
+      type: 'statsUpdate' | 'activity' | 'copyError';
       data: unknown;
     }) => {
       callback(payload);
@@ -1340,6 +1343,111 @@ const copierAPI = {
     return () => {
       ipcRenderer.removeListener('copier:event', handler);
     };
+  },
+};
+
+// ============================================================================
+// Daily Limit Tracking API (EOD-based dynamic daily limits)
+// ============================================================================
+
+interface DailyLimitResult {
+  /** The balance used as reference for daily limit calculation */
+  referenceBalance: number;
+  /** Daily limit as absolute value (negative = max loss allowed) */
+  dailyLimitPnL: number;
+  /** Daily limit as percentage */
+  dailyLimitPercent: number;
+  /** Current day's P&L relative to day-start */
+  currentDayPnL: number;
+  /** Current day's P&L as percentage of day-start balance */
+  currentDayPnLPercent: number;
+  /** Remaining daily drawdown before hitting limit */
+  remainingDailyDrawdown: number;
+  /** Whether daily limit has been breached */
+  isLimitBreached: boolean;
+  /** The date used for this calculation (broker time) */
+  tradingDate: string;
+}
+
+interface DailyAccountState {
+  accountId: string;
+  dayStartBalance: number;
+  dayStartEquity: number;
+  dayStartDate: string;
+  lastEodTimestamp: number;
+  crossoverHighWaterMark: number | null;
+  hadPositionAtCrossover: boolean;
+}
+
+const dailyLimitAPI = {
+  /**
+   * Calculate daily limit for an account based on broker server EOD
+   * Uses the current day's starting balance instead of initial account size
+   * 
+   * @param accountId - The terminal ID or account ID
+   * @param maxDailyLossPercent - The max daily loss percentage (e.g., 5 for 5%)
+   */
+  calculate: async (
+    accountId: string, 
+    maxDailyLossPercent: number
+  ): Promise<{ success: boolean; data?: DailyLimitResult; error?: string }> => {
+    if (!accountId) {
+      return { success: false, error: 'Account ID is required' };
+    }
+    if (typeof maxDailyLossPercent !== 'number' || maxDailyLossPercent <= 0) {
+      return { success: false, error: 'maxDailyLossPercent must be a positive number' };
+    }
+    try {
+      return await ipcRenderer.invoke('dailyLimit:calculate', {
+        accountId,
+        maxDailyLossPercent,
+      });
+    } catch (err) {
+      console.error('[Preload] dailyLimit:calculate error:', err);
+      return { success: false, error: err instanceof Error ? err.message : String(err) };
+    }
+  },
+
+  /**
+   * Get day-start state for an account
+   */
+  getState: async (accountId: string): Promise<{ success: boolean; data?: DailyAccountState; error?: string }> => {
+    if (!accountId) {
+      return { success: false, error: 'Account ID is required' };
+    }
+    try {
+      return await ipcRenderer.invoke('dailyLimit:getState', accountId);
+    } catch (err) {
+      console.error('[Preload] dailyLimit:getState error:', err);
+      return { success: false, error: err instanceof Error ? err.message : String(err) };
+    }
+  },
+
+  /**
+   * Manually reset day-start balance (e.g., after deposit/withdrawal)
+   */
+  reset: async (accountId: string): Promise<{ success: boolean; error?: string }> => {
+    if (!accountId) {
+      return { success: false, error: 'Account ID is required' };
+    }
+    try {
+      return await ipcRenderer.invoke('dailyLimit:reset', accountId);
+    } catch (err) {
+      console.error('[Preload] dailyLimit:reset error:', err);
+      return { success: false, error: err instanceof Error ? err.message : String(err) };
+    }
+  },
+
+  /**
+   * Get all tracked account IDs
+   */
+  getAllAccounts: async (): Promise<{ success: boolean; data?: string[]; error?: string }> => {
+    try {
+      return await ipcRenderer.invoke('dailyLimit:getAllAccounts');
+    } catch (err) {
+      console.error('[Preload] dailyLimit:getAllAccounts error:', err);
+      return { success: false, error: err instanceof Error ? err.message : String(err) };
+    }
   },
 };
 
@@ -1444,6 +1552,11 @@ const electronAPI = {
    * Trade copier engine for leader→follower copy management
    */
   copier: copierAPI,
+
+  /**
+   * Daily limit tracking for EOD-based dynamic daily loss limits
+   */
+  dailyLimit: dailyLimitAPI,
 };
 
 // Expose the API to the renderer process via window.electronAPI

@@ -235,6 +235,10 @@ class ConnectionSupervisor {
    */
   getSnapshot(accountId: string): ConnectionSnapshot | null {
     if (this.state.snapshots[accountId]) return this.state.snapshots[accountId];
+    // Try with "mt5-" prefix (caller may pass raw login)
+    const prefixed = `mt5-${accountId}`;
+    if (this.state.snapshots[prefixed]) return this.state.snapshots[prefixed];
+    // Fallback: search by mt5Login field
     for (const snap of Object.values(this.state.snapshots)) {
       if ((snap.session as any)?.mt5Login === accountId) return snap;
     }

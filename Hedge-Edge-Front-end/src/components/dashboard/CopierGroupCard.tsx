@@ -16,7 +16,6 @@ import {
   MoreVertical,
   Settings,
   Trash2,
-  Activity,
   Copy,
   Zap,
   TrendingUp,
@@ -28,7 +27,6 @@ import {
   Users,
   ChevronDown,
   ChevronUp,
-  ShieldCheck,
   Repeat2,
 } from 'lucide-react';
 import type { CopierGroup, FollowerConfig } from '@/types/copier';
@@ -57,12 +55,7 @@ const phaseConfig: Record<string, { badge: string; label: string }> = {
 };
 
 const volumeLabel: Record<string, string> = {
-  'equity-to-equity': 'Equity-to-Equity',
   'lot-multiplier':   'Lot Multiplier',
-  'risk-multiplier':  'Risk Multiplier',
-  'fixed-lot':        'Fixed Lot',
-  'fixed-risk-percent':'Fixed Risk %',
-  'fixed-risk-nominal':'Fixed Risk $',
 };
 
 // ─── Follower Row ───────────────────────────────────────────────────────────
@@ -115,19 +108,7 @@ function FollowerRow({
         </span>
       </div>
 
-      {/* Right: toggle */}
-      <Button
-        variant="ghost"
-        size="icon"
-        className="h-7 w-7 shrink-0"
-        onClick={() => onToggle(follower.id)}
-      >
-        {follower.status === 'active' ? (
-          <Pause className="h-3.5 w-3.5" />
-        ) : (
-          <Play className="h-3.5 w-3.5" />
-        )}
-      </Button>
+
     </div>
   );
 }
@@ -252,10 +233,6 @@ export function CopierGroupCard({
                   <Settings className="mr-2 h-4 w-4" />
                   Configure
                 </DropdownMenuItem>
-                <DropdownMenuItem>
-                  <Activity className="mr-2 h-4 w-4" />
-                  View Activity Log
-                </DropdownMenuItem>
                 <DropdownMenuSeparator />
                 <DropdownMenuItem className="text-destructive" onClick={() => onDelete(group.id)}>
                   <Trash2 className="mr-2 h-4 w-4" />
@@ -288,11 +265,7 @@ export function CopierGroupCard({
             {isProfit ? <TrendingUp className="h-3 w-3" /> : <TrendingDown className="h-3 w-3" />}
             {fmt(profit)}
           </span>
-          {group.followers.some(f => f.protectionMode !== 'off') && (
-            <span className="flex items-center gap-1 text-primary">
-              <ShieldCheck className="h-3 w-3" /> Protected
-            </span>
-          )}
+
         </div>
 
         {/* ── Expanded Follower List ────────────────────────────────── */}

@@ -10,12 +10,26 @@
  */
 
 import { EventEmitter } from 'events';
+import { Position, pipValueFromDigits } from './shared-types.js';
+
+// Re-export the canonical Position type as ZmqPosition for backwards compatibility
+export type ZmqPosition = Position;
+export { pipValueFromDigits } from './shared-types.js';
+
+// O(1) lookup set for known event-driven message types (replaces array.includes)
+const KNOWN_EVENT_TYPES: ReadonlySet<string> = new Set([
+  'CONNECTED', 'DISCONNECTED', 'HEARTBEAT',
+  'POSITION_OPENED', 'POSITION_CLOSED', 'POSITION_MODIFIED', 'POSITION_REVERSED',
+  'DEAL_EXECUTED', 'ORDER_PLACED', 'ORDER_CANCELLED', 'ACCOUNT_UPDATE',
+  'PRICE_UPDATE', 'PAUSED', 'RESUMED',
+]);
 
 // ZeroMQ type definitions (zeromq is an optional peer dependency)
 // eslint-disable-next-line @typescript-eslint/no-namespace
 namespace ZmqTypes {
   export interface Subscriber {
     receiveTimeout: number;
+    receiveHighWaterMark: number;
     linger: number;
     connect(endpoint: string): void;
     subscribe(filter: string): void;
@@ -109,6 +123,10 @@ export interface ZmqHeartbeatData {
   isLicenseValid: boolean;
   isPaused: boolean;
   positions?: ZmqPosition[];
+  /** Broker server time (for EOD tracking) */
+  serverTime?: string;
+  /** Broker server time as Unix timestamp */
+  serverTimeUnix?: number;
 }
 
 /**
@@ -158,27 +176,17 @@ export interface ZmqSnapshot {
   positions: ZmqPosition[];
   // Event data (when type is an event type)
   data?: unknown;
+  /** Broker server time for EOD tracking */
+  serverTime?: string;
+  /** Broker server time as Unix timestamp */
+  serverTimeUnix?: number;
 }
 
-export interface ZmqPosition {
-  id: string;
-  symbol: string;
-  volume: number;
-  volumeLots: number;
-  side: 'BUY' | 'SELL';
-  entryPrice: number;
-  currentPrice: number;
-  stopLoss: number | null;
-  takeProfit: number | null;
-  profit: number;
-  swap: number;
-  commission: number;
-  openTime: string;
-  comment: string;
-}
+// ZmqPosition is now a type alias for Position (from shared-types.ts)
+// It includes the optional `digits` field for dynamic pip-value computation.
 
 export interface ZmqCommand {
-  action: 'PAUSE' | 'RESUME' | 'CLOSE_ALL' | 'CLOSE_POSITION' | 'OPEN_POSITION' | 'MODIFY_POSITION' | 'STATUS' | 'GET_ACCOUNT' | 'PING' | 'CONFIG' | 'GET_HISTORY';
+  action: 'PAUSE' | 'RESUME' | 'CLOSE_ALL' | 'CLOSE_POSITION' | 'OPEN_POSITION' | 'MODIFY_POSITION' | 'STATUS' | 'GET_ACCOUNT' | 'PING' | 'CONFIG' | 'SET_CONFIG' | 'GET_HISTORY';
   positionId?: string;
   params?: Record<string, unknown>;
   // OPEN_POSITION fields
@@ -253,6 +261,12 @@ export interface ZmqBridgeConfig {
   subscribeFilter?: string;
   reconnectIntervalMs?: number;
   commandTimeoutMs?: number;
+  /** Role of the EA this bridge connects to: 'master' publishes events, 'slave' copies them */
+  role?: 'master' | 'slave' | 'unknown';
+  /** Enable CURVE encryption (requires server public key) */
+  curveEnabled?: boolean;
+  /** Server (EA) public key for CURVE encryption (Z85-encoded, 40 chars) */
+  curveServerKey?: string;
 }
 
 export interface ZmqConnectionStatus {
@@ -320,8 +334,9 @@ export class ZmqBridge extends EventEmitter {
   // Track last time any PUB/SUB message was received for liveness detection
   // ZMQ SUB sockets are stateless - they don't detect publisher disconnection.
   // We must track message receipt times to determine if the EA is still alive.
+  // With the new Master EA sending heartbeats every 3s + snapshots, 15s is generous.
   private lastMessageReceivedAt: Date | null = null;
-  private static readonly LIVENESS_TIMEOUT_MS = 8000; // 8 seconds (EA heartbeats every 1-2s)
+  private static readonly LIVENESS_TIMEOUT_MS = 15000; // 15 seconds (Master heartbeats every 3s)
   
   // Command queue: serializes concurrent sendCommand() calls to prevent
   // REQ/REP socket corruption. ZMQ REQ sockets enforce strict send-then-
@@ -359,11 +374,12 @@ export class ZmqBridge extends EventEmitter {
     try {
       // Dynamically import zeromq (optional peer dependency)
       // eslint-disable-next-line @typescript-eslint/no-require-imports
-      this.zmq = await import(/* webpackIgnore: true */ 'zeromq') as ZmqTypes.ZmqModule;
+      this.zmq = (await import(/* webpackIgnore: true */ 'zeromq')) as unknown as ZmqTypes.ZmqModule;
       
       console.log('[ZmqBridge] Starting ZeroMQ bridge...');
       console.log(`[ZmqBridge] Data endpoint: tcp://${this.config.dataHost}:${this.config.dataPort}`);
       console.log(`[ZmqBridge] Command endpoint: tcp://${this.config.commandHost}:${this.config.commandPort}`);
+      console.log(`[ZmqBridge] Role: ${this.config.role || 'unknown'}, CURVE: ${this.config.curveEnabled ? 'enabled' : 'disabled'}`);
 
       // Create SUB socket for receiving snapshots
       await this.connectDataSocket();
@@ -407,12 +423,46 @@ export class ZmqBridge extends EventEmitter {
       // for async iteration.
       this.subSocket.linger = 0;
       
+      // Backpressure: drop oldest messages when subscriber can't keep up.
+      // Default ZMQ HWM is 1000; we set 1000 explicitly so it's visible
+      // and tunable without digging into library defaults.
+      this.subSocket.receiveHighWaterMark = 1000;
+      
+      // CURVE encryption support
+      if (this.config.curveEnabled && this.config.curveServerKey) {
+        try {
+          console.log('[ZmqBridge] Configuring CURVE encryption on SUB socket...');
+          // zeromq.js v6 supports CURVE via curveServerKey / curvePublicKey / curveSecretKey options
+          // Generate a temporary client keypair
+          const curveModule = this.zmq.curveKeyPair ? this.zmq : null;
+          if (curveModule && curveModule.curveKeyPair) {
+            const clientKeys = curveModule.curveKeyPair();
+            this.subSocket.curveServerKey = this.config.curveServerKey;
+            this.subSocket.curvePublicKey = clientKeys.publicKey;
+            this.subSocket.curveSecretKey = clientKeys.secretKey;
+            console.log('[ZmqBridge] CURVE configured on SUB socket');
+          } else {
+            console.warn('[ZmqBridge] curveKeyPair not available in zeromq module - CURVE disabled');
+          }
+        } catch (curveErr) {
+          console.warn('[ZmqBridge] Failed to configure CURVE on SUB socket:', curveErr);
+        }
+      }
+      
       // Connect to EA's PUB socket
       const endpoint = `tcp://${this.config.dataHost}:${this.config.dataPort}`;
       this.subSocket.connect(endpoint);
       
-      // Subscribe to all messages (or specific filter)
-      this.subSocket.subscribe(this.config.subscribeFilter || '');
+      // Subscribe to topic-prefixed messages from the new Master/Slave EAs
+      // The EA publishes messages as "TOPIC|{json}" where TOPIC is EVENT or SNAPSHOT
+      if (this.config.subscribeFilter) {
+        this.subSocket.subscribe(this.config.subscribeFilter);
+      } else {
+        // Subscribe to both topic prefixes AND empty prefix (legacy compatibility)
+        this.subSocket.subscribe('EVENT|');
+        this.subSocket.subscribe('SNAPSHOT|');
+        this.subSocket.subscribe('');  // Legacy: unprefixed JSON messages
+      }
       
       this.status.dataSocket = 'connected';
       console.log(`[ZmqBridge] Data socket connected to ${endpoint}`);
@@ -439,6 +489,22 @@ export class ZmqBridge extends EventEmitter {
       this.reqSocket.sendTimeout = this.config.commandTimeoutMs;
       this.reqSocket.receiveTimeout = this.config.commandTimeoutMs;
       this.reqSocket.linger = 0;
+      
+      // CURVE encryption support for REQ socket
+      if (this.config.curveEnabled && this.config.curveServerKey) {
+        try {
+          const curveModule = this.zmq.curveKeyPair ? this.zmq : null;
+          if (curveModule && curveModule.curveKeyPair) {
+            const clientKeys = curveModule.curveKeyPair();
+            this.reqSocket.curveServerKey = this.config.curveServerKey;
+            this.reqSocket.curvePublicKey = clientKeys.publicKey;
+            this.reqSocket.curveSecretKey = clientKeys.secretKey;
+            console.log('[ZmqBridge] CURVE configured on REQ socket');
+          }
+        } catch (curveErr) {
+          console.warn('[ZmqBridge] Failed to configure CURVE on REQ socket:', curveErr);
+        }
+      }
       
       // Connect to EA's REP socket
       const endpoint = `tcp://${this.config.commandHost}:${this.config.commandPort}`;
@@ -467,14 +533,36 @@ export class ZmqBridge extends EventEmitter {
         
         try {
           const messageStr = msg.toString();
-          const event = JSON.parse(messageStr) as ZmqEvent;
+          
+          // Parse topic-prefixed messages from v3 EAs
+          // Format: "TOPIC|{json}" where TOPIC is EVENT or SNAPSHOT
+          // Legacy format: plain "{json}" (no prefix)
+          let jsonStr: string;
+          let topic: string | null = null;
+          
+          const pipeIndex = messageStr.indexOf('|');
+          if (pipeIndex > 0 && pipeIndex < 20) {
+            // Looks like a topic-prefixed message
+            const possibleTopic = messageStr.substring(0, pipeIndex);
+            if (possibleTopic === 'EVENT' || possibleTopic === 'SNAPSHOT') {
+              topic = possibleTopic;
+              jsonStr = messageStr.substring(pipeIndex + 1);
+            } else {
+              // Not a known topic, treat as raw JSON
+              jsonStr = messageStr;
+            }
+          } else {
+            jsonStr = messageStr;
+          }
+          
+          const event = JSON.parse(jsonStr) as ZmqEvent;
           
           this.status.eventsReceived++;
           this.status.lastEvent = new Date();
           this.lastMessageReceivedAt = new Date();
 
           if (this.status.eventsReceived === 1) {
-            console.log(`[ZmqBridge] First PUB message received! (${messageStr.length} bytes, type: ${event.type})`);
+            console.log(`[ZmqBridge] First PUB message received! (${messageStr.length} bytes, topic: ${topic || 'none'}, type: ${event.type})`);
           }
           
           // Handle event-driven message types
@@ -505,10 +593,8 @@ export class ZmqBridge extends EventEmitter {
     const messageType: string = raw.type || 'SNAPSHOT';
     
     // Already in event-driven format (has a `data` field and known event type)
-    if (raw.data !== undefined && ['CONNECTED', 'DISCONNECTED', 'HEARTBEAT', 
-        'POSITION_OPENED', 'POSITION_CLOSED', 'POSITION_MODIFIED', 'POSITION_REVERSED',
-        'DEAL_EXECUTED', 'ORDER_PLACED', 'ORDER_CANCELLED', 'ACCOUNT_UPDATE',
-        'PRICE_UPDATE', 'PAUSED', 'RESUMED'].includes(messageType)) {
+    // Uses module-level Set for O(1) lookup instead of array.includes() O(n)
+    if (raw.data !== undefined && KNOWN_EVENT_TYPES.has(messageType)) {
       return raw as ZmqEvent;
     }
     
@@ -591,64 +677,69 @@ export class ZmqBridge extends EventEmitter {
         
       case 'ACCOUNT_UPDATE': {
         // Diff positions to detect opens/closes from legacy SNAPSHOT messages.
-        // The EA doesn't send discrete POSITION_OPENED / POSITION_CLOSED events;
-        // it re-publishes a full snapshot after every trade transaction.
+        // Skip diff for event-driven v3+ EAs — they publish discrete
+        // POSITION_OPENED / POSITION_CLOSED events, making diff redundant.
         const newState = event.data as ZmqAccountData;
-        const oldPositions = this.cachedAccountState?.positions ?? [];
-        const newPositions = newState.positions ?? [];
 
-        const oldIds = new Set(oldPositions.map(p => p.id));
-        const newIds = new Set(newPositions.map(p => p.id));
+        if (!newState.eventDriven) {
+          // Legacy path: EA doesn't send discrete position events;
+          // it re-publishes a full snapshot after every trade transaction.
+          const oldPositions = this.cachedAccountState?.positions ?? [];
+          const newPositions = newState.positions ?? [];
 
-        // Positions present before but missing now → closed
-        for (const pos of oldPositions) {
-          if (!newIds.has(pos.id)) {
-            const closedEvent: ZmqEvent = {
-              type: 'POSITION_CLOSED',
-              eventIndex: event.eventIndex,
-              timestamp: event.timestamp,
-              platform: event.platform || 'MT5',
-              accountId: event.accountId,
-              data: {
-                position: Number(pos.id) || 0,
-                symbol: pos.symbol,
-                volume: pos.volumeLots ?? pos.volume,
-                price: pos.currentPrice,
-                profit: pos.profit + (pos.swap ?? 0) + (pos.commission ?? 0),
-                type: pos.side as 'BUY' | 'SELL',
-                entry: 'OUT' as const,
-                stopLoss: pos.stopLoss ?? undefined,
-                takeProfit: pos.takeProfit ?? undefined,
-              } as ZmqPositionEventData,
-            };
-            console.log(`[ZmqBridge] Position closed (diff): ${pos.symbol} #${pos.id}  profit=${pos.profit}`);
-            this.emit('positionClosed', closedEvent);
+          const oldIds = new Set(oldPositions.map(p => p.id));
+          const newIds = new Set(newPositions.map(p => p.id));
+
+          // Positions present before but missing now → closed
+          for (const pos of oldPositions) {
+            if (!newIds.has(pos.id)) {
+              const closedEvent: ZmqEvent = {
+                type: 'POSITION_CLOSED',
+                eventIndex: event.eventIndex,
+                timestamp: event.timestamp,
+                platform: event.platform || 'MT5',
+                accountId: event.accountId,
+                data: {
+                  position: Number(pos.id) || 0,
+                  symbol: pos.symbol,
+                  volume: pos.volumeLots ?? pos.volume,
+                  price: pos.currentPrice,
+                  profit: pos.profit + (pos.swap ?? 0) + (pos.commission ?? 0),
+                  type: pos.side as 'BUY' | 'SELL',
+                  entry: 'OUT' as const,
+                  stopLoss: pos.stopLoss ?? undefined,
+                  takeProfit: pos.takeProfit ?? undefined,
+                } as ZmqPositionEventData,
+              };
+              console.log(`[ZmqBridge] Position closed (diff): ${pos.symbol} #${pos.id}  profit=${pos.profit}`);
+              this.emit('positionClosed', closedEvent);
+            }
           }
-        }
 
-        // Positions absent before but present now → opened
-        for (const pos of newPositions) {
-          if (!oldIds.has(pos.id)) {
-            const openedEvent: ZmqEvent = {
-              type: 'POSITION_OPENED',
-              eventIndex: event.eventIndex,
-              timestamp: event.timestamp,
-              platform: event.platform || 'MT5',
-              accountId: event.accountId,
-              data: {
-                position: Number(pos.id) || 0,
-                symbol: pos.symbol,
-                volume: pos.volumeLots ?? pos.volume,
-                price: pos.entryPrice,
-                profit: pos.profit,
-                type: pos.side as 'BUY' | 'SELL',
-                entry: 'IN' as const,
-                stopLoss: pos.stopLoss ?? undefined,
-                takeProfit: pos.takeProfit ?? undefined,
-              } as ZmqPositionEventData,
-            };
-            console.log(`[ZmqBridge] Position opened (diff): ${pos.symbol} #${pos.id}`);
-            this.emit('positionOpened', openedEvent);
+          // Positions absent before but present now → opened
+          for (const pos of newPositions) {
+            if (!oldIds.has(pos.id)) {
+              const openedEvent: ZmqEvent = {
+                type: 'POSITION_OPENED',
+                eventIndex: event.eventIndex,
+                timestamp: event.timestamp,
+                platform: event.platform || 'MT5',
+                accountId: event.accountId,
+                data: {
+                  position: Number(pos.id) || 0,
+                  symbol: pos.symbol,
+                  volume: pos.volumeLots ?? pos.volume,
+                  price: pos.entryPrice,
+                  profit: pos.profit,
+                  type: pos.side as 'BUY' | 'SELL',
+                  entry: 'IN' as const,
+                  stopLoss: pos.stopLoss ?? undefined,
+                  takeProfit: pos.takeProfit ?? undefined,
+                } as ZmqPositionEventData,
+              };
+              console.log(`[ZmqBridge] Position opened (diff): ${pos.symbol} #${pos.id}`);
+              this.emit('positionOpened', openedEvent);
+            }
           }
         }
 
@@ -979,6 +1070,21 @@ export class ZmqBridge extends EventEmitter {
   }
 
   /**
+   * Push runtime config to the slave EA (lot multiplier, reverse mode, etc.)
+   */
+  async setConfig(config: {
+    invertTrades?: boolean;
+    copySLTP?: boolean;
+    lotMultiplier?: number;
+    fixedLots?: number;
+  }): Promise<ZmqResponse> {
+    return this.sendCommand({
+      action: 'SET_CONFIG',
+      params: config as Record<string, unknown>,
+    });
+  }
+
+  /**
    * Send OPEN_POSITION command to open a new trade
    */
   async openPosition(params: {
@@ -1130,10 +1236,16 @@ export class ZmqBridge extends EventEmitter {
   /**
    * Check if bridge sockets are open (does NOT guarantee EA is alive)
    * For liveness, use isAlive() which also checks message freshness.
+   * Slave bridges (command-only) only need commandSocket to be connected.
    */
   isConnected(): boolean {
+    if (!this.isRunning) return false;
+    // Slave bridges don't have a data/SUB socket — only command/REQ
+    const isSlave = (this.config as any).role === 'slave';
+    if (isSlave) {
+      return this.status.commandSocket === 'connected';
+    }
     return (
-      this.isRunning &&
       this.status.dataSocket === 'connected' &&
       this.status.commandSocket === 'connected'
     );
@@ -1141,15 +1253,22 @@ export class ZmqBridge extends EventEmitter {
   
   /**
    * Check if the EA is actually alive (connected + receiving messages recently)
-   * ZMQ SUB sockets are stateless — they stay "connected" even if the publisher
-   * (MT5 EA) stops. This method checks whether we've received any PUB message
-   * within the liveness timeout window.
+   * For master bridges: checks PUB/SUB message freshness.
+   * For slave bridges: checks lastMessageReceivedAt set by polling STATUS.
    */
   isAlive(): boolean {
     if (!this.isConnected()) return false;
     if (!this.lastMessageReceivedAt) return false;
     const age = Date.now() - this.lastMessageReceivedAt.getTime();
     return age < ZmqBridge.LIVENESS_TIMEOUT_MS;
+  }
+  
+  /**
+   * Mark the bridge as having received data (for slave bridges polled externally).
+   * Call this after a successful STATUS response from a slave EA.
+   */
+  markAlive(): void {
+    this.lastMessageReceivedAt = new Date();
   }
   
   /**

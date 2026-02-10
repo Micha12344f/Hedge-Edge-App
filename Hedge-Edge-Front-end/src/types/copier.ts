@@ -6,17 +6,8 @@
 
 // ─── Volume Sizing ──────────────────────────────────────────────────────────
 
-export type VolumeSizingMode =
-  | 'equity-to-equity'
-  | 'lot-multiplier'
-  | 'risk-multiplier'
-  | 'fixed-lot'
-  | 'fixed-risk-percent'
-  | 'fixed-risk-nominal';
-
-// ─── Account Protection ─────────────────────────────────────────────────────
-
-export type AccountProtectionMode = 'off' | 'balance-based' | 'equity-based';
+/** Only lot-multiplier is supported for now */
+export type VolumeSizingMode = 'lot-multiplier';
 
 // ─── Copier Group Status ────────────────────────────────────────────────────
 
@@ -42,21 +33,11 @@ export interface FollowerConfig {
   phase: 'evaluation' | 'funded' | 'live';
   status: FollowerStatus;
 
-  // Volume sizing
+  // Volume sizing — always lot-multiplier
   volumeSizing: VolumeSizingMode;
-  lotMultiplier: number;       // used when volumeSizing = 'lot-multiplier'
-  riskMultiplier: number;      // used when volumeSizing = 'risk-multiplier'
-  fixedLot: number;            // used when volumeSizing = 'fixed-lot'
-  fixedRiskPercent: number;    // used when volumeSizing = 'fixed-risk-percent'
-  fixedRiskNominal: number;    // used when volumeSizing = 'fixed-risk-nominal'
+  lotMultiplier: number;       // multiply leader lot size by this factor
 
-  // TP / SL
-  copySL: boolean;
-  copyTP: boolean;
-  additionalSLPips: number;
-  additionalTPPips: number;
-
-  // Reverse mode (for hedging)
+  // Reverse mode — always true: this copier only reverses (hedges) trades
   reverseMode: boolean;
 
   // Symbol filtering
@@ -65,13 +46,14 @@ export interface FollowerConfig {
   symbolSuffix: string;        // append suffix to all symbols
   symbolAliases: SymbolMapping[];
 
-  // Account protection
-  protectionMode: AccountProtectionMode;
-  minThreshold: number;        // close all & stop if below
-  maxThreshold: number;        // close all & stop if above
+  // Magic number filtering
+  magicNumberWhitelist: number[];  // only copy these magic numbers
+  magicNumberBlacklist: number[];  // skip these magic numbers
 
-  // Delay
-  delayMs: number;
+  /** Balance of this follower account at the time the copier group was created.
+   *  Used to compute Hedge P/L = (currentBalance - baselineBalance) + floatingPnL.
+   *  Falls back to TradingAccount.account_size when not set (legacy groups). */
+  baselineBalance?: number;
 
   // Stats (runtime)
   stats: FollowerStats;
@@ -131,7 +113,7 @@ export interface CopierActivityEntry {
   groupId: string;
   followerId: string;
   timestamp: string;
-  type: 'open' | 'close' | 'modify' | 'error' | 'protection-triggered';
+  type: 'open' | 'close' | 'modify' | 'error';
   symbol: string;
   action: 'buy' | 'sell';
   volume: number;

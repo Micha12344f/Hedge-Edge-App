@@ -865,10 +865,26 @@ export const DraggableHedgeMap = ({
     }
   };
 
-  // Get line color: use copier status if available, otherwise fall back to logic type
+  // Get line color: use copier status (cross-validated with real connection) if available
   const getLineColor = (rel: HedgeRelationship): string => {
     if (getConnectionStatusProp) {
-      const status = getConnectionStatusProp(rel.sourceId, rel.targetId);
+      let status = getConnectionStatusProp(rel.sourceId, rel.targetId);
+
+      // Cross-validate: if copier says "active" but the hedge account's real
+      // connection is down, downgrade the line to "error" so the visual matches reality
+      if (status === 'active' && getAccountSnapshot) {
+        const hedgeAccount = accounts.find(
+          a => (a.id === rel.sourceId || a.id === rel.targetId) && a.phase === 'live',
+        );
+        if (hedgeAccount) {
+          const snap = getAccountSnapshot(hedgeAccount.login || hedgeAccount.id);
+          const realStatus = snap?.session?.status;
+          if (realStatus && realStatus !== 'connected' && realStatus !== 'connecting') {
+            status = 'error';
+          }
+        }
+      }
+
       return getStatusColor(status);
     }
     // Fallback: color by logic type
@@ -881,12 +897,28 @@ export const DraggableHedgeMap = ({
   };
 
   // Get the connection status for a relationship (for node border coloring)
+  // Cross-validates copier group status with real connection snapshots
   const getRelConnectionStatus = (accountId: string): ConnectionStatus => {
     if (!getConnectionStatusProp) return 'none';
     // Check all relationships involving this account
     for (const rel of relationships) {
       if (rel.sourceId === accountId || rel.targetId === accountId) {
-        const status = getConnectionStatusProp(rel.sourceId, rel.targetId);
+        let status = getConnectionStatusProp(rel.sourceId, rel.targetId);
+
+        // For active copier links, verify the hedge account's real connection
+        if (status === 'active' && getAccountSnapshot) {
+          const hedgeAccount = accounts.find(
+            a => (a.id === rel.sourceId || a.id === rel.targetId) && a.phase === 'live',
+          );
+          if (hedgeAccount) {
+            const snap = getAccountSnapshot(hedgeAccount.login || hedgeAccount.id);
+            const realStatus = snap?.session?.status;
+            if (realStatus && realStatus !== 'connected' && realStatus !== 'connecting') {
+              return 'error';
+            }
+          }
+        }
+
         if (status === 'error') return 'error';
         if (status === 'active') return 'active';
         if (status === 'paused') return 'paused';
@@ -917,8 +949,7 @@ export const DraggableHedgeMap = ({
       .filter((rel) => {
         const sourceAccount = accounts.find(a => a.id === rel.sourceId);
         const targetAccount = accounts.find(a => a.id === rel.targetId);
-        if (!sourceAccount || !targetAccount) return false;
-        return sourceAccount.phase === 'live' || targetAccount.phase === 'live';
+        return !!sourceAccount && !!targetAccount;
       })
       .forEach((rel) => {
         const sourcePos = getNodePosition(rel.sourceId);

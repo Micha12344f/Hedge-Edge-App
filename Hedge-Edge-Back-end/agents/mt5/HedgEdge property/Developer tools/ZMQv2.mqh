@@ -1,18 +1,17 @@
 //+------------------------------------------------------------------+
-//|                                                          ZMQ.mqh |
+//|                                                       ZMQv2.mqh  |
 //|                                   Copyright 2026, Hedge Edge     |
 //|                                     https://www.hedge-edge.com   |
 //+------------------------------------------------------------------+
-//| ZeroMQ Wrapper for MQL5                                          |
-//| Based on mql-zmq by nicholashagen / dingmaotu                    |
-//| Provides high-performance messaging between EA and Hedge Edge app|
+//| ZeroMQ v2 Wrapper for MQL5                                       |
+//| Adds: CURVE encryption, socket monitor, topic-based PUB/SUB      |
 //+------------------------------------------------------------------+
-#ifndef ZMQ_MQH
-#define ZMQ_MQH
+#ifndef ZMQ_V2_MQH
+#define ZMQ_V2_MQH
 
 #property copyright "Copyright 2026, Hedge Edge"
 #property link      "https://www.hedge-edge.com"
-#property version   "1.00"
+#property version   "2.00"
 #property strict
 
 //+------------------------------------------------------------------+
@@ -118,6 +117,28 @@
 #define ZMQ_POLLERR                 4
 #define ZMQ_POLLPRI                 8
 
+// Socket monitor events
+#define ZMQ_EVENT_CONNECTED         0x0001
+#define ZMQ_EVENT_CONNECT_DELAYED   0x0002
+#define ZMQ_EVENT_CONNECT_RETRIED   0x0004
+#define ZMQ_EVENT_LISTENING         0x0008
+#define ZMQ_EVENT_BIND_FAILED       0x0010
+#define ZMQ_EVENT_ACCEPTED          0x0020
+#define ZMQ_EVENT_ACCEPT_FAILED     0x0040
+#define ZMQ_EVENT_CLOSED            0x0080
+#define ZMQ_EVENT_CLOSE_FAILED      0x0100
+#define ZMQ_EVENT_DISCONNECTED      0x0200
+#define ZMQ_EVENT_MONITOR_STOPPED   0x0400
+#define ZMQ_EVENT_HANDSHAKE_FAILED_NO_DETAIL  0x0800
+#define ZMQ_EVENT_HANDSHAKE_SUCCEEDED         0x1000
+#define ZMQ_EVENT_HANDSHAKE_FAILED_PROTOCOL   0x2000
+#define ZMQ_EVENT_HANDSHAKE_FAILED_AUTH       0x4000
+#define ZMQ_EVENT_ALL               0xFFFF
+
+// CURVE key constants
+#define ZMQ_CURVE_KEYSIZE           32
+#define ZMQ_CURVE_KEYSIZE_Z85       40
+
 // Error codes
 #define ZMQ_EAGAIN                  11
 #define ZMQ_ENOTSUP                 156384713
@@ -169,6 +190,9 @@ int  zmq_connect(long socket, const uchar &endpoint[]);
 int  zmq_unbind(long socket, const uchar &endpoint[]);
 int  zmq_disconnect(long socket, const uchar &endpoint[]);
 
+// Socket monitor
+int  zmq_socket_monitor(long socket, const uchar &addr[], int events);
+
 // Message
 int  zmq_msg_init(long &msg[]);
 int  zmq_msg_init_size(long &msg[], int size);
@@ -185,13 +209,17 @@ int  zmq_msg_get(long &msg[], int property);
 int  zmq_msg_set(long &msg[], int property, int optval);
 string zmq_msg_gets(long &msg[], const char &property[]);
 
-// Simple send/recv (uses internal buffer)
+// Simple send/recv
 int  zmq_send(long socket, const uchar &buf[], int len, int flags);
 int  zmq_recv(long socket, uchar &buf[], int len, int flags);
 int  zmq_send_const(long socket, const uchar &buf[], int len, int flags);
 
 // Polling
 int  zmq_poll(long &items[], int nitems, long timeout);
+
+// CURVE keypair generation
+int  zmq_curve_keypair(uchar &z85_public_key[], uchar &z85_secret_key[]);
+int  zmq_curve_public(uchar &z85_public_key[], const uchar &z85_secret_key[]);
 
 // Error handling
 int  zmq_errno();
@@ -200,7 +228,7 @@ string zmq_strerror(int errnum);
 #import
 
 //+------------------------------------------------------------------+
-//| ZMQ Helper Class - Encapsulates ZeroMQ operations                |
+//| ZMQ Context Class                                                 |
 //+------------------------------------------------------------------+
 class CZmqContext
 {
@@ -214,24 +242,16 @@ public:
    ~CZmqContext()
    {
       if(m_initialized && m_context != 0)
-      {
          Shutdown();
-      }
    }
    
    bool Initialize()
    {
-      if(m_initialized)
-         return true;
-         
+      if(m_initialized) return true;
       m_context = zmq_ctx_new();
       m_initialized = (m_context != 0);
-      
       if(!m_initialized)
-      {
          Print("ZMQ: Failed to create context, error: ", zmq_errno());
-      }
-      
       return m_initialized;
    }
    
@@ -250,7 +270,7 @@ public:
 };
 
 //+------------------------------------------------------------------+
-//| ZMQ Socket Helper Class                                           |
+//| ZMQ Socket Class (v2 — with CURVE + monitor support)              |
 //+------------------------------------------------------------------+
 class CZmqSocket
 {
@@ -265,10 +285,7 @@ private:
 public:
    CZmqSocket() : m_socket(0), m_context(0), m_type(-1), m_bound(false), m_connected(false) {}
    
-   ~CZmqSocket()
-   {
-      Close();
-   }
+   ~CZmqSocket() { Close(); }
    
    bool Create(CZmqContext &context, int type)
    {
@@ -277,37 +294,49 @@ public:
          Print("ZMQ Socket: Context not initialized");
          return false;
       }
-      
       m_context = context.Handle();
       m_type = type;
       m_socket = zmq_socket(m_context, type);
-      
       if(m_socket == 0)
       {
-         Print("ZMQ Socket: Failed to create socket, error: ", zmq_errno());
+         Print("ZMQ Socket: Failed to create socket type ", type, ", error: ", zmq_errno());
          return false;
       }
-      
       return true;
    }
    
    bool Bind(string endpoint)
    {
-      if(m_socket == 0)
-      {
-         Print("ZMQ Socket: Socket not created");
-         return false;
-      }
+      if(m_socket == 0) { Print("ZMQ Socket: Socket not created"); return false; }
       
       uchar endpointArr[];
       StringToCharArray(endpoint, endpointArr);
-      
       int result = zmq_bind(m_socket, endpointArr);
       
       if(result != 0)
       {
-         Print("ZMQ Socket: Failed to bind to ", endpoint, ", error: ", zmq_errno());
-         return false;
+         int err = zmq_errno();
+         if(err == 100 || err == ZMQ_EADDRINUSE)
+         {
+            Print("ZMQ Socket: Port in use, recovery on ", endpoint);
+            zmq_unbind(m_socket, endpointArr);
+            Sleep(200);
+            result = zmq_bind(m_socket, endpointArr);
+            if(result != 0)
+            {
+               Print("ZMQ Socket: Recreating socket for ", endpoint);
+               SetLinger(0);
+               zmq_close(m_socket);
+               Sleep(500);
+               m_socket = zmq_socket(m_context, m_type);
+               if(m_socket != 0) result = zmq_bind(m_socket, endpointArr);
+            }
+         }
+         if(result != 0)
+         {
+            Print("ZMQ Socket: Failed to bind to ", endpoint, ", error: ", zmq_errno());
+            return false;
+         }
       }
       
       m_bound = true;
@@ -318,71 +347,116 @@ public:
    
    bool Connect(string endpoint)
    {
-      if(m_socket == 0)
-      {
-         Print("ZMQ Socket: Socket not created");
-         return false;
-      }
+      if(m_socket == 0) { Print("ZMQ Socket: Socket not created"); return false; }
       
       uchar endpointArr[];
       StringToCharArray(endpoint, endpointArr);
-      
       int result = zmq_connect(m_socket, endpointArr);
-      
       if(result != 0)
       {
          Print("ZMQ Socket: Failed to connect to ", endpoint, ", error: ", zmq_errno());
          return false;
       }
-      
       m_connected = true;
       m_endpoint = endpoint;
       Print("ZMQ Socket: Connected to ", endpoint);
       return true;
    }
    
+   //--- Set integer option
    bool SetOption(int option, int value)
    {
       if(m_socket == 0) return false;
-      
       uchar optval[4];
       optval[0] = (uchar)(value & 0xFF);
       optval[1] = (uchar)((value >> 8) & 0xFF);
       optval[2] = (uchar)((value >> 16) & 0xFF);
       optval[3] = (uchar)((value >> 24) & 0xFF);
-      
       return zmq_setsockopt(m_socket, option, optval, 4) == 0;
    }
    
-   bool SetLinger(int milliseconds)
+   //--- Set binary option (for CURVE keys)
+   bool SetBinaryOption(int option, const uchar &data[], int len)
    {
-      return SetOption(ZMQ_LINGER, milliseconds);
+      if(m_socket == 0) return false;
+      return zmq_setsockopt(m_socket, option, data, len) == 0;
    }
    
-   bool SetSendTimeout(int milliseconds)
+   //--- CURVE: Configure as server (binds)
+   bool SetCurveServer(const uchar &secretKeyZ85[])
    {
-      return SetOption(ZMQ_SNDTIMEO, milliseconds);
+      if(!SetOption(ZMQ_CURVE_SERVER, 1))
+      {
+         Print("ZMQ CURVE: Failed to set CURVE_SERVER=1, error: ", zmq_errno());
+         return false;
+      }
+      if(!SetBinaryOption(ZMQ_CURVE_SECRETKEY, secretKeyZ85, 40))
+      {
+         Print("ZMQ CURVE: Failed to set server secret key, error: ", zmq_errno());
+         return false;
+      }
+      Print("ZMQ Socket: CURVE server mode enabled");
+      return true;
    }
    
-   bool SetReceiveTimeout(int milliseconds)
+   //--- CURVE: Configure as client (connects) 
+   bool SetCurveClient(const uchar &serverPublicKeyZ85[], 
+                       const uchar &clientPublicKeyZ85[], 
+                       const uchar &clientSecretKeyZ85[])
    {
-      return SetOption(ZMQ_RCVTIMEO, milliseconds);
+      if(!SetBinaryOption(ZMQ_CURVE_SERVERKEY, serverPublicKeyZ85, 40))
+      {
+         Print("ZMQ CURVE: Failed to set server public key, error: ", zmq_errno());
+         return false;
+      }
+      if(!SetBinaryOption(ZMQ_CURVE_PUBLICKEY, clientPublicKeyZ85, 40))
+      {
+         Print("ZMQ CURVE: Failed to set client public key, error: ", zmq_errno());
+         return false;
+      }
+      if(!SetBinaryOption(ZMQ_CURVE_SECRETKEY, clientSecretKeyZ85, 40))
+      {
+         Print("ZMQ CURVE: Failed to set client secret key, error: ", zmq_errno());
+         return false;
+      }
+      Print("ZMQ Socket: CURVE client mode enabled");
+      return true;
    }
    
-   bool SetHighWaterMark(int messages)
+   //--- Socket monitor (creates an inproc PAIR socket for state events)
+   bool StartMonitor(string monitorEndpoint, int events = ZMQ_EVENT_ALL)
    {
-      return SetOption(ZMQ_SNDHWM, messages) && SetOption(ZMQ_RCVHWM, messages);
+      if(m_socket == 0) return false;
+      uchar endpointArr[];
+      StringToCharArray(monitorEndpoint, endpointArr);
+      int result = zmq_socket_monitor(m_socket, endpointArr, events);
+      if(result != 0)
+      {
+         Print("ZMQ Socket: Failed to start monitor on ", monitorEndpoint, ", error: ", zmq_errno());
+         return false;
+      }
+      Print("ZMQ Socket: Monitor started on ", monitorEndpoint);
+      return true;
+   }
+   
+   bool SetLinger(int milliseconds)       { return SetOption(ZMQ_LINGER, milliseconds); }
+   bool SetSendTimeout(int milliseconds)  { return SetOption(ZMQ_SNDTIMEO, milliseconds); }
+   bool SetReceiveTimeout(int milliseconds) { return SetOption(ZMQ_RCVTIMEO, milliseconds); }
+   bool SetHighWaterMark(int messages)     { return SetOption(ZMQ_SNDHWM, messages) && SetOption(ZMQ_RCVHWM, messages); }
+   bool SetSubscribe(string filter)
+   {
+      uchar filterArr[];
+      int len = StringToCharArray(filter, filterArr, 0, WHOLE_ARRAY, CP_UTF8) - 1;
+      if(len < 0) len = 0;
+      return zmq_setsockopt(m_socket, ZMQ_SUBSCRIBE, filterArr, len) == 0;
    }
    
    int Send(string message, int flags = 0)
    {
       if(m_socket == 0) return -1;
-      
       uchar buf[];
-      int len = StringToCharArray(message, buf, 0, WHOLE_ARRAY, CP_UTF8) - 1; // Exclude null terminator
-      
+      int len = StringToCharArray(message, buf, 0, WHOLE_ARRAY, CP_UTF8) - 1;
       if(len <= 0) return -1;
-      
       return zmq_send(m_socket, buf, len, flags);
    }
    
@@ -395,23 +469,17 @@ public:
    string Receive(int maxSize = 65536, int flags = 0)
    {
       if(m_socket == 0) return "";
-      
       uchar buf[];
       ArrayResize(buf, maxSize);
       ArrayInitialize(buf, 0);
-      
       int received = zmq_recv(m_socket, buf, maxSize, flags);
-      
-      if(received <= 0)
-         return "";
-      
+      if(received <= 0) return "";
       return CharArrayToString(buf, 0, received, CP_UTF8);
    }
    
    int ReceiveBytes(uchar &data[], int maxSize, int flags = 0)
    {
       if(m_socket == 0) return -1;
-      
       ArrayResize(data, maxSize);
       return zmq_recv(m_socket, data, maxSize, flags);
    }
@@ -420,28 +488,23 @@ public:
    {
       if(m_socket != 0)
       {
-         // Set linger to 0 for immediate close
          SetLinger(0);
-         
          if(m_bound)
          {
-            uchar endpointArr[];
-            StringToCharArray(m_endpoint, endpointArr);
-            zmq_unbind(m_socket, endpointArr);
+            uchar ea[];
+            StringToCharArray(m_endpoint, ea);
+            zmq_unbind(m_socket, ea);
             m_bound = false;
          }
-         
          if(m_connected)
          {
-            uchar endpointArr[];
-            StringToCharArray(m_endpoint, endpointArr);
-            zmq_disconnect(m_socket, endpointArr);
+            uchar ea[];
+            StringToCharArray(m_endpoint, ea);
+            zmq_disconnect(m_socket, ea);
             m_connected = false;
          }
-         
          zmq_close(m_socket);
          m_socket = 0;
-         Print("ZMQ Socket: Closed");
       }
    }
    
@@ -453,7 +516,7 @@ public:
 };
 
 //+------------------------------------------------------------------+
-//| ZMQ Publisher Helper - For streaming data                         |
+//| Topic-based Publisher (prefixes messages with topic)              |
 //+------------------------------------------------------------------+
 class CZmqPublisher
 {
@@ -461,40 +524,40 @@ private:
    CZmqSocket m_socket;
    
 public:
+   CZmqSocket *Socket() { return &m_socket; }
+   
    bool Initialize(CZmqContext &context, string endpoint)
    {
-      if(!m_socket.Create(context, ZMQ_PUB))
-         return false;
-      
-      // Configure for low latency
+      if(!m_socket.Create(context, ZMQ_PUB)) return false;
       m_socket.SetLinger(100);
       m_socket.SetHighWaterMark(1000);
       m_socket.SetSendTimeout(100);
-      
       return m_socket.Bind(endpoint);
    }
    
-   int Publish(string topic, string message)
+   bool SetCurveServer(const uchar &secretKeyZ85[])
    {
-      // Format: "topic message"
-      string fullMessage = topic + " " + message;
-      return m_socket.Send(fullMessage);
+      return m_socket.SetCurveServer(secretKeyZ85);
    }
    
+   //--- Publish with topic prefix: "TOPIC|json"
+   int PublishWithTopic(string topic, string json)
+   {
+      string full = topic + "|" + json;
+      return m_socket.Send(full);
+   }
+   
+   //--- Publish raw JSON (no topic, legacy compatibility)
    int PublishJson(string message)
    {
-      // Publish without topic prefix for simple JSON streaming
       return m_socket.Send(message);
    }
    
-   void Shutdown()
-   {
-      m_socket.Close();
-   }
+   void Shutdown() { m_socket.Close(); }
 };
 
 //+------------------------------------------------------------------+
-//| ZMQ Replier Helper - For request/response commands                |
+//| REP socket for command handling                                   |
 //+------------------------------------------------------------------+
 class CZmqReplier
 {
@@ -502,40 +565,180 @@ private:
    CZmqSocket m_socket;
    
 public:
+   CZmqSocket *Socket() { return &m_socket; }
+   
    bool Initialize(CZmqContext &context, string endpoint)
    {
-      if(!m_socket.Create(context, ZMQ_REP))
-         return false;
-      
-      // Configure for command handling
+      if(!m_socket.Create(context, ZMQ_REP)) return false;
       m_socket.SetLinger(100);
-      m_socket.SetReceiveTimeout(10); // Non-blocking check
+      m_socket.SetReceiveTimeout(10);
       m_socket.SetSendTimeout(1000);
-      
       return m_socket.Bind(endpoint);
+   }
+   
+   bool SetCurveServer(const uchar &secretKeyZ85[])
+   {
+      return m_socket.SetCurveServer(secretKeyZ85);
    }
    
    bool Poll(string &request)
    {
-      // Non-blocking receive (uses timeout set above)
       request = m_socket.Receive(65536, ZMQ_DONTWAIT);
       return StringLen(request) > 0;
    }
    
    bool Reply(string response)
    {
-      int sent = m_socket.Send(response);
-      return sent >= 0;
+      return m_socket.Send(response) >= 0;
    }
    
-   void Shutdown()
+   void Shutdown() { m_socket.Close(); }
+};
+
+//+------------------------------------------------------------------+
+//| SUB socket for subscribing to a publisher                        |
+//+------------------------------------------------------------------+
+class CZmqSubscriber
+{
+private:
+   CZmqSocket m_socket;
+   
+public:
+   CZmqSocket *Socket() { return &m_socket; }
+   
+   bool Initialize(CZmqContext &context, string endpoint, string filter = "")
    {
-      m_socket.Close();
+      if(!m_socket.Create(context, ZMQ_SUB)) return false;
+      m_socket.SetLinger(0);
+      m_socket.SetHighWaterMark(1000);
+      m_socket.SetReceiveTimeout(100); // Non-blocking poll
+      m_socket.SetSubscribe(filter);
+      return m_socket.Connect(endpoint);
+   }
+   
+   bool SetCurveClient(const uchar &serverPubZ85[],
+                       const uchar &clientPubZ85[],
+                       const uchar &clientSecZ85[])
+   {
+      return m_socket.SetCurveClient(serverPubZ85, clientPubZ85, clientSecZ85);
+   }
+   
+   string Poll()
+   {
+      return m_socket.Receive(65536, ZMQ_DONTWAIT);
+   }
+   
+   //--- Receive with topic parsing: splits "TOPIC|payload" into topic and message
+   bool ReceiveWithTopic(string &topic, string &message)
+   {
+      string raw = m_socket.Receive(65536, ZMQ_DONTWAIT);
+      if(StringLen(raw) == 0) return false;
+      
+      int sepPos = StringFind(raw, "|");
+      if(sepPos < 0)
+      {
+         topic = "";
+         message = raw;
+      }
+      else
+      {
+         topic = StringSubstr(raw, 0, sepPos);
+         message = StringSubstr(raw, sepPos + 1);
+      }
+      return true;
+   }
+   
+   void Shutdown() { m_socket.Close(); }
+};
+
+//+------------------------------------------------------------------+
+//| REQ socket for sending commands to a server                      |
+//+------------------------------------------------------------------+
+class CZmqRequester
+{
+private:
+   CZmqSocket m_socket;
+   
+public:
+   CZmqSocket *Socket() { return &m_socket; }
+   
+   bool Initialize(CZmqContext &context, string endpoint)
+   {
+      if(!m_socket.Create(context, ZMQ_REQ)) return false;
+      m_socket.SetLinger(100);
+      m_socket.SetSendTimeout(3000);
+      m_socket.SetReceiveTimeout(3000);
+      return m_socket.Connect(endpoint);
+   }
+   
+   bool SetCurveClient(const uchar &serverPubZ85[],
+                       const uchar &clientPubZ85[],
+                       const uchar &clientSecZ85[])
+   {
+      return m_socket.SetCurveClient(serverPubZ85, clientPubZ85, clientSecZ85);
+   }
+   
+   string SendAndReceive(string request)
+   {
+      if(m_socket.Send(request) < 0) return "";
+      return m_socket.Receive();
+   }
+   
+   void Shutdown() { m_socket.Close(); }
+};
+
+//+------------------------------------------------------------------+
+//| CURVE Keypair Helper                                             |
+//+------------------------------------------------------------------+
+class CZmqCurve
+{
+public:
+   //--- Generate a new CURVE keypair (Z85-encoded, 40 chars each + null)
+   static bool GenerateKeypair(uchar &publicKeyZ85[], uchar &secretKeyZ85[])
+   {
+      ArrayResize(publicKeyZ85, 41);
+      ArrayResize(secretKeyZ85, 41);
+      ArrayInitialize(publicKeyZ85, 0);
+      ArrayInitialize(secretKeyZ85, 0);
+      
+      int result = zmq_curve_keypair(publicKeyZ85, secretKeyZ85);
+      if(result != 0)
+      {
+         Print("ZMQ CURVE: Keypair generation failed, error: ", zmq_errno());
+         Print("ZMQ CURVE: Ensure libzmq was built with libsodium support");
+         return false;
+      }
+      Print("ZMQ CURVE: Keypair generated successfully");
+      return true;
+   }
+   
+   //--- Get public key from secret key
+   static bool DerivePublicKey(const uchar &secretKeyZ85[], uchar &publicKeyZ85[])
+   {
+      ArrayResize(publicKeyZ85, 41);
+      ArrayInitialize(publicKeyZ85, 0);
+      int result = zmq_curve_public(publicKeyZ85, secretKeyZ85);
+      return result == 0;
+   }
+   
+   //--- Convert Z85-encoded key to string
+   static string KeyToString(const uchar &keyZ85[])
+   {
+      return CharArrayToString(keyZ85, 0, 40, CP_UTF8);
+   }
+   
+   //--- Convert string to Z85-encoded key (returns true if key looks valid)
+   static bool StringToKey(string keyStr, uchar &keyZ85[])
+   {
+      ArrayResize(keyZ85, 41);
+      ArrayInitialize(keyZ85, 0);
+      StringToCharArray(keyStr, keyZ85, 0, 40, CP_UTF8);
+      return (StringLen(keyStr) == 40);
    }
 };
 
 //+------------------------------------------------------------------+
-//| Get ZeroMQ Version String                                         |
+//| Utility Functions                                                 |
 //+------------------------------------------------------------------+
 string ZmqVersion()
 {
@@ -544,13 +747,10 @@ string ZmqVersion()
    return StringFormat("%d.%d.%d", major, minor, patch);
 }
 
-//+------------------------------------------------------------------+
-//| Get Last ZMQ Error as String                                      |
-//+------------------------------------------------------------------+
 string ZmqLastError()
 {
    int errnum = zmq_errno();
    return zmq_strerror(errnum);
 }
 
-#endif // ZMQ_MQH
+#endif // ZMQ_V2_MQH

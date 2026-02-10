@@ -118,21 +118,27 @@ export function CopierGroupsProvider({ children }: { children: ReactNode }) {
   const [groups, setGroups] = useState<CopierGroup[]>([]);
   const [initialized, setInitialized] = useState(false);
 
+  // Track whether the initial load has been applied so the persist effect
+  // never overwrites localStorage with the default empty array.
+  const loadAppliedRef = useRef(false);
+
   // ── Load from localStorage once accounts are ready ──
 
   useEffect(() => {
     if (loading) return;
     const stored = getStoredCopierGroups();
-    if (stored.length > 0) {
-      setGroups(stored);
-    }
+    // Always apply stored groups (even if empty) so state is in sync with localStorage
+    setGroups(stored);
+    loadAppliedRef.current = true;
     setInitialized(true);
-  }, [accounts, loading]);
+  }, [loading]);
 
   // ── Persist every change to localStorage ──
+  // Only persist after the initial load has been applied to avoid
+  // overwriting localStorage with the default empty state.
 
   useEffect(() => {
-    if (!initialized) return;
+    if (!initialized || !loadAppliedRef.current) return;
     saveCopierGroups(groups);
   }, [groups, initialized]);
 
@@ -212,6 +218,7 @@ export function CopierGroupsProvider({ children }: { children: ReactNode }) {
           const statsData = event.data as Record<string, {
             groupId: string;
             followers: Record<string, FollowerStats>;
+            totalFailedCopies?: number;
           } & GroupStats>;
           if (statsData && typeof statsData === 'object') {
             setGroups(prev => prev.map(g => {
@@ -227,6 +234,7 @@ export function CopierGroupsProvider({ children }: { children: ReactNode }) {
                   activeFollowers: engineStats.activeFollowers,
                   totalFollowers: engineStats.totalFollowers,
                 },
+                totalFailedCopies: engineStats.totalFailedCopies ?? g.totalFailedCopies,
                 followers: g.followers.map(f => {
                   const fStats = engineStats.followers?.[f.id];
                   if (!fStats) return f;
@@ -245,7 +253,6 @@ export function CopierGroupsProvider({ children }: { children: ReactNode }) {
           break;
         }
         case 'copyError':
-        case 'protectionTriggered':
           // Could trigger toast notifications here in the future
           console.warn(`[Copier] ${event.type}:`, event.data);
           break;
@@ -456,6 +463,10 @@ export function CopierGroupsProvider({ children }: { children: ReactNode }) {
   // ── Sync: create/update/remove relationships from copier groups ──
 
   const syncRelationshipsFromGroups = useCallback(() => {
+    // Guard: don't clean up orphans if groups haven't loaded from localStorage yet.
+    // Without this, the first call with groups=[] would wipe all relationships.
+    if (!initialized || !loadAppliedRef.current) return;
+
     const currentRelationships = getStoredRelationships();
     let changed = false;
 
@@ -514,7 +525,7 @@ export function CopierGroupsProvider({ children }: { children: ReactNode }) {
       saveRelationships(cleaned);
       window.dispatchEvent(new CustomEvent('hedge-relationships-changed'));
     }
-  }, [groups]);
+  }, [groups, initialized]);
 
   // ── Auto-create copier group from a hedge map relationship ──
 

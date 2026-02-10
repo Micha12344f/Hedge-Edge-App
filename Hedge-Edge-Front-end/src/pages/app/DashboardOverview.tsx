@@ -1,6 +1,8 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { useTradingAccounts, TradingAccount } from '@/hooks/useTradingAccounts';
 import { useConnectionsFeed } from '@/hooks/useConnectionsFeed';
+import { useHedgeStats } from '@/hooks/useHedgeStats';
+import { useCopierGroupsContext } from '@/contexts/CopierGroupsContext';
 import { isBridgeAvailable, mt5, type AccountSnapshot } from '@/lib/local-trading-bridge';
 import type { ConnectionSnapshot } from '@/types/connections';
 import { AccountCard } from '@/components/dashboard/AccountCard';
@@ -23,7 +25,6 @@ import {
   Wallet, 
   Target, 
   BarChart3,
-  PlayCircle,
   RefreshCw,
   Sparkles,
   HelpCircle,
@@ -36,6 +37,8 @@ import {
 const DashboardOverview = () => {
   const { accounts, loading, createAccount, deleteAccount, archiveAccount, restoreAccount, syncAccountFromMT5 } = useTradingAccounts();
   const { snapshots, getSnapshot, disconnect, refreshFromEA, manualRefreshAll } = useConnectionsFeed({ autoStart: true, debug: true });
+  const { groups: copierGroups } = useCopierGroupsContext();
+  const { getAggregateHedgeStats, getAccountHedgeStats } = useHedgeStats(accounts, copierGroups, getSnapshot);
   const [addModalOpen, setAddModalOpen] = useState(false);
   const [activeTab, setActiveTab] = useState('all');
   const [selectedAccount, setSelectedAccount] = useState<TradingAccount | null>(null);
@@ -176,6 +179,7 @@ const DashboardOverview = () => {
     if (!account.login) return null;
 
     // 1. Try supervisor snapshot first (most authoritative)
+    //    getSnapshot now supports direct key, "mt5-<login>" prefix, and mt5Login fallback
     const supervisorSnap = getSnapshot(account.login) || getSnapshot(account.id);
     if (supervisorSnap) return supervisorSnap;
 
@@ -185,8 +189,17 @@ const DashboardOverview = () => {
       return buildTerminalSnapshot(account, terminalSnap);
     }
 
+    // Debug: log when we can't find a snapshot for an account that has a login
+    // This helps diagnose "shows Disconnected when actually connected" issues
+    if (Object.keys(snapshots).length > 0) {
+      console.debug(
+        `[DashboardOverview] No snapshot found for account "${account.account_name}" (login=${account.login}, id=${account.id}). ` +
+        `Available snapshot keys: [${Object.keys(snapshots).join(', ')}]`
+      );
+    }
+
     return null;
-  }, [getSnapshot, terminalSnapshots, buildTerminalSnapshot]);
+  }, [getSnapshot, terminalSnapshots, buildTerminalSnapshot, snapshots]);
 
   const handleAccountClick = (account: TradingAccount) => {
     setSelectedAccount(account);
@@ -194,9 +207,18 @@ const DashboardOverview = () => {
   };
 
   // Wrapper to disconnect account from MT5 before archiving
+  // Also persists the current hedge P/L so subsequent phases can factor it into lot sizing
   const handleArchiveAccount = async (id: string) => {
-    // Find the account to get its login for disconnecting
     const account = accounts.find(a => a.id === id);
+
+    // Compute this account's hedge P/L before disconnecting
+    let hedgePnL: number | undefined;
+    if (account && account.phase !== 'live') {
+      const stats = getAccountHedgeStats(account);
+      hedgePnL = stats.hedgePnL;
+      console.log(`[DashboardOverview] Storing hedge P/L on archive: $${hedgePnL?.toFixed(2)} for ${account.account_name}`);
+    }
+
     if (account?.login) {
       // Disconnect from MT5 first
       console.log('[DashboardOverview] Disconnecting account before archive:', account.login);
@@ -204,8 +226,8 @@ const DashboardOverview = () => {
       // Also try with account id in case that's the key used
       await disconnect(account.id, 'Account archived');
     }
-    // Then archive the account
-    return archiveAccount(id);
+    // Then archive the account (with hedge P/L persisted)
+    return archiveAccount(id, hedgePnL);
   };
 
   // Wrapper to handle restore and tab switching
@@ -250,27 +272,44 @@ const DashboardOverview = () => {
   });
 
   // Calculate stats (exclude archived accounts)
-  // Use live balance from connection snapshot when available, else fall back to stored value
   const activeAccounts = accounts.filter(a => !a.is_archived);
-  const getLiveBalance = (acc: TradingAccount) => {
-    const snap = getAccountSnapshot(acc);
-    return snap?.metrics?.balance ?? (Number(acc.current_balance) || Number(acc.account_size) || 0);
-  };
   const propAccounts = activeAccounts.filter(a => a.phase === 'funded' || a.phase === 'evaluation');
-  const propBalance = propAccounts.reduce((sum, acc) => sum + (Number(acc.account_size) || 0), 0);
-  const totalPnL = activeAccounts.reduce((sum, acc) => {
-    const snap = getAccountSnapshot(acc);
-    const size = Number(acc.account_size) || 0;
-    if (snap?.metrics?.balance != null) {
-      return sum + (snap.metrics.balance - size);
+  const hedgeAccounts = activeAccounts.filter(a => a.phase === 'live');
+
+  // Assets Under Management = cumulative sum of account_size for funded + evaluation accounts only (excludes hedge accounts)
+  const totalAUM = propAccounts.reduce((sum, acc) => sum + (Number(acc.account_size) || 0), 0);
+
+  // --- Total P&L = P - (H + HD + E) ---
+  // P = total received payouts from all accounts
+  const totalReceivedPayouts = useMemo(() => {
+    try {
+      const stored = localStorage.getItem('hedge_edge_payouts');
+      const payouts: Array<{ amount: number; received: boolean }> = stored ? JSON.parse(stored) : [];
+      return payouts.filter(p => p.received).reduce((sum, p) => sum + p.amount, 0);
+    } catch {
+      return 0;
     }
-    return sum + (Number(acc.pnl) || 0);
-  }, 0);
-  const totalAUM = activeAccounts.reduce((sum, acc) => sum + getLiveBalance(acc), 0);
-  const totalAccountValue = activeAccounts.reduce((sum, acc) => sum + (Number(acc.account_size) || 0), 0);
-  // Calculate weighted average return based on account sizes (more accurate than simple average)
-  const avgPnLPercent = totalAccountValue > 0 
-    ? (totalPnL / totalAccountValue) * 100 
+  }, [accounts]); // re-compute when accounts change (proxy for data changes)
+
+  // H = cumulative Hedge P/L (attributed from copier engine per-leader)
+  // HD = hedge discrepancy = Σ HD_i using formula: HD_i = -(P_f,i × F_i) / (D_i × S_i) - P_h,i
+  const { totalHedgePnL: cumulativeHedgePnL, totalHedgeDiscrepancy: hedgeDiscrepancy } = getAggregateHedgeStats();
+
+  // E = cumulative eval fees for all accounts (only root accounts in a progression chain)
+  const totalEvalFees = useMemo(() => {
+    const allPropAccounts = accounts.filter(a => a.phase !== 'live');
+    return allPropAccounts
+      .filter(a => !a.previous_account_id)
+      .reduce((sum, acc) => sum + (Number(acc.evaluation_fee) || 0), 0);
+  }, [accounts]);
+
+  // Total P&L = P - (H + HD + E)
+  const totalPnL = totalReceivedPayouts - (Math.abs(cumulativeHedgePnL) + hedgeDiscrepancy + totalEvalFees);
+
+  // ROI = (P / (|H| + HD + E)) * 100
+  const totalCosts = Math.abs(cumulativeHedgePnL) + hedgeDiscrepancy + totalEvalFees;
+  const roiPercent = totalCosts > 0
+    ? (totalReceivedPayouts / totalCosts) * 100
     : 0;
 
   const evaluationCount = activeAccounts.filter(a => a.phase === 'evaluation').length;
@@ -295,7 +334,7 @@ const DashboardOverview = () => {
       type: 'currency' as const,
       className: totalPnL >= 0 ? 'text-primary' : 'text-destructive',
       iconClassName: totalPnL >= 0 ? 'text-primary' : 'text-destructive',
-      tooltip: 'Combined profit/loss across all accounts',
+      tooltip: 'Payouts Received - (|Hedge P/L| + Hedge Discrepancy + Eval Fees). HD = -(Pf×F)/(D×S) - Ph',
       colorByValue: true,
       shiny: totalPnL > 0,
     },
@@ -306,17 +345,17 @@ const DashboardOverview = () => {
       type: 'currency' as const,
       className: 'text-foreground',
       iconClassName: 'text-muted-foreground',
-      tooltip: 'Total live balance across all active accounts',
+      tooltip: 'Cumulative account sizes for funded & evaluation accounts',
       colorByValue: false,
     },
     {
-      title: 'Avg. Return',
+      title: 'ROI',
       icon: BarChart3,
-      value: avgPnLPercent,
+      value: roiPercent,
       type: 'percent' as const,
-      className: avgPnLPercent >= 0 ? 'text-primary' : 'text-destructive',
+      className: roiPercent >= 0 ? 'text-primary' : 'text-destructive',
       iconClassName: 'text-muted-foreground',
-      tooltip: 'Average percentage return across all accounts',
+      tooltip: 'ROI = (Payouts Received / (|Hedge P/L| + Hedge Discrepancy + Eval Fees)) × 100',
       colorByValue: true,
     },
     {
@@ -375,19 +414,7 @@ const DashboardOverview = () => {
               </TooltipContent>
             </Tooltip>
           </TooltipProvider>
-          <TooltipProvider>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button variant="outline" size="sm" className="group">
-                  <PlayCircle className="mr-2 h-4 w-4 transition-transform group-hover:scale-110" />
-                  Tutorials
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>
-                <p>Watch video guides to get started</p>
-              </TooltipContent>
-            </Tooltip>
-          </TooltipProvider>
+
           <Button onClick={() => setAddModalOpen(true)} className="group">
             <Plus className="mr-2 h-4 w-4 transition-transform group-hover:rotate-90" />
             Add Account
@@ -486,10 +513,7 @@ const DashboardOverview = () => {
                   </TabsTrigger>
                 )}
               </TabsList>
-              <Button variant="outline" size="sm" className="hidden sm:flex group">
-                <RefreshCw className="mr-2 h-4 w-4 transition-transform group-hover:rotate-180 duration-500" />
-                Sync All
-              </Button>
+
             </div>
 
             <TabsContent value={activeTab} className="mt-4">

@@ -199,18 +199,6 @@ export function NotificationPreferencesPanel() {
 
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2">
-                  <Shield className="h-3.5 w-3.5 text-yellow-400" />
-                  <Label htmlFor="notify-protection" className="text-sm">Account protection triggers</Label>
-                </div>
-                <Switch
-                  id="notify-protection"
-                  checked={prefs.notify_on_protection_triggered}
-                  onCheckedChange={(v) => updatePref('notify_on_protection_triggered', v)}
-                />
-              </div>
-
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
                   <AlertTriangle className="h-3.5 w-3.5 text-orange-400" />
                   <Label htmlFor="notify-circuit" className="text-sm">Circuit breaker trips</Label>
                 </div>
@@ -234,21 +222,7 @@ export function NotificationPreferencesPanel() {
               </div>
             </div>
 
-            {/* Throttling */}
-            <div className="space-y-2 border-t border-border/30 pt-4">
-              <Label htmlFor="min-interval" className="text-sm text-muted-foreground">
-                Minimum interval between emails (seconds)
-              </Label>
-              <Input
-                id="min-interval"
-                type="number"
-                min={10}
-                max={3600}
-                value={prefs.min_interval_seconds}
-                onChange={(e) => updatePref('min_interval_seconds', parseInt(e.target.value) || 60)}
-                className="w-32"
-              />
-            </div>
+
           </>
         )}
 

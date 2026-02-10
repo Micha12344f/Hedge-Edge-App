@@ -81,7 +81,7 @@ export interface CTraderPosition {
 }
 
 export interface CTraderCommand {
-  action: 'PAUSE' | 'RESUME' | 'CLOSE_ALL' | 'CLOSE_POSITION' | 'STATUS' | 'PING' | 'CONFIG';
+  action: 'PAUSE' | 'RESUME' | 'CLOSE_ALL' | 'CLOSE_POSITION' | 'STATUS' | 'PING' | 'CONFIG' | 'SET_CONFIG';
   positionId?: string;
   params?: Record<string, unknown>;
   timestamp?: string;

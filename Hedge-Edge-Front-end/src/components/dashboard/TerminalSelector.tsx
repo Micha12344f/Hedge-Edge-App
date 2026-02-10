@@ -244,13 +244,14 @@ export function TerminalSelector({
           const isLaunching = launching === terminal.id;
 
           return (
-            <button
+            <div
               key={terminal.id}
-              type="button"
+              role="button"
+              tabIndex={disabled ? -1 : 0}
               onClick={() => handleSelect(terminal)}
-              disabled={disabled}
+              onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handleSelect(terminal); } }}
               className={cn(
-                "w-full p-3 rounded-lg border transition-all text-left group",
+                "w-full p-3 rounded-lg border transition-all text-left group cursor-pointer",
                 "hover:bg-muted/50",
                 isSelected
                   ? "border-primary/50 bg-primary/5"
@@ -335,7 +336,7 @@ export function TerminalSelector({
                   )}
                 </div>
               </div>
-            </button>
+            </div>
           );
         })}
       </div>

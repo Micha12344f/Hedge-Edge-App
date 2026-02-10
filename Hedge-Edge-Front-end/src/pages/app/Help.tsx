@@ -115,7 +115,7 @@ const faqCategories = [
     faqs: [
       {
         question: 'How does the trade copier work?',
-        answer: 'The trade copier monitors trades on your master account and automatically replicates them to follower accounts. You can configure risk multipliers, inverse copying (for hedging), and symbol mapping for each follower.',
+        answer: 'The trade copier monitors trades on your master account and automatically replicates them to follower accounts. You can configure lot multipliers, inverse copying (for hedging), and symbol mapping for each follower.',
       },
       {
         question: 'Can I copy trades between different brokers?',

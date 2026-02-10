@@ -168,11 +168,16 @@ export function useConnectionsFeed(options?: UseConnectionsFeedOptions): UseConn
    * (connection keys are "mt5-<login>" but callers may pass raw login).
    */
   const getSnapshot = useCallback((accountId: string): ConnectionSnapshot | null => {
-    // Direct key match (e.g., "mt5-11789976")
+    // Direct key match (e.g., "mt5-11789976" or Supabase UUID)
     if (snapshots[accountId]) return snapshots[accountId];
-    // Fallback: search by mt5Login field (e.g., caller passes "11789976")
+    // Try with "mt5-" prefix (caller may pass raw login "11789976")
+    const prefixed = `mt5-${accountId}`;
+    if (snapshots[prefixed]) return snapshots[prefixed];
+    // Fallback: search by mt5Login or credentials login field
     for (const snap of Object.values(snapshots)) {
-      if ((snap.session as any)?.mt5Login === accountId) return snap;
+      const session = snap.session as any;
+      if (session?.mt5Login === accountId) return snap;
+      if (session?._credentials?.login === accountId) return snap;
     }
     return null;
   }, [snapshots]);

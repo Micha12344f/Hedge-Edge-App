@@ -16,6 +16,12 @@ build/release/
 *.exe
 *.app
 
+# Compiled binaries & native libraries
+*.ex5
+*.dll
+*.so
+*.dylib
+
 # Environment files (contain secrets)
 .env
 .env.local
@@ -42,6 +48,10 @@ out/
 
 # Build (front-end)
 build/
+
+# PyInstaller / standalone agent builds
+standalone/
+*.spec
 
 # Test scripts
 zmq_listener_test.mjs

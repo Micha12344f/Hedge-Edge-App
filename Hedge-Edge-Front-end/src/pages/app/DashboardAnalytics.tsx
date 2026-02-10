@@ -3,6 +3,9 @@ import { useTradingAccounts } from '@/hooks/useTradingAccounts';
 import { useTradeHistoryContext } from '@/contexts/TradeHistoryContext';
 import { buildChartData } from '@/hooks/useTradeHistory';
 import { useConnectionsFeed } from '@/hooks/useConnectionsFeed';
+import { useHedgeStats } from '@/hooks/useHedgeStats';
+import { useCopierGroupsContext } from '@/contexts/CopierGroupsContext';
+import { isElectron } from '@/lib/desktop';
 import { PROP_FIRMS } from '@/components/dashboard/AddAccountModal';
 import { Card, CardContent } from '@/components/ui/card';
 import { PageBackground } from '@/components/ui/page-background';
@@ -72,12 +75,29 @@ const DashboardAnalytics = () => {
   const [isAddingPayout, setIsAddingPayout] = useState(false);
   const [newPayoutAmount, setNewPayoutAmount] = useState('');
   const [isRefreshingChart, setIsRefreshingChart] = useState(false);
+  
+  // Dynamic daily limit from EOD tracker (uses day-start balance, not initial account size)
+  const [dynamicDailyLimit, setDynamicDailyLimit] = useState<{
+    referenceBalance: number;
+    dailyLimitPnL: number;
+    currentDayPnL: number;
+    currentDayPnLPercent: number;
+    remainingDailyDrawdown: number;
+    isLimitBreached: boolean;
+    tradingDate: string;
+  } | null>(null);
 
   // Trade history from always-mounted context (records events on ALL pages)
   const { getTradesForAccount, requestHistoryForAccount, requestHistoryForAll } = useTradeHistoryContext();
 
   // Live connections feed — gives us real-time balance/equity/profit from the EA
   const { getSnapshot } = useConnectionsFeed({ autoStart: true });
+
+  // Copier groups — needed to map leader → follower accounts for hedge P/L
+  const { groups: copierGroups } = useCopierGroupsContext();
+
+  // Hedge stats — computed from live snapshots + copier group config (no copier-engine IPC)
+  const { getAccountHedgeStats, getAggregateHedgeStats } = useHedgeStats(accounts, copierGroups, getSnapshot);
 
   // Helper to get live snapshot for an account (same pattern as DashboardOverview)
   const getAccountSnapshot = useCallback((account: { login?: string; id: string; is_archived?: boolean }) => {
@@ -129,6 +149,67 @@ const DashboardAnalytics = () => {
     }
   }, [selectedAccountId, accounts, getTradesForAccount, requestHistoryForAccount]);
 
+  // Fetch dynamic daily limit from EOD tracker (desktop only)
+  // This uses the day-start balance (updated at broker EOD) instead of initial account size
+  useEffect(() => {
+    if (!isElectron()) {
+      setDynamicDailyLimit(null);
+      return;
+    }
+    if (!selectedAccountId || selectedAccountId === 'all') {
+      setDynamicDailyLimit(null);
+      return;
+    }
+    
+    const account = accounts.find(a => a.id === selectedAccountId);
+    if (!account || account.is_archived) {
+      setDynamicDailyLimit(null);
+      return;
+    }
+    
+    const maxDailyLossPercent = Number(account.max_daily_loss) || 0;
+    if (maxDailyLossPercent <= 0) {
+      setDynamicDailyLimit(null);
+      return;
+    }
+    
+    // Use login as the account identifier for the daily limit tracker
+    const accountIdForTracker = account.login || selectedAccountId;
+    
+    const fetchDailyLimit = async () => {
+      try {
+        const result = await window.electronAPI?.dailyLimit?.calculate(
+          accountIdForTracker,
+          maxDailyLossPercent
+        );
+        if (result?.success && result.data) {
+          const apiResult = result.data;
+          // Map API result to state shape expected by the component
+          setDynamicDailyLimit({
+            referenceBalance: apiResult.dailyStartBalance,
+            dailyLimitPnL: -apiResult.dailyLimitAmount, // Negative because it's a loss limit
+            currentDayPnL: -(apiResult.dailyStartBalance - apiResult.currentEquity),
+            currentDayPnLPercent: apiResult.dailyLimitPercent,
+            remainingDailyDrawdown: apiResult.remainingAmount,
+            isLimitBreached: apiResult.usedAmount >= apiResult.dailyLimitAmount,
+            tradingDate: apiResult.serverDay,
+          });
+        } else {
+          setDynamicDailyLimit(null);
+        }
+      } catch (err) {
+        console.error('[DashboardAnalytics] Failed to fetch daily limit:', err);
+        setDynamicDailyLimit(null);
+      }
+    };
+    
+    fetchDailyLimit();
+    
+    // Refresh every 30 seconds to catch EOD transitions
+    const interval = setInterval(fetchDailyLimit, 30000);
+    return () => clearInterval(interval);
+  }, [selectedAccountId, accounts]);
+
   // Separate active and archived accounts - archived accounts don't need live data
   const activeAccounts = accounts.filter(a => !a.is_archived);
   const archivedAccounts = accounts.filter(a => a.is_archived);
@@ -147,12 +228,12 @@ const DashboardAnalytics = () => {
   
   const totalInvestment = relevantAccounts.reduce((sum, acc) => sum + (Number(acc.account_size) || 0), 0);
 
-  // Calculate hedge discrepancy (only active accounts)
+  // Calculate hedge stats using correct formula: HD_i = -(P_f,i × F_i) / (D_i × S_i) - P_h,i
   const propAccounts = activeAccounts.filter(a => a.phase === 'funded' || a.phase === 'evaluation');
   const hedgeAccounts = activeAccounts.filter(a => a.phase === 'live');
-  const propPnL = propAccounts.reduce((sum, acc) => sum + (Number(acc.pnl) || 0), 0);
-  const hedgePnL = hedgeAccounts.reduce((sum, acc) => sum + (Number(acc.pnl) || 0), 0);
-  const hedgeDiscrepancy = propPnL + hedgePnL; // Should be close to 0 if properly hedged
+
+  // Aggregate hedge P/L and discrepancy (for "All Accounts" view)
+  const { totalHedgePnL: hedgePnL, totalHedgeDiscrepancy: hedgeDiscrepancy } = getAggregateHedgeStats();
 
   // Calculate total challenge fees across all accounts (active + archived)
   // If an account has previous_account_id, it's linked to an archived account — count as ONE fee
@@ -191,20 +272,18 @@ const DashboardAnalytics = () => {
       .reduce((sum, p) => sum + p.amount, 0);
   }, [selectedAccount, payouts]);
 
-  // Per-account proportional hedge P/L (this account's share of total hedge P/L)
-  const selectedAccountProportionalHedgePnL = useMemo(() => {
-    if (!selectedAccount || selectedAccount.phase === 'live') return 0;
-    const totalPropSize = propAccounts.reduce((sum, a) => sum + (Number(a.account_size) || 0), 0);
-    const proportion = totalPropSize > 0 ? (Number(selectedAccount.account_size) || 0) / totalPropSize : 0;
-    return hedgePnL * proportion;
-  }, [selectedAccount, propAccounts, hedgePnL]);
+  // Per-account hedge P/L and discrepancy (attributed from copier engine)
+  const selectedAccountHedgeStats = useMemo(() => {
+    if (!selectedAccount || selectedAccount.phase === 'live') {
+      return { hedgePnL: 0, expectedHedgePnL: 0, hedgeDiscrepancy: 0 };
+    }
+    return getAccountHedgeStats(selectedAccount);
+  }, [selectedAccount, getAccountHedgeStats]);
 
-  // Per-account hedge discrepancy: account's own P/L + proportional hedge P/L
-  const selectedAccountHedgeDiscrepancy = useMemo(() => {
-    if (!selectedAccount || selectedAccount.phase === 'live') return 0;
-    const accountPnL = Number(selectedAccount.pnl) || 0;
-    return accountPnL + selectedAccountProportionalHedgePnL;
-  }, [selectedAccount, selectedAccountProportionalHedgePnL]);
+  const selectedAccountProportionalHedgePnL = selectedAccountHedgeStats.hedgePnL;
+
+  // Per-account hedge discrepancy: HD_i = -(P_f,i × F_i) / (D_i × S_i) - P_h,i
+  const selectedAccountHedgeDiscrepancy = selectedAccountHedgeStats.hedgeDiscrepancy;
 
   // Total P/L:
   // All Accounts: Payouts - (|Hedge P/L| + Challenge Fees + Hedge Discrepancy)
@@ -295,13 +374,6 @@ const DashboardAnalytics = () => {
   // Calculate max trades for X-axis domain
   const maxTrades = Math.max(...areaChartData.map(d => d.trades), 0);
 
-  // Time-based domain helpers for area chart
-  const hasMultiplePoints = areaChartData.length > 1;
-  const formatTimeAxis = (tick: number) => {
-    const d = new Date(tick);
-    return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-  };
-
   // Calculate profit target and max loss as P&L values
   const profitTargetPnL = selectedAccount 
     ? ((Number(selectedAccount.profit_target) || 0) / 100 * startingBalance)
@@ -311,9 +383,18 @@ const DashboardAnalytics = () => {
     ? -((Number(selectedAccount.max_loss) || 0) / 100 * startingBalance)
     : 0;
 
-  const dailyMaxLossPnL = selectedAccount 
-    ? -((Number(selectedAccount.max_daily_loss) || 0) / 100 * startingBalance)
-    : 0;
+  // Daily max loss: use dynamic EOD-based value when available (desktop with live connection)
+  // Falls back to static calculation using initial account size for non-desktop or no live data
+  // The dynamic limit uses the day-start balance which adjusts at broker EOD
+  // If balance is up 5%, the new daily limit is 5% of the NEW balance, not the initial
+  const dailyMaxLossPnL = dynamicDailyLimit
+    ? dynamicDailyLimit.dailyLimitPnL  // Dynamic value based on day-start balance
+    : selectedAccount 
+      ? -((Number(selectedAccount.max_daily_loss) || 0) / 100 * startingBalance)  // Static fallback
+      : 0;
+
+  // Day-start reference balance (for display purposes)
+  const dailyReferenceBalance = dynamicDailyLimit?.referenceBalance || startingBalance;
 
   // Calculate custom ticks at 50% intervals of profit target/max loss
   const getCustomTicks = () => {
@@ -443,8 +524,8 @@ const DashboardAnalytics = () => {
               <h3 className="text-sm font-medium text-muted-foreground mb-2">Hedge P/L</h3>
               <div className="flex flex-col">
                 <div className="flex items-baseline gap-2">
-                  <span className={`text-xl font-semibold ${hedgePnL >= 0 ? 'text-primary' : 'text-destructive'}`}>
-                    {formatCurrency(hedgePnL)}
+                  <span className={`text-xl font-semibold ${(selectedAccountId === 'all' ? hedgePnL : selectedAccountProportionalHedgePnL) >= 0 ? 'text-primary' : 'text-destructive'}`}>
+                    {formatCurrency(selectedAccountId === 'all' ? hedgePnL : selectedAccountProportionalHedgePnL)}
                   </span>
                 </div>
               </div>
@@ -513,8 +594,8 @@ const DashboardAnalytics = () => {
               <h3 className="text-sm font-medium text-muted-foreground mb-2">Hedge Discrepancy</h3>
               <div className="flex flex-col">
                 <div className="flex items-baseline gap-2">
-                  <span className={`text-xl font-semibold ${Math.abs(hedgeDiscrepancy) < 100 ? 'text-primary' : 'text-secondary'}`}>
-                    {formatCurrency(hedgeDiscrepancy)}
+                  <span className={`text-xl font-semibold ${(selectedAccountId === 'all' ? hedgeDiscrepancy : selectedAccountHedgeDiscrepancy) < 0 ? 'text-destructive' : 'text-primary'}`}>
+                    {formatCurrency(selectedAccountId === 'all' ? hedgeDiscrepancy : selectedAccountHedgeDiscrepancy)}
                   </span>
                 </div>
               </div>
@@ -792,15 +873,16 @@ const DashboardAnalytics = () => {
                           vertical={false}
                         />
                         <XAxis 
-                          dataKey="time" 
+                          dataKey="trades" 
                           type="number"
-                          domain={hasMultiplePoints ? ['dataMin', 'dataMax'] : ['auto', 'auto']}
-                          tickFormatter={formatTimeAxis}
+                          domain={[0, maxTrades > 0 ? maxTrades : 1]}
+                          tickFormatter={(v: number) => v === 0 ? '0' : `#${v}`}
+                          allowDecimals={false}
                           axisLine={{ stroke: 'hsl(var(--border))' }}
                           tickLine={{ stroke: 'hsl(var(--border))' }}
                           tick={{ fill: '#ffffff', fontSize: 12 }}
                           label={{ 
-                            value: 'Time', 
+                            value: 'Trades', 
                             position: 'bottom', 
                             offset: 15,
                             fill: '#ffffff',
@@ -896,8 +978,8 @@ const DashboardAnalytics = () => {
                           content={({ active, payload }) => {
                             if (active && payload && payload.length) {
                               const data = payload[0].payload;
+                              const tradeLabel = data.trades > 0 ? `Trade #${data.trades}` : 'Start';
                               const timeStr = data.time ? new Date(data.time).toLocaleString() : '';
-                              const tradeLabel = data.trades > 0 ? `Trade #${data.trades}` : 'Current';
                               return (
                                 <div className="bg-card border border-border rounded-lg p-3 shadow-lg">
                                   <p className="text-foreground text-sm font-medium">{tradeLabel}</p>

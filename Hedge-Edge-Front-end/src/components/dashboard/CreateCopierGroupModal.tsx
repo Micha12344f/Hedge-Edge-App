@@ -30,11 +30,13 @@ import {
   Plus,
   Repeat2,
   Info,
+  Zap,
 } from 'lucide-react';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import type { TradingAccount } from '@/hooks/useTradingAccounts';
-import type { CopierGroup, VolumeSizingMode, AccountProtectionMode } from '@/types/copier';
+import type { CopierGroup, VolumeSizingMode } from '@/types/copier';
 import { createCopierGroup, createDefaultFollower } from '@/lib/copier-groups';
+import { getSuggestedLotMultiplier } from '@/lib/lot-multiplier';
 
 // ─── Phase badge config ─────────────────────────────────────────────────────
 
@@ -47,20 +49,7 @@ const phaseBadge: Record<string, { className: string; label: string }> = {
 // ─── Volume sizing options ──────────────────────────────────────────────────
 
 const volumeOptions: { value: VolumeSizingMode; label: string; description: string }[] = [
-  { value: 'equity-to-equity',   label: 'Equity-to-Equity',      description: 'Same risk % as leader based on equity ratio' },
   { value: 'lot-multiplier',     label: 'Lot Multiplier',         description: 'Multiply leader lot size by a factor' },
-  { value: 'risk-multiplier',    label: 'Risk Multiplier',        description: 'Multiply equity ratio by a factor' },
-  { value: 'fixed-lot',          label: 'Fixed Lot',              description: 'Use a fixed lot size for all trades' },
-  { value: 'fixed-risk-percent', label: 'Fixed Risk %',           description: 'Risk a fixed % of equity per trade (needs SL)' },
-  { value: 'fixed-risk-nominal', label: 'Fixed Risk $',           description: 'Risk a fixed dollar amount per trade (needs SL)' },
-];
-
-// ─── Protection options ─────────────────────────────────────────────────────
-
-const protectionOptions: { value: AccountProtectionMode; label: string }[] = [
-  { value: 'off',            label: 'Off' },
-  { value: 'balance-based',  label: 'Balance-based' },
-  { value: 'equity-based',   label: 'Equity-based' },
 ];
 
 // ─── Props ──────────────────────────────────────────────────────────────────
@@ -97,7 +86,7 @@ export function CreateCopierGroupModal({
   );
 
   // Risk settings (applied to all new followers as defaults)
-  const [volumeSizing, setVolumeSizing] = useState<VolumeSizingMode>('equity-to-equity');
+  const [volumeSizing] = useState<VolumeSizingMode>('lot-multiplier');
 
   // ── Reset form state when dialog opens (ensures fresh state each time) ──
 
@@ -113,18 +102,7 @@ export function CreateCopierGroupModal({
         setGroupName('');
         setLeaderId('');
         setSelectedFollowerIds([]);
-        setVolumeSizing('equity-to-equity');
         setLotMultiplier('1.0');
-        setRiskMultiplier('1.0');
-        setFixedLot('0.01');
-        setFixedRiskPercent('1.0');
-        setFixedRiskNominal('50');
-        setCopySL(true);
-        setCopyTP(true);
-        setReverseMode(false);
-        setProtectionMode('off');
-        setMinThreshold('');
-        setMaxThreshold('');
         setSymbolSuffix('');
         setSymbolBlacklist('');
         setActiveTab('accounts');
@@ -132,18 +110,7 @@ export function CreateCopierGroupModal({
     }
   }, [open, editGroup]);
   const [lotMultiplier, setLotMultiplier] = useState('1.0');
-  const [riskMultiplier, setRiskMultiplier] = useState('1.0');
-  const [fixedLot, setFixedLot] = useState('0.01');
-  const [fixedRiskPercent, setFixedRiskPercent] = useState('1.0');
-  const [fixedRiskNominal, setFixedRiskNominal] = useState('50');
-  const [copySL, setCopySL] = useState(true);
-  const [copyTP, setCopyTP] = useState(true);
-  const [reverseMode, setReverseMode] = useState(false);
-
-  // Protection
-  const [protectionMode, setProtectionMode] = useState<AccountProtectionMode>('off');
-  const [minThreshold, setMinThreshold] = useState('');
-  const [maxThreshold, setMaxThreshold] = useState('');
+  const [reverseMode] = useState(true); // Always true — hedge copier always reverses
 
   // Symbol mapping
   const [symbolSuffix, setSymbolSuffix] = useState('');
@@ -153,6 +120,20 @@ export function CreateCopierGroupModal({
 
   const leader = activeAccounts.find(a => a.id === leaderId);
   const availableFollowers = activeAccounts.filter(a => a.id !== leaderId);
+
+  // Auto-calculate suggested lot multiplier from leader account's costs
+  const lotSuggestion = useMemo(() => {
+    if (!leader) return null;
+    const result = getSuggestedLotMultiplier(leader, accounts);
+    return result.suggested > 0 ? result : null;
+  }, [leader, accounts]);
+
+  // Auto-set lot multiplier when leader changes and a suggestion is available
+  useEffect(() => {
+    if (lotSuggestion && lotSuggestion.suggested > 0) {
+      setLotMultiplier(String(lotSuggestion.suggested));
+    }
+  }, [lotSuggestion]);
 
   const toggleFollower = (id: string) => {
     setSelectedFollowerIds(prev =>
@@ -177,16 +158,7 @@ export function CreateCopierGroupModal({
       ...f,
       volumeSizing,
       lotMultiplier: parseFloat(lotMultiplier) || 1,
-      riskMultiplier: parseFloat(riskMultiplier) || 1,
-      fixedLot: parseFloat(fixedLot) || 0.01,
-      fixedRiskPercent: parseFloat(fixedRiskPercent) || 1,
-      fixedRiskNominal: parseFloat(fixedRiskNominal) || 50,
-      copySL,
-      copyTP,
       reverseMode,
-      protectionMode,
-      minThreshold: parseFloat(minThreshold) || 0,
-      maxThreshold: parseFloat(maxThreshold) || 0,
       symbolSuffix,
       symbolBlacklist: symbolBlacklist
         .split(';')
@@ -203,104 +175,13 @@ export function CreateCopierGroupModal({
     setGroupName('');
     setLeaderId('');
     setSelectedFollowerIds([]);
-    setVolumeSizing('equity-to-equity');
     setLotMultiplier('1.0');
-    setRiskMultiplier('1.0');
-    setFixedLot('0.01');
-    setFixedRiskPercent('1.0');
-    setFixedRiskNominal('50');
-    setCopySL(true);
-    setCopyTP(true);
-    setReverseMode(false);
-    setProtectionMode('off');
-    setMinThreshold('');
-    setMaxThreshold('');
     setSymbolSuffix('');
     setSymbolBlacklist('');
     setActiveTab('accounts');
   };
 
   // ── Render volume sizing fields ────────────────────────────────
-
-  const renderVolumeFields = () => {
-    switch (volumeSizing) {
-      case 'lot-multiplier':
-        return (
-          <div className="space-y-2">
-            <Label className="text-xs">Lot Multiplier</Label>
-            <Input
-              type="number"
-              step="0.1"
-              value={lotMultiplier}
-              onChange={e => setLotMultiplier(e.target.value)}
-              placeholder="1.0"
-            />
-            <p className="text-xs text-muted-foreground">1.0 = same size, 0.5 = half, 2.0 = double</p>
-          </div>
-        );
-      case 'risk-multiplier':
-        return (
-          <div className="space-y-2">
-            <Label className="text-xs">Risk Multiplier</Label>
-            <Input
-              type="number"
-              step="0.1"
-              value={riskMultiplier}
-              onChange={e => setRiskMultiplier(e.target.value)}
-              placeholder="1.0"
-            />
-            <p className="text-xs text-muted-foreground">Multiplied against equity-to-equity ratio</p>
-          </div>
-        );
-      case 'fixed-lot':
-        return (
-          <div className="space-y-2">
-            <Label className="text-xs">Fixed Lot Size</Label>
-            <Input
-              type="number"
-              step="0.01"
-              value={fixedLot}
-              onChange={e => setFixedLot(e.target.value)}
-              placeholder="0.01"
-            />
-          </div>
-        );
-      case 'fixed-risk-percent':
-        return (
-          <div className="space-y-2">
-            <Label className="text-xs">Risk Percentage (%)</Label>
-            <Input
-              type="number"
-              step="0.1"
-              value={fixedRiskPercent}
-              onChange={e => setFixedRiskPercent(e.target.value)}
-              placeholder="1.0"
-            />
-            <p className="text-xs text-muted-foreground">Requires leader trade to have a stop loss</p>
-          </div>
-        );
-      case 'fixed-risk-nominal':
-        return (
-          <div className="space-y-2">
-            <Label className="text-xs">Risk Amount ($)</Label>
-            <Input
-              type="number"
-              step="1"
-              value={fixedRiskNominal}
-              onChange={e => setFixedRiskNominal(e.target.value)}
-              placeholder="50"
-            />
-            <p className="text-xs text-muted-foreground">Requires leader trade to have a stop loss</p>
-          </div>
-        );
-      default:
-        return (
-          <p className="text-xs text-muted-foreground">
-            Lot size automatically matched to maintain the same risk as the leader account.
-          </p>
-        );
-    }
-  };
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -316,7 +197,7 @@ export function CreateCopierGroupModal({
         </DialogHeader>
 
         <Tabs value={activeTab} onValueChange={setActiveTab} className="flex-1 min-h-0 flex flex-col">
-          <TabsList className="grid w-full grid-cols-4 bg-muted/50 shrink-0">
+          <TabsList className="grid w-full grid-cols-3 bg-muted/50 shrink-0">
             <TabsTrigger value="accounts" className="text-xs data-[state=active]:bg-primary/20 data-[state=active]:text-primary">
               <Users className="h-3.5 w-3.5 mr-1" />
               Accounts
@@ -328,10 +209,6 @@ export function CreateCopierGroupModal({
             <TabsTrigger value="symbols" className="text-xs data-[state=active]:bg-primary/20 data-[state=active]:text-primary">
               <ArrowRightLeft className="h-3.5 w-3.5 mr-1" />
               Symbols
-            </TabsTrigger>
-            <TabsTrigger value="protection" className="text-xs data-[state=active]:bg-primary/20 data-[state=active]:text-primary">
-              <Shield className="h-3.5 w-3.5 mr-1" />
-              Protection
             </TabsTrigger>
           </TabsList>
 
@@ -451,63 +328,68 @@ export function CreateCopierGroupModal({
 
             {/* ─── TAB 2: Risk Management ─────────────────────── */}
             <TabsContent value="risk" className="mt-0 space-y-5">
-              {/* Volume Sizing */}
+              {/* Volume Sizing — Lot Multiplier only */}
               <div className="space-y-3">
-                <Label className="font-semibold">Volume Sizing Mode</Label>
-                <Select
-                  value={volumeSizing}
-                  onValueChange={v => setVolumeSizing(v as VolumeSizingMode)}
-                >
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {volumeOptions.map(opt => (
-                      <SelectItem key={opt.value} value={opt.value}>
-                        <div>
-                          <span>{opt.label}</span>
-                          <span className="text-xs text-muted-foreground ml-2">
-                            — {opt.description}
-                          </span>
-                        </div>
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-                {renderVolumeFields()}
-              </div>
-
-              <Separator />
-
-              {/* TP / SL */}
-              <div className="space-y-4">
-                <Label className="font-semibold">Stop Loss & Take Profit</Label>
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="flex items-center justify-between gap-2 p-3 rounded-lg border border-border/40 bg-muted/20">
-                    <Label className="text-sm">Copy SL from Leader</Label>
-                    <Switch checked={copySL} onCheckedChange={setCopySL} />
-                  </div>
-                  <div className="flex items-center justify-between gap-2 p-3 rounded-lg border border-border/40 bg-muted/20">
-                    <Label className="text-sm">Copy TP from Leader</Label>
-                    <Switch checked={copyTP} onCheckedChange={setCopyTP} />
-                  </div>
+                <div className="flex items-center justify-between">
+                  <Label className="font-semibold">Lot Multiplier</Label>
+                  {lotSuggestion && lotSuggestion.suggested > 0 && (
+                    <TooltipProvider>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <button
+                            type="button"
+                            onClick={() => setLotMultiplier(String(lotSuggestion.suggested))}
+                            className="flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium bg-primary/15 text-primary border border-primary/30 hover:bg-primary/25 transition-colors cursor-pointer"
+                          >
+                            <Zap className="h-3 w-3" />
+                            Suggested: {lotSuggestion.suggested}
+                          </button>
+                        </TooltipTrigger>
+                        <TooltipContent className="max-w-xs">
+                          <p className="text-xs">
+                            Auto-calculated from cost to recover:<br />
+                            Challenge fee: ${lotSuggestion.evalFee.toLocaleString()}<br />
+                            {lotSuggestion.archivedHedgePnL > 0 && (<>Archived hedge losses: ${lotSuggestion.archivedHedgePnL.toLocaleString()}<br /></>)}
+                            Total: ${lotSuggestion.costToRecover.toLocaleString()}
+                            {' / '}({(lotSuggestion.maxDrawdownDecimal * 100).toFixed(0)}% × ${lotSuggestion.accountSize.toLocaleString()})
+                            {' = '}{lotSuggestion.suggested}
+                          </p>
+                        </TooltipContent>
+                      </Tooltip>
+                    </TooltipProvider>
+                  )}
                 </div>
+                <Input
+                  type="number"
+                  step="0.01"
+                  value={lotMultiplier}
+                  onChange={e => setLotMultiplier(e.target.value)}
+                  placeholder="1.0"
+                />
+                <p className="text-xs text-muted-foreground">
+                  {lotSuggestion && lotSuggestion.suggested > 0
+                    ? `Auto-sized to recover $${lotSuggestion.costToRecover.toLocaleString()} in costs. Edit freely.`
+                    : '1.0 = same size, 0.5 = half, 2.0 = double leader lot size'}
+                </p>
               </div>
 
               <Separator />
 
-              {/* Reverse Mode */}
-              <div className="flex items-center justify-between gap-3 p-3 rounded-lg border border-border/40 bg-muted/20">
+              {/* Reverse Mode — Always On */}
+              <div className="flex items-center justify-between gap-3 p-3 rounded-lg border border-green-500/30 bg-green-500/5">
                 <div className="flex items-center gap-2">
-                  <Repeat2 className="h-4 w-4 text-purple-500" />
+                  <Repeat2 className="h-4 w-4 text-green-500" />
                   <div>
                     <Label className="text-sm font-medium">Reverse Mode (Hedging)</Label>
                     <p className="text-xs text-muted-foreground">
-                      Copy trades in the opposite direction for hedging
+                      Always enabled — hedge accounts copy in the opposite direction to directly offset
                     </p>
                   </div>
                 </div>
-                <Switch checked={reverseMode} onCheckedChange={setReverseMode} />
+                <div className="flex items-center gap-1.5 text-xs font-medium text-green-500">
+                  <span className="inline-block w-2 h-2 rounded-full bg-green-500" />
+                  Always On
+                </div>
               </div>
             </TabsContent>
 
@@ -547,80 +429,6 @@ export function CreateCopierGroupModal({
               </div>
             </TabsContent>
 
-            {/* ─── TAB 4: Account Protection ──────────────────── */}
-            <TabsContent value="protection" className="mt-0 space-y-5">
-              <div className="space-y-3">
-                <Label className="font-semibold">Account Protection Mode</Label>
-                <Select
-                  value={protectionMode}
-                  onValueChange={v => setProtectionMode(v as AccountProtectionMode)}
-                >
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {protectionOptions.map(opt => (
-                      <SelectItem key={opt.value} value={opt.value}>
-                        {opt.label}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-                <p className="text-xs text-muted-foreground">
-                  When triggered, all positions are closed and copying is stopped on the follower.
-                </p>
-              </div>
-
-              {protectionMode !== 'off' && (
-                <>
-                  <Separator />
-                  <div className="grid grid-cols-2 gap-4">
-                    <div className="space-y-2">
-                      <Label className="text-sm">Minimum Threshold ($)</Label>
-                      <Input
-                        type="number"
-                        value={minThreshold}
-                        onChange={e => setMinThreshold(e.target.value)}
-                        placeholder="e.g. 96000"
-                      />
-                      <p className="text-xs text-muted-foreground">
-                        Close & stop if {protectionMode === 'balance-based' ? 'balance' : 'equity'} falls below
-                      </p>
-                    </div>
-                    <div className="space-y-2">
-                      <Label className="text-sm">Maximum Threshold ($)</Label>
-                      <Input
-                        type="number"
-                        value={maxThreshold}
-                        onChange={e => setMaxThreshold(e.target.value)}
-                        placeholder="e.g. 110000"
-                      />
-                      <p className="text-xs text-muted-foreground">
-                        Close & stop if {protectionMode === 'balance-based' ? 'balance' : 'equity'} rises above
-                      </p>
-                    </div>
-                  </div>
-
-                  {leader && (
-                    <div className="p-3 rounded-lg bg-primary/5 border border-primary/20">
-                      <p className="text-xs text-muted-foreground">
-                        <strong>Tip:</strong> Leader account size is ${Number(leader.account_size).toLocaleString()}.
-                        {leader.max_loss && (
-                          <> Max loss rule: {leader.max_loss}%. Suggested min threshold: $
-                            {Math.round(Number(leader.account_size) * (1 - Number(leader.max_loss) / 100)).toLocaleString()}.
-                          </>
-                        )}
-                        {leader.profit_target && (
-                          <> Profit target: {leader.profit_target}%. Suggested max threshold: $
-                            {Math.round(Number(leader.account_size) * (1 + Number(leader.profit_target) / 100)).toLocaleString()}.
-                          </>
-                        )}
-                      </p>
-                    </div>
-                  )}
-                </>
-              )}
-            </TabsContent>
           </div>
         </Tabs>
 

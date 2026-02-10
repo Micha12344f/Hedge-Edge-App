@@ -1,11 +1,15 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useCallback, useMemo } from "react";
 import { TradingAccount } from "@/hooks/useTradingAccounts";
 import { useVPSMT5Feed } from "@/hooks/useVPSMT5Feed";
+import { useHedgeStats } from "@/hooks/useHedgeStats";
+import { useCopierGroupsContext } from "@/contexts/CopierGroupsContext";
+import { useConnectionsFeed } from "@/hooks/useConnectionsFeed";
 import { getCachedPassword, cachePassword } from "@/lib/mt5-password-cache";
 import { mt5, ctrader, isBridgeAvailable, type TradingPlatform } from "@/lib/local-trading-bridge";
 import type { Position } from "@/lib/local-trading-bridge";
 import type { ConnectionSnapshot, ConnectionStatus as ConnectionStatusType } from "@/types/connections";
 import { getStatusBadgeClass, formatConnectionStatus } from "@/lib/desktop";
+import type { CopierGroup, FollowerConfig, VolumeSizingMode } from "@/types/copier";
 import {
   Sheet,
   SheetContent,
@@ -20,13 +24,19 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { Switch } from "@/components/ui/switch";
+import { Textarea } from "@/components/ui/textarea";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import {
+  Accordion,
+  AccordionContent,
+  AccordionItem,
+  AccordionTrigger,
+} from "@/components/ui/accordion";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import {
   Loader2,
   RefreshCw,
-  TrendingUp,
-  TrendingDown,
-  Wallet,
-  PiggyBank,
   AlertCircle,
   Activity,
   ArrowUpRight,
@@ -39,10 +49,23 @@ import {
   Power,
   PowerOff,
   Archive,
-  Scale,
-  Percent,
+  Settings,
+  Crown,
+  Users,
+  ArrowRightLeft,
+  Repeat2,
+  Info,
+  CircleDot,
+  Pause,
+  AlertTriangle,
+  BarChart3,
+  Hash,
+  ArrowRight,
+  Save,
+  Zap,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { getSuggestedLotMultiplier } from "@/lib/lot-multiplier";
 
 // Type alias for backwards compatibility  
 type MT5Position = Position;
@@ -68,6 +91,123 @@ const calculatePnLPercent = (currentBalance: number, startingBalance: number): n
   return ((currentBalance - startingBalance) / startingBalance) * 100;
 };
 
+// ─── Payout storage (same as DashboardAnalytics) ─────────────────────────────
+interface PayoutEntry {
+  id: string;
+  accountId: string;
+  accountName: string;
+  amount: number;
+  date: string;
+  received: boolean;
+  denied: boolean;
+}
+
+const PAYOUTS_KEY = 'hedge_edge_payouts';
+const getStoredPayouts = (): PayoutEntry[] => {
+  try {
+    const stored = localStorage.getItem(PAYOUTS_KEY);
+    return stored ? JSON.parse(stored) : [];
+  } catch {
+    return [];
+  }
+};
+
+// ─── Copier config constants (same as ConfigureCopierGroupModal) ──────────
+
+// ─── Follower form state (same as ConfigureCopierGroupModal) ──────────────
+
+interface FollowerFormState {
+  volumeSizing: VolumeSizingMode;
+  lotMultiplier: string;
+  reverseMode: boolean;
+  symbolSuffix: string;
+  symbolAliases: string;
+  symbolBlacklist: string;
+  magicNumberFilter: string;
+}
+
+function followerToForm(f: FollowerConfig): FollowerFormState {
+  return {
+    volumeSizing: 'lot-multiplier',
+    lotMultiplier: String(f.lotMultiplier),
+    reverseMode: true, // Always true — this copier only reverses (hedges) trades
+    symbolSuffix: f.symbolSuffix,
+    symbolAliases: f.symbolAliases
+      .map(a => `${a.masterSymbol}=${a.slaveSymbol}${a.lotMultiplier ? `|${a.lotMultiplier}` : ''}`)
+      .join(';'),
+    symbolBlacklist: [
+      ...(f.symbolWhitelist || []).map(s => `+${s}`),
+      ...(f.symbolBlacklist || []).map(s => `-${s}`),
+    ].join(';'),
+    magicNumberFilter: [
+      ...(f.magicNumberWhitelist || []).map(n => `+${n}`),
+      ...(f.magicNumberBlacklist || []).map(n => `-${n}`),
+    ].join(';'),
+  };
+}
+
+function formToFollowerPatch(form: FollowerFormState): Partial<FollowerConfig> {
+  const symbolAliases = form.symbolAliases
+    .split(';')
+    .map(s => s.trim())
+    .filter(Boolean)
+    .map(entry => {
+      const [left, right] = entry.split('=');
+      if (!left || !right) return null;
+      const [slaveSymbol, mult] = right.split('|');
+      return {
+        masterSymbol: left.trim(),
+        slaveSymbol: slaveSymbol.trim(),
+        lotMultiplier: mult ? parseFloat(mult) : undefined,
+      };
+    })
+    .filter(Boolean) as FollowerConfig['symbolAliases'];
+
+  const symbolWhitelist: string[] = [];
+  const symbolBlacklist: string[] = [];
+  form.symbolBlacklist
+    .split(';')
+    .map(s => s.trim())
+    .filter(Boolean)
+    .forEach(entry => {
+      if (entry.startsWith('+')) symbolWhitelist.push(entry.slice(1));
+      else if (entry.startsWith('-')) symbolBlacklist.push(entry.slice(1));
+      else symbolBlacklist.push(entry);
+    });
+
+  // Parse magic number filter
+  const magicNumberWhitelist: number[] = [];
+  const magicNumberBlacklist: number[] = [];
+  form.magicNumberFilter
+    .split(';')
+    .map(s => s.trim())
+    .filter(Boolean)
+    .forEach(entry => {
+      if (entry.startsWith('+')) {
+        const num = parseInt(entry.slice(1));
+        if (!isNaN(num)) magicNumberWhitelist.push(num);
+      } else if (entry.startsWith('-')) {
+        const num = parseInt(entry.slice(1));
+        if (!isNaN(num)) magicNumberBlacklist.push(num);
+      } else {
+        const num = parseInt(entry);
+        if (!isNaN(num)) magicNumberBlacklist.push(num);
+      }
+    });
+
+  return {
+    volumeSizing: 'lot-multiplier' as const,
+    lotMultiplier: parseFloat(form.lotMultiplier) || 1,
+    reverseMode: true, // Always true — this copier only reverses (hedges) trades
+    symbolSuffix: form.symbolSuffix,
+    symbolAliases,
+    symbolWhitelist,
+    symbolBlacklist,
+    magicNumberWhitelist,
+    magicNumberBlacklist,
+  };
+}
+
 interface AccountDetailsModalProps {
   account: TradingAccount | null;
   open: boolean;
@@ -83,6 +223,12 @@ interface AccountDetailsModalProps {
   connectedAccount?: TradingAccount | null;
   /** Connection snapshot for the connected account */
   connectedAccountSnapshot?: ConnectionSnapshot | null;
+  /** All trading accounts (for analytics tile calculations) */
+  allAccounts?: TradingAccount[];
+  /** Copier group for this account's link */
+  copierGroup?: CopierGroup | null;
+  /** Callback to save copier group changes */
+  onSaveCopierGroup?: (updated: CopierGroup) => void;
 }
 
 export function AccountDetailsModal({
@@ -95,6 +241,9 @@ export function AccountDetailsModal({
   onDisconnect,
   connectedAccount,
   connectedAccountSnapshot,
+  allAccounts = [],
+  copierGroup,
+  onSaveCopierGroup,
 }: AccountDetailsModalProps) {
   // Password state for accounts without cached password
   const [password, setPassword] = useState("");
@@ -107,6 +256,136 @@ export function AccountDetailsModal({
   
   // File-based EA status - when true, we can connect without password
   const [hasFileBasedEA, setHasFileBasedEA] = useState(false);
+
+  // Active tab for the modal content
+  const [activeModalTab, setActiveModalTab] = useState<'analytics' | 'config'>('analytics');
+
+  // ── Copier group configuration state ──────────────────────
+  const [groupName, setGroupName] = useState('');
+  const [leaderSuffixRemove, setLeaderSuffixRemove] = useState('');
+  const [followerForms, setFollowerForms] = useState<Record<string, FollowerFormState>>({});
+  const [expandedFollower, setExpandedFollower] = useState<string>('');
+
+  // Initialise copier config state when group changes
+  useEffect(() => {
+    if (!copierGroup) return;
+    setGroupName(copierGroup.name);
+    setLeaderSuffixRemove(copierGroup.leaderSymbolSuffixRemove || '');
+    const forms: Record<string, FollowerFormState> = {};
+    copierGroup.followers.forEach(f => {
+      forms[f.id] = followerToForm(f);
+    });
+    setFollowerForms(forms);
+    setExpandedFollower(copierGroup.followers[0]?.id || '');
+  }, [copierGroup]);
+
+  // Compute suggested lot multiplier from the leader account's costs
+  const lotSuggestion = useMemo(() => {
+    if (!copierGroup || !allAccounts.length) return null;
+    const leaderAccount = allAccounts.find(a => a.id === copierGroup.leaderAccountId);
+    if (!leaderAccount) return null;
+    const result = getSuggestedLotMultiplier(leaderAccount, allAccounts);
+    return result.suggested > 0 ? result : null;
+  }, [copierGroup, allAccounts]);
+
+  const updateFollower = useCallback(
+    (followerId: string, patch: Partial<FollowerFormState>) => {
+      setFollowerForms(prev => ({
+        ...prev,
+        [followerId]: { ...prev[followerId], ...patch },
+      }));
+    },
+    [],
+  );
+
+  const handleSaveCopierConfig = () => {
+    if (!copierGroup || !onSaveCopierGroup) return;
+    const updatedFollowers = copierGroup.followers.map(f => {
+      const form = followerForms[f.id];
+      if (!form) return f;
+      return { ...f, ...formToFollowerPatch(form) };
+    });
+    const updated: CopierGroup = {
+      ...copierGroup,
+      name: groupName.trim() || copierGroup.name,
+      leaderSymbolSuffixRemove: leaderSuffixRemove,
+      followers: updatedFollowers,
+      updatedAt: new Date().toISOString(),
+    };
+    onSaveCopierGroup(updated);
+  };
+
+  // ── Analytics tile calculations ───────────────────────────
+  const payouts = useMemo(() => getStoredPayouts(), [open]);
+
+  const activeAccounts = useMemo(() => allAccounts.filter(a => !a.is_archived), [allAccounts]);
+  const propAccounts = useMemo(() => activeAccounts.filter(a => a.phase === 'funded' || a.phase === 'evaluation'), [activeAccounts]);
+  const hedgeAccounts = useMemo(() => activeAccounts.filter(a => a.phase === 'live'), [activeAccounts]);
+
+  // Copier groups + live snapshots for hedge P/L computation
+  const { groups: copierGroups } = useCopierGroupsContext();
+  const { getSnapshot } = useConnectionsFeed({ autoStart: true });
+  const { getAccountHedgeStats } = useHedgeStats(allAccounts, copierGroups, getSnapshot);
+
+  const accountHedgeStats = useMemo(() => {
+    if (!account || account.phase === 'live') {
+      return { hedgePnL: 0, expectedHedgePnL: 0, hedgeDiscrepancy: 0 };
+    }
+    return getAccountHedgeStats(account);
+  }, [account, getAccountHedgeStats]);
+
+  const selectedAccountProportionalHedgePnL = accountHedgeStats.hedgePnL;
+  const selectedAccountHedgeDiscrepancy = accountHedgeStats.hedgeDiscrepancy;
+
+  const totalChallengeFees = useMemo(() => {
+    const allPropAccounts = allAccounts.filter(a => a.phase !== 'live');
+    return allPropAccounts
+      .filter(a => !a.previous_account_id)
+      .reduce((sum, acc) => sum + (Number(acc.evaluation_fee) || 0), 0);
+  }, [allAccounts]);
+
+  const selectedAccountChallengeFee = useMemo(() => {
+    if (!account || account.phase === 'live') return 0;
+    let current = account;
+    while (current.previous_account_id) {
+      const prev = allAccounts.find(a => a.id === current.previous_account_id);
+      if (prev) current = prev;
+      else break;
+    }
+    return Number(current.evaluation_fee) || 0;
+  }, [account, allAccounts]);
+
+  const totalReceivedPayouts = useMemo(() => {
+    return payouts.filter(p => p.received).reduce((sum, p) => sum + p.amount, 0);
+  }, [payouts]);
+
+  const selectedAccountPayouts = useMemo(() => {
+    if (!account) return 0;
+    return payouts
+      .filter(p => p.received && p.accountId === account.id)
+      .reduce((sum, p) => sum + p.amount, 0);
+  }, [account, payouts]);
+
+  const totalPnLValue = useMemo(() => {
+    if (!account) return 0;
+    if (account.phase === 'funded') {
+      return selectedAccountPayouts - (Math.abs(selectedAccountProportionalHedgePnL) + selectedAccountChallengeFee + selectedAccountHedgeDiscrepancy);
+    }
+    return 0;
+  }, [account, selectedAccountPayouts, selectedAccountProportionalHedgePnL, selectedAccountChallengeFee, selectedAccountHedgeDiscrepancy]);
+
+  const dollarsToTarget = useMemo(() => {
+    if (!account || account.phase !== 'evaluation') return 0;
+    const profitTarget = (Number(account.profit_target) || 0) / 100 * (Number(account.account_size) || 0);
+    const currentPnLVal = Number(account.pnl) || 0;
+    return profitTarget - currentPnLVal;
+  }, [account]);
+
+  const roiValue = useMemo(() => {
+    if (!account || account.phase !== 'funded') return 0;
+    const costs = Math.abs(selectedAccountProportionalHedgePnL) + selectedAccountChallengeFee + selectedAccountHedgeDiscrepancy;
+    return costs !== 0 ? (selectedAccountPayouts / Math.abs(costs)) * 100 : 0;
+  }, [account, selectedAccountProportionalHedgePnL, selectedAccountChallengeFee, selectedAccountHedgeDiscrepancy, selectedAccountPayouts]);
 
   // Get the appropriate bridge based on platform
   const getBridge = (platform: string | null | undefined) => {
@@ -421,7 +700,222 @@ export function AccountDetailsModal({
 
         <ScrollArea className="flex-1 mt-4">
           <div className="space-y-4 pr-4">
+
+            {/* ── Analytics Tiles + Config Tabs (funded/evaluation only) ── */}
+            {account && (account.phase === 'funded' || account.phase === 'evaluation') && allAccounts.length > 0 && (
+              <>
+                {/* Analytics Tiles */}
+                <div className={`grid gap-3 ${account.phase === 'evaluation' ? 'grid-cols-2 sm:grid-cols-4' : 'grid-cols-2 sm:grid-cols-5'}`}>
+                  {/* Total P/L - funded only */}
+                  {account.phase === 'funded' && (
+                    <div className={`flex flex-col justify-between p-3 rounded-lg bg-card border ${
+                      account.phase === 'funded' ? 'border-green-500/50 shadow-[0_0_10px_rgba(34,197,94,0.1)]' : 'border-yellow-500/50 shadow-[0_0_10px_rgba(234,179,8,0.1)]'
+                    }`}>
+                      <h3 className="text-xs font-medium text-muted-foreground mb-1">Total P/L</h3>
+                      <span className={`text-lg font-semibold ${totalPnLValue >= 0 ? 'text-primary' : 'text-destructive'}`}>
+                        {formatCurrency(totalPnLValue)}
+                      </span>
+                    </div>
+                  )}
+
+                  {/* Hedge P/L */}
+                  <div className={`flex flex-col justify-between p-3 rounded-lg bg-card border ${
+                    account.phase === 'funded' ? 'border-green-500/50 shadow-[0_0_10px_rgba(34,197,94,0.1)]' : 'border-yellow-500/50 shadow-[0_0_10px_rgba(234,179,8,0.1)]'
+                  }`}>
+                    <h3 className="text-xs font-medium text-muted-foreground mb-1">Hedge P/L</h3>
+                    <span className={`text-lg font-semibold ${selectedAccountProportionalHedgePnL >= 0 ? 'text-primary' : 'text-destructive'}`}>
+                      {formatCurrency(selectedAccountProportionalHedgePnL)}
+                    </span>
+                  </div>
+
+                  {/* Prop balance */}
+                  <div className={`flex flex-col justify-between p-3 rounded-lg bg-card border ${
+                    account.phase === 'funded' ? 'border-green-500/50 shadow-[0_0_10px_rgba(34,197,94,0.1)]' : 'border-yellow-500/50 shadow-[0_0_10px_rgba(234,179,8,0.1)]'
+                  }`}>
+                    <h3 className="text-xs font-medium text-muted-foreground mb-1">Prop balance</h3>
+                    <span className={`text-lg font-semibold ${(Number(account.pnl) || 0) >= 0 ? 'text-primary' : 'text-destructive'}`}>
+                      {formatCurrency(Number(account.pnl) || 0)}
+                    </span>
+                  </div>
+
+                  {/* $ to Target / ROI */}
+                  <div className={`flex flex-col justify-between p-3 rounded-lg bg-card border ${
+                    account.phase === 'funded' ? 'border-green-500/50 shadow-[0_0_10px_rgba(34,197,94,0.1)]' : 'border-yellow-500/50 shadow-[0_0_10px_rgba(234,179,8,0.1)]'
+                  }`}>
+                    <h3 className="text-xs font-medium text-muted-foreground mb-1">
+                      {account.phase === 'evaluation' ? '$ to Target' : 'ROI'}
+                    </h3>
+                    {account.phase === 'evaluation' ? (
+                      <span className={`text-lg font-semibold ${dollarsToTarget <= 0 ? 'text-primary' : 'text-yellow-400'}`}>
+                        {dollarsToTarget <= 0 ? 'Target Reached!' : formatCurrency(dollarsToTarget)}
+                      </span>
+                    ) : (
+                      <span className={`text-lg font-semibold ${roiValue >= 0 ? 'text-primary' : 'text-destructive'}`}>
+                        {roiValue.toFixed(2)}%
+                      </span>
+                    )}
+                  </div>
+
+                  {/* Hedge Discrepancy */}
+                  <div className={`flex flex-col justify-between p-3 rounded-lg bg-card border ${
+                    account.phase === 'funded' ? 'border-green-500/50 shadow-[0_0_10px_rgba(34,197,94,0.1)]' : 'border-yellow-500/50 shadow-[0_0_10px_rgba(234,179,8,0.1)]'
+                  }`}>
+                    <h3 className="text-xs font-medium text-muted-foreground mb-1">Hedge Discrepancy</h3>
+                    <span className={`text-lg font-semibold ${Math.abs(selectedAccountHedgeDiscrepancy) < 100 ? 'text-primary' : 'text-secondary'}`}>
+                      {formatCurrency(selectedAccountHedgeDiscrepancy)}
+                    </span>
+                  </div>
+                </div>
+
+                {/* Tab switcher: Account Details vs Link Configuration */}
+                {copierGroup && (
+                  <Tabs value={activeModalTab} onValueChange={(v) => setActiveModalTab(v as 'analytics' | 'config')} className="w-full">
+                    <TabsList className="grid w-full grid-cols-2 bg-muted/50">
+                      <TabsTrigger value="analytics" className="text-xs data-[state=active]:bg-primary/20 data-[state=active]:text-primary">
+                        <Activity className="h-3.5 w-3.5 mr-1" />
+                        Account Details
+                      </TabsTrigger>
+                      <TabsTrigger value="config" className="text-xs data-[state=active]:bg-primary/20 data-[state=active]:text-primary">
+                        <Settings className="h-3.5 w-3.5 mr-1" />
+                        Link Configuration
+                      </TabsTrigger>
+                    </TabsList>
+
+                    {/* ── Link Configuration Tab (embedded copier settings) ── */}
+                    <TabsContent value="config" className="mt-3 space-y-4">
+                      {/* Group Name */}
+                      <div className="space-y-2">
+                        <Label className="font-semibold text-sm">Group Name</Label>
+                        <Input
+                          value={groupName}
+                          onChange={e => setGroupName(e.target.value)}
+                          placeholder="e.g. FTMO 100k → IC Markets Hedge"
+                          className="text-sm"
+                        />
+                      </div>
+
+                      <Separator />
+
+                      {/* Leader Info (read-only) */}
+                      <div className="space-y-2">
+                        <div className="flex items-center gap-2">
+                          <Crown className="h-4 w-4 text-yellow-500" />
+                          <Label className="font-semibold text-sm">Leader Account (Master)</Label>
+                        </div>
+                        <div className="p-3 rounded-lg border border-border/40 bg-muted/20">
+                          <div className="flex items-center gap-2">
+                            <CircleDot className="h-4 w-4 text-green-500" />
+                            <span className="font-medium text-foreground text-sm">{copierGroup.leaderAccountName}</span>
+                            <Badge variant="outline" className={`text-[10px] ${
+                              copierGroup.leaderPhase === 'evaluation' ? 'bg-yellow-500/20 text-yellow-500 border-yellow-500/30' :
+                              copierGroup.leaderPhase === 'funded' ? 'bg-primary/20 text-primary border-primary/30' :
+                              'bg-blue-500/20 text-blue-500 border-blue-500/30'
+                            }`}>
+                              {copierGroup.leaderPhase === 'evaluation' ? 'EVAL' : copierGroup.leaderPhase === 'funded' ? 'FUNDED' : 'HEDGE'}
+                            </Badge>
+                            <span className="text-xs text-muted-foreground">({copierGroup.leaderPlatform})</span>
+                          </div>
+                        </div>
+                      </div>
+
+                      <Separator />
+
+                      {/* Leader Symbol Suffix Remove */}
+                      <div className="space-y-2">
+                        <div className="flex items-center gap-2">
+                          <Label className="font-semibold text-sm">Remove Symbol Suffix (Leader)</Label>
+                          <TooltipProvider>
+                            <Tooltip>
+                              <TooltipTrigger>
+                                <Info className="h-3.5 w-3.5 text-muted-foreground" />
+                              </TooltipTrigger>
+                              <TooltipContent className="max-w-xs">
+                                <p>If the leader account has symbol suffixes (e.g. EURUSD_x), enter the suffix here to remove it before sending to followers.</p>
+                              </TooltipContent>
+                            </Tooltip>
+                          </TooltipProvider>
+                        </div>
+                        <Input
+                          value={leaderSuffixRemove}
+                          onChange={e => setLeaderSuffixRemove(e.target.value)}
+                          placeholder="e.g. _x or .raw (leave blank if none)"
+                          className="text-sm"
+                        />
+                        <p className="text-xs text-muted-foreground">
+                          Strips this suffix from all leader symbols before processing on followers.
+                        </p>
+                      </div>
+
+                      <Separator />
+
+                      {/* Per-follower settings */}
+                      <div className="space-y-2">
+                        <div className="flex items-center gap-2">
+                          <Users className="h-4 w-4 text-primary" />
+                          <Label className="font-semibold text-sm">Follower Settings</Label>
+                        </div>
+
+                        <Accordion
+                          type="single"
+                          collapsible
+                          value={expandedFollower}
+                          onValueChange={setExpandedFollower}
+                        >
+                          {copierGroup.followers.map(follower => {
+                            const form = followerForms[follower.id];
+                            if (!form) return null;
+
+                            return (
+                              <AccordionItem key={follower.id} value={follower.id} className="border border-border/40 rounded-lg mb-2 overflow-hidden">
+                                <AccordionTrigger className="px-3 py-2 hover:no-underline hover:bg-muted/20">
+                                  <div className="flex items-center gap-2 text-left">
+                                    <CircleDot className="h-3.5 w-3.5 text-green-500" />
+                                    <span className="font-medium text-sm">{follower.accountName}</span>
+                                    <Badge variant="outline" className={`text-[10px] ${
+                                      follower.phase === 'evaluation' ? 'bg-yellow-500/20 text-yellow-500 border-yellow-500/30' :
+                                      follower.phase === 'funded' ? 'bg-primary/20 text-primary border-primary/30' :
+                                      'bg-blue-500/20 text-blue-500 border-blue-500/30'
+                                    }`}>
+                                      {follower.phase === 'evaluation' ? 'EVAL' : follower.phase === 'funded' ? 'FUNDED' : 'HEDGE'}
+                                    </Badge>
+                                    {form.reverseMode && (
+                                      <Badge variant="outline" className="text-[10px] bg-purple-500/10 text-purple-500 border-purple-500/30">
+                                        <Repeat2 className="h-3 w-3 mr-0.5" />
+                                        Reverse
+                                      </Badge>
+                                    )}
+                                  </div>
+                                </AccordionTrigger>
+                                <AccordionContent className="px-3 pb-3 pt-1">
+                                  <InlineFollowerConfigPanel
+                                    follower={follower}
+                                    form={form}
+                                    onUpdate={(patch) => updateFollower(follower.id, patch)}
+                                    lotSuggestion={lotSuggestion}
+                                  />
+                                </AccordionContent>
+                              </AccordionItem>
+                            );
+                          })}
+                        </Accordion>
+                      </div>
+
+                      {/* Save Button */}
+                      <Button onClick={handleSaveCopierConfig} className="w-full">
+                        <Save className="h-4 w-4 mr-1" />
+                        Save Configuration
+                      </Button>
+                    </TabsContent>
+
+                    <TabsContent value="analytics" className="mt-0" />
+                  </Tabs>
+                )}
+              </>
+            )}
             
+            {/* ── Original Account Details Content (hidden when config tab active) ── */}
+            {!(account && (account.phase === 'funded' || account.phase === 'evaluation') && copierGroup && activeModalTab === 'config') && (
+            <>
             {/* Password Required - only show if no file-based EA available */}
             {needsPassword && !hasFileBasedEA && (terminalStatus === 'running' || connectionSnapshot) && (
               <Card>
@@ -469,190 +963,6 @@ export function AccountDetailsModal({
                 </CardContent>
               </Card>
             )}
-
-            {/* Live Metrics from Connection Supervisor */}
-            {hasSupervisedMetrics && connectionSnapshot?.metrics && (
-              <>
-                <div className="grid grid-cols-2 gap-3">
-                  <Card>
-                    <CardHeader className="pb-1 pt-3 px-3">
-                      <CardTitle className="text-xs font-medium text-muted-foreground flex items-center gap-1">
-                        <Wallet className="h-3 w-3" />
-                        Balance
-                      </CardTitle>
-                    </CardHeader>
-                    <CardContent className="px-3 pb-3">
-                      <div className="text-xl font-bold">
-                        {formatCurrency(connectionSnapshot.metrics.balance)}
-                      </div>
-                    </CardContent>
-                  </Card>
-
-                  <Card>
-                    <CardHeader className="pb-1 pt-3 px-3">
-                      <CardTitle className="text-xs font-medium text-muted-foreground flex items-center gap-1">
-                        <PiggyBank className="h-3 w-3" />
-                        Equity
-                      </CardTitle>
-                    </CardHeader>
-                    <CardContent className="px-3 pb-3">
-                      <div className="text-xl font-bold">
-                        {formatCurrency(connectionSnapshot.metrics.equity)}
-                      </div>
-                      {connectionSnapshot.metrics.freeMargin != null && (
-                        <p className="text-xs text-muted-foreground">
-                          Free: {formatCurrency(connectionSnapshot.metrics.freeMargin)}
-                        </p>
-                      )}
-                    </CardContent>
-                  </Card>
-
-                  <Card>
-                    <CardHeader className="pb-1 pt-3 px-3">
-                      <CardTitle className="text-xs font-medium text-muted-foreground flex items-center gap-1">
-                        <Activity className="h-3 w-3" />
-                        Used Margin
-                      </CardTitle>
-                    </CardHeader>
-                    <CardContent className="px-3 pb-3">
-                      <div className="text-xl font-bold">
-                        {formatCurrency(connectionSnapshot.metrics.margin ?? 0)}
-                      </div>
-                      {connectionSnapshot.metrics.marginLevel != null && (
-                        <p className="text-xs text-muted-foreground">
-                          Level: {connectionSnapshot.metrics.marginLevel.toFixed(1)}%
-                        </p>
-                      )}
-                    </CardContent>
-                  </Card>
-
-                  <Card className={connectionSnapshot.metrics.profit >= 0 ? "bg-primary/5" : "bg-red-500/5"}>
-                    <CardHeader className="pb-1 pt-3 px-3">
-                      <CardTitle className="text-xs font-medium text-muted-foreground flex items-center gap-1">
-                        {connectionSnapshot.metrics.profit >= 0 ? (
-                          <TrendingUp className="h-3 w-3 text-primary" />
-                        ) : (
-                          <TrendingDown className="h-3 w-3 text-red-500" />
-                        )}
-                        Floating P&L
-                      </CardTitle>
-                    </CardHeader>
-                    <CardContent className="px-3 pb-3">
-                      <div className={`text-xl font-bold ${connectionSnapshot.metrics.profit >= 0 ? "text-primary" : "text-red-500"}`}>
-                        {connectionSnapshot.metrics.profit >= 0 ? '+' : ''}{formatCurrency(connectionSnapshot.metrics.profit)}
-                      </div>
-                    </CardContent>
-                  </Card>
-                </div>
-
-              </>
-            )}
-
-            {/* Hedge Analytics Section — shows Prop P&L, Hedge P&L, Discrepancy */}
-            {connectedAccount && account && (() => {
-              const isPropAccount = account.phase === 'evaluation' || account.phase === 'funded';
-              const propAccount = isPropAccount ? account : connectedAccount;
-              const hedgeAccount = isPropAccount ? connectedAccount : account;
-
-              // Prop P&L
-              const propSize = Number(propAccount.account_size) || 0;
-              const propBalance = Number(propAccount.current_balance) || propSize;
-              const propPnL = propBalance - propSize;
-              const propPnLPercent = propSize > 0 ? (propPnL / propSize) * 100 : 0;
-
-              // Hedge P&L — the P&L on the hedge account from copied trades
-              const hedgeSize = Number(hedgeAccount.account_size) || 0;
-              const hedgeBalance = Number(hedgeAccount.current_balance) || hedgeSize;
-              // Use live snapshot if available
-              const hedgeLiveBalance = isPropAccount
-                ? (connectedAccountSnapshot?.metrics?.balance ?? hedgeBalance)
-                : (connectionSnapshot?.metrics?.balance ?? hedgeBalance);
-              const hedgePnL = hedgeLiveBalance - hedgeSize;
-              const hedgePnLPercent = hedgeSize > 0 ? (hedgePnL / hedgeSize) * 100 : 0;
-
-              // Challenge / Evaluation fee
-              const challengeFee = Number(propAccount.evaluation_fee) || 0;
-
-              // Hedge Discrepancy = Prop P&L + Hedge P&L - Challenge Fee
-              // Positive = net profit, Negative = net cost
-              const hedgeDiscrepancy = propPnL + hedgePnL - challengeFee;
-              const isDiscrepancyPositive = hedgeDiscrepancy >= 0;
-
-              return (
-                <Card className="border-border/50">
-                  <CardHeader className="pb-2">
-                    <CardTitle className="text-sm flex items-center gap-2">
-                      <Scale className="h-4 w-4 text-muted-foreground" />
-                      Hedge Analytics
-                    </CardTitle>
-                  </CardHeader>
-                  <CardContent className="space-y-3">
-                    {/* Prop P&L */}
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-2">
-                        <div className={`w-2 h-2 rounded-full ${propPnL >= 0 ? 'bg-primary' : 'bg-red-500'}`} />
-                        <span className="text-sm text-muted-foreground">Prop P&L</span>
-                        <span className="text-xs text-muted-foreground/60">({propAccount.account_name})</span>
-                      </div>
-                      <div className="text-right">
-                        <span className={`text-sm font-semibold ${propPnL >= 0 ? 'text-primary' : 'text-red-500'}`}>
-                          {propPnL >= 0 ? '+' : ''}{formatCurrency(propPnL)}
-                        </span>
-                        <span className={`text-xs ml-1 ${propPnL >= 0 ? 'text-primary/70' : 'text-red-500/70'}`}>
-                          ({propPnLPercent >= 0 ? '+' : ''}{propPnLPercent.toFixed(2)}%)
-                        </span>
-                      </div>
-                    </div>
-
-                    {/* Hedge P&L */}
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-2">
-                        <div className={`w-2 h-2 rounded-full ${hedgePnL >= 0 ? 'bg-blue-400' : 'bg-red-500'}`} />
-                        <span className="text-sm text-muted-foreground">Hedge P&L</span>
-                        <span className="text-xs text-muted-foreground/60">({hedgeAccount.account_name})</span>
-                      </div>
-                      <div className="text-right">
-                        <span className={`text-sm font-semibold ${hedgePnL >= 0 ? 'text-blue-400' : 'text-red-500'}`}>
-                          {hedgePnL >= 0 ? '+' : ''}{formatCurrency(hedgePnL)}
-                        </span>
-                        <span className={`text-xs ml-1 ${hedgePnL >= 0 ? 'text-blue-400/70' : 'text-red-500/70'}`}>
-                          ({hedgePnLPercent >= 0 ? '+' : ''}{hedgePnLPercent.toFixed(2)}%)
-                        </span>
-                      </div>
-                    </div>
-
-                    {/* Challenge Fee (if applicable) */}
-                    {challengeFee > 0 && (
-                      <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-2">
-                          <div className="w-2 h-2 rounded-full bg-yellow-500" />
-                          <span className="text-sm text-muted-foreground">Challenge Fee</span>
-                        </div>
-                        <span className="text-sm font-semibold text-yellow-500">
-                          -{formatCurrency(challengeFee)}
-                        </span>
-                      </div>
-                    )}
-
-                    <Separator />
-
-                    {/* Hedge Discrepancy */}
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-2">
-                        <Percent className="h-3.5 w-3.5 text-muted-foreground" />
-                        <span className="text-sm font-medium">Hedge Discrepancy</span>
-                      </div>
-                      <span className={`text-lg font-bold ${isDiscrepancyPositive ? 'text-primary' : 'text-red-500'}`}>
-                        {isDiscrepancyPositive ? '+' : ''}{formatCurrency(hedgeDiscrepancy)}
-                      </span>
-                    </div>
-                    <p className="text-xs text-muted-foreground">
-                      Net result: Prop P&L + Hedge P&L{challengeFee > 0 ? ' − Challenge Fee' : ''}
-                    </p>
-                  </CardContent>
-                </Card>
-              );
-            })()}
 
             {terminalStatus === 'not-running' && (
               <Card className="border-orange-500/50">
@@ -738,111 +1048,9 @@ export function AccountDetailsModal({
               </Card>
             )}
 
-            {/* Account Overview Cards (legacy - when not using connection supervisor) */}
-            {!hasSupervisedMetrics && (snapshot || (!needsPassword && !error)) && terminalStatus === 'running' && (
+            {/* Account Info - shown for both supervised connections and legacy */}
+            {(hasSupervisedMetrics || (snapshot || (!needsPassword && !error)) && terminalStatus === 'running') && (
               <>
-                <div className="grid grid-cols-2 gap-3">
-                  <Card>
-                    <CardHeader className="pb-1 pt-3 px-3">
-                      <CardTitle className="text-xs font-medium text-muted-foreground flex items-center gap-1">
-                        <Wallet className="h-3 w-3" />
-                        Balance
-                      </CardTitle>
-                    </CardHeader>
-                    <CardContent className="px-3 pb-3">
-                      <div className="text-xl font-bold">
-                        {snapshot
-                          ? formatCurrency(snapshot.balance, snapshot.currency)
-                          : formatCurrency(Number(account.current_balance) || accountSize)}
-                      </div>
-                      {snapshot && (
-                        <p className="text-xs text-muted-foreground">
-                          Leverage: 1:{snapshot.leverage}
-                        </p>
-                      )}
-                    </CardContent>
-                  </Card>
-
-                  <Card>
-                    <CardHeader className="pb-1 pt-3 px-3">
-                      <CardTitle className="text-xs font-medium text-muted-foreground flex items-center gap-1">
-                        <PiggyBank className="h-3 w-3" />
-                        Equity
-                      </CardTitle>
-                    </CardHeader>
-                    <CardContent className="px-3 pb-3">
-                      <div className="text-xl font-bold">
-                        {snapshot
-                          ? formatCurrency(snapshot.equity, snapshot.currency)
-                          : formatCurrency(Number(account.current_balance) || accountSize)}
-                      </div>
-                      {snapshot && (
-                        <p className="text-xs text-muted-foreground">
-                          Free: {formatCurrency(snapshot.margin_free, snapshot.currency)}
-                        </p>
-                      )}
-                    </CardContent>
-                  </Card>
-
-                  <Card>
-                    <CardHeader className="pb-1 pt-3 px-3">
-                      <CardTitle className="text-xs font-medium text-muted-foreground flex items-center gap-1">
-                        <Activity className="h-3 w-3" />
-                        Used Margin
-                      </CardTitle>
-                    </CardHeader>
-                    <CardContent className="px-3 pb-3">
-                      <div className="text-xl font-bold">
-                        {snapshot
-                          ? formatCurrency(snapshot.margin, snapshot.currency)
-                          : "$0.00"}
-                      </div>
-                      {snapshot && (
-                        <p className="text-xs text-muted-foreground">
-                          Level: {snapshot.margin_level ? `${snapshot.margin_level.toFixed(1)}%` : "N/A"}
-                        </p>
-                      )}
-                    </CardContent>
-                  </Card>
-
-                  <Card className={isProfit ? "bg-primary/5" : "bg-red-500/5"}>
-                    <CardHeader className="pb-1 pt-3 px-3">
-                      <CardTitle className="text-xs font-medium text-muted-foreground flex items-center gap-1">
-                        {isProfit ? (
-                          <TrendingUp className="h-3 w-3 text-primary" />
-                        ) : (
-                          <TrendingDown className="h-3 w-3 text-red-500" />
-                        )}
-                        Total P&L
-                      </CardTitle>
-                    </CardHeader>
-                    <CardContent className="px-3 pb-3">
-                      <div className={`text-xl font-bold ${isProfit ? "text-primary" : "text-red-500"}`}>
-                        {snapshot 
-                          ? formatCurrency(actualPnL, snapshot.currency)
-                          : formatCurrency(actualPnL)}
-                      </div>
-                      <p className={`text-xs ${isProfit ? "text-primary" : "text-red-500"}`}>
-                        {formatPercent(actualPnLPercent)}
-                      </p>
-                    </CardContent>
-                  </Card>
-                </div>
-
-                {/* Floating P&L (unrealized) */}
-                {snapshot && snapshot.profit !== 0 && (
-                  <Card className={snapshot.profit >= 0 ? "bg-primary/5 border-primary/20" : "bg-red-500/5 border-red-500/20"}>
-                    <CardContent className="p-3">
-                      <div className="flex items-center justify-between">
-                        <span className="text-sm text-muted-foreground">Floating P&L (Unrealized)</span>
-                        <span className={`text-lg font-bold ${snapshot.profit >= 0 ? "text-primary" : "text-red-500"}`}>
-                          {formatCurrency(snapshot.profit, snapshot.currency)}
-                        </span>
-                      </div>
-                    </CardContent>
-                  </Card>
-                )}
-
                 {/* Account Info */}
                 <Card>
                   <CardHeader className="pb-2">
@@ -866,6 +1074,25 @@ export function AccountDetailsModal({
                       <span className="text-muted-foreground">Platform</span>
                       <span>{account.platform || "MT5"}</span>
                     </div>
+                    {hasSupervisedMetrics && connectionSnapshot?.metrics && (
+                      <>
+                        <Separator />
+                        <div className="flex justify-between text-sm">
+                          <span className="text-muted-foreground">Balance</span>
+                          <span className="font-medium">{formatCurrency(connectionSnapshot.metrics.balance)}</span>
+                        </div>
+                        <div className="flex justify-between text-sm">
+                          <span className="text-muted-foreground">Equity</span>
+                          <span className="font-medium">{formatCurrency(connectionSnapshot.metrics.equity)}</span>
+                        </div>
+                        <div className="flex justify-between text-sm">
+                          <span className="text-muted-foreground">Profit</span>
+                          <span className={`font-medium ${connectionSnapshot.metrics.profit >= 0 ? 'text-primary' : 'text-destructive'}`}>
+                            {formatCurrency(connectionSnapshot.metrics.profit)}
+                          </span>
+                        </div>
+                      </>
+                    )}
                     {snapshot && (
                       <>
                         <Separator />
@@ -883,6 +1110,8 @@ export function AccountDetailsModal({
                 </Card>
 
               </>
+            )}
+            </>
             )}
           </div>
         </ScrollArea>
@@ -1011,6 +1240,129 @@ function PositionRow({
         >
           {isProfit ? "+" : ""}
           {formatCurrency(position.profit, currency)}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Inline Follower Config Panel (embedded in AccountDetailsModal)
+ * Same settings as ConfigureCopierGroupModal's FollowerConfigPanel
+ */
+function InlineFollowerConfigPanel({
+  follower,
+  form,
+  onUpdate,
+  lotSuggestion,
+}: {
+  follower: FollowerConfig;
+  form: FollowerFormState;
+  onUpdate: (patch: Partial<FollowerFormState>) => void;
+  lotSuggestion?: { suggested: number; costToRecover: number; evalFee: number; archivedHedgePnL: number; maxDrawdownDecimal: number; accountSize: number } | null;
+}) {
+  return (
+    <div className="space-y-4">
+      {/* Volume Sizing — always Lot Multiplier */}
+      <div className="space-y-2">
+        <div className="flex items-center gap-2">
+          <BarChart3 className="h-3.5 w-3.5 text-primary" />
+          <Label className="font-semibold text-xs">Volume Sizing</Label>
+        </div>
+        <div className="space-y-1">
+          <div className="flex items-center justify-between">
+            <Label className="text-xs">Lot Multiplier</Label>
+            {lotSuggestion && lotSuggestion.suggested > 0 && (
+              <TooltipProvider>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <button
+                      type="button"
+                      onClick={() => onUpdate({ lotMultiplier: String(lotSuggestion.suggested) })}
+                      className="flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[9px] font-medium bg-primary/15 text-primary border border-primary/30 hover:bg-primary/25 transition-colors cursor-pointer"
+                    >
+                      <Zap className="h-2.5 w-2.5" />
+                      Suggested: {lotSuggestion.suggested}
+                    </button>
+                  </TooltipTrigger>
+                  <TooltipContent className="max-w-xs">
+                    <p className="text-xs">
+                      Cost to recover: ${lotSuggestion.costToRecover.toLocaleString()}<br />
+                      (Fee: ${lotSuggestion.evalFee.toLocaleString()}
+                      {lotSuggestion.archivedHedgePnL > 0 && <> + Hedge losses: ${lotSuggestion.archivedHedgePnL.toLocaleString()}</>})<br />
+                      ÷ ({(lotSuggestion.maxDrawdownDecimal * 100).toFixed(0)}% × ${lotSuggestion.accountSize.toLocaleString()})
+                      = {lotSuggestion.suggested}
+                    </p>
+                  </TooltipContent>
+                </Tooltip>
+              </TooltipProvider>
+            )}
+          </div>
+          <Input type="number" step="0.01" className="text-xs" value={form.lotMultiplier} onChange={e => onUpdate({ lotMultiplier: e.target.value })} />
+          {lotSuggestion && lotSuggestion.suggested > 0 && (
+            <p className="text-[10px] text-muted-foreground">Auto-sized to recover ${lotSuggestion.costToRecover.toLocaleString()} in costs</p>
+          )}
+        </div>
+      </div>
+
+      <Separator />
+
+      {/* Trade Copy Settings */}
+      <div className="space-y-2">
+        <div className="flex items-center gap-2">
+          <ArrowRightLeft className="h-3.5 w-3.5 text-primary" />
+          <Label className="font-semibold text-xs">Trade Copy Settings</Label>
+        </div>
+        <div className="flex items-center justify-between gap-2 p-2 rounded-lg border border-purple-500/30 bg-purple-500/10">
+          <div className="flex items-center gap-2">
+            <Repeat2 className="h-3.5 w-3.5 text-purple-500" />
+            <div>
+              <Label className="text-xs font-medium">Reverse Mode (Always On)</Label>
+              <p className="text-[10px] text-muted-foreground">All trades reversed for hedging. Cannot be disabled.</p>
+            </div>
+          </div>
+          <Switch checked={true} disabled className="data-[state=checked]:bg-purple-500 opacity-100" />
+        </div>
+      </div>
+
+      <Separator />
+
+      {/* Symbol Configuration */}
+      <div className="space-y-2">
+        <div className="flex items-center gap-2">
+          <Hash className="h-3.5 w-3.5 text-primary" />
+          <Label className="font-semibold text-xs">Symbol Configuration</Label>
+        </div>
+        <div className="space-y-1">
+          <Label className="text-xs">Add Symbol Suffix</Label>
+          <Input className="text-xs" value={form.symbolSuffix} onChange={e => onUpdate({ symbolSuffix: e.target.value })} placeholder="e.g. _x or .raw" />
+        </div>
+        <div className="space-y-1">
+          <Label className="text-xs">Symbol Aliases</Label>
+          <Textarea
+            className="text-xs min-h-[50px] font-mono"
+            value={form.symbolAliases}
+            onChange={e => onUpdate({ symbolAliases: e.target.value })}
+            placeholder="DJ30.cash=US30|0.1;SpotCrude=WTI"
+          />
+        </div>
+        <div className="space-y-1">
+          <Label className="text-xs">Symbol Black/Whitelist</Label>
+          <Input
+            className="text-xs font-mono"
+            value={form.symbolBlacklist}
+            onChange={e => onUpdate({ symbolBlacklist: e.target.value })}
+            placeholder="+BTCUSD;+ETHUSD or -DJ30;-USDJPY"
+          />
+        </div>
+        <div className="space-y-1">
+          <Label className="text-xs">Magic Number Filter</Label>
+          <Input
+            className="text-xs font-mono"
+            value={form.magicNumberFilter}
+            onChange={e => onUpdate({ magicNumberFilter: e.target.value })}
+            placeholder="+111111;+222222;-333333"
+          />
         </div>
       </div>
     </div>

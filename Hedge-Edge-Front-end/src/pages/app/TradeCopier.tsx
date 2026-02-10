@@ -2,10 +2,9 @@ import { useState, useMemo } from 'react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { Input } from '@/components/ui/input';
 import { PageBackground } from '@/components/ui/page-background';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
-import { Switch } from '@/components/ui/switch';
+
 import { CopierGroupCard } from '@/components/dashboard/CopierGroupCard';
 import { CreateCopierGroupModal } from '@/components/dashboard/CreateCopierGroupModal';
 import { ConfigureCopierGroupModal } from '@/components/dashboard/ConfigureCopierGroupModal';
@@ -13,21 +12,16 @@ import { NotificationPreferencesPanel } from '@/components/dashboard/Notificatio
 import { useCopierGroupsContext } from '@/contexts/CopierGroupsContext';
 import type { CopierGroup } from '@/types/copier';
 import {
-  Copy,
   Zap,
   Shield,
   ArrowRightLeft,
   Plus,
   Settings,
-  HelpCircle,
   ArrowRight,
   CheckCircle2,
   Clock,
-  TrendingUp,
   AlertTriangle,
-  Search,
   Activity,
-  Power,
   Users,
 } from 'lucide-react';
 
@@ -41,8 +35,8 @@ const features = [
   },
   {
     icon: Shield,
-    title: 'Account Protection',
-    description: 'Set min/max thresholds to auto-close positions and stop copying',
+    title: 'Smart Symbol Mapping',
+    description: 'Automatic symbol mapping with suffix handling and alias support',
   },
   {
     icon: ArrowRightLeft,
@@ -72,7 +66,7 @@ const setupSteps = [
   {
     step: 3,
     title: 'Configure Risk Settings',
-    description: 'Set volume sizing, lot multipliers, and SL/TP rules',
+    description: 'Set volume sizing and lot multipliers for each follower',
     icon: Shield,
   },
   {
@@ -88,55 +82,43 @@ const setupSteps = [
 const TradeCopier = () => {
   const {
     groups,
-    summary,
     accounts,
     accountsLoading: loading,
     toggleGroup,
     toggleFollower,
-    toggleGlobal,
     deleteGroup,
     addGroup,
     updateGroup,
     activityLog,
     resetCircuitBreaker,
-    globalCopierEnabled,
   } = useCopierGroupsContext();
 
   // Only non-archived accounts are valid for copier groups
   const activeAccounts = useMemo(() => accounts.filter(a => !a.is_archived), [accounts]);
 
-  const [searchQuery, setSearchQuery] = useState('');
   const [createOpen, setCreateOpen] = useState(false);
   const [configureGroup, setConfigureGroup] = useState<CopierGroup | null>(null);
 
-  // ── Handlers (delegate to shared context) ──────────────────────
-
-  const handleToggleGroup = (groupId: string) => toggleGroup(groupId);
-
-  const handleToggleFollower = (groupId: string, followerId: string) => toggleFollower(groupId, followerId);
-
-  const handleDeleteGroup = (groupId: string) => deleteGroup(groupId);
-
-  const handleGroupCreated = (group: CopierGroup) => addGroup(group);
-
-  const handleConfigureSave = (updated: CopierGroup) => updateGroup(updated);
-
-  const handleToggleGlobal = (enabled: boolean) => {
-    toggleGlobal(enabled);
+  const handleToggleGroup = async (groupId: string) => {
+    await toggleGroup(groupId);
   };
 
-  // ── Filtered groups ────────────────────────────────────────────
+  const handleToggleFollower = async (groupId: string, accountId: string) => {
+    await toggleFollower(groupId, accountId);
+  };
 
-  const filteredGroups = useMemo(() => {
-    if (!searchQuery.trim()) return groups;
-    const q = searchQuery.toLowerCase();
-    return groups.filter(
-      g =>
-        g.name.toLowerCase().includes(q) ||
-        g.leaderAccountName.toLowerCase().includes(q) ||
-        g.followers.some(f => f.accountName.toLowerCase().includes(q)),
-    );
-  }, [groups, searchQuery]);
+  const handleDeleteGroup = async (groupId: string) => {
+    await deleteGroup(groupId);
+  };
+
+  const handleGroupCreated = async (group: CopierGroup) => {
+    await addGroup(group);
+  };
+
+  const handleConfigureSave = async (group: CopierGroup) => {
+    await updateGroup(group);
+    setConfigureGroup(null);
+  };
 
   // ── Render ─────────────────────────────────────────────────────
 
@@ -154,57 +136,7 @@ const TradeCopier = () => {
               Copy trades from leader accounts to followers automatically
             </p>
           </div>
-        </div>
-
-        {/* Toolbar */}
-        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 animate-fade-in-up">
-          {/* Left: search + global toggle */}
-          <div className="flex items-center gap-3 w-full sm:w-auto">
-            <div className="relative flex-1 sm:w-64">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-              <Input
-                value={searchQuery}
-                onChange={e => setSearchQuery(e.target.value)}
-                placeholder="Search groups..."
-                className="pl-9"
-              />
-            </div>
-            {groups.length > 0 && (
-              <div className="flex items-center gap-2">
-                <TooltipProvider>
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <div className="flex items-center gap-2">
-                        <Power className={`h-4 w-4 ${globalCopierEnabled ? 'text-green-500' : 'text-muted-foreground'}`} />
-                        <Switch
-                          checked={globalCopierEnabled}
-                          onCheckedChange={handleToggleGlobal}
-                        />
-                      </div>
-                    </TooltipTrigger>
-                    <TooltipContent>
-                      <p>{globalCopierEnabled ? 'All copying active' : 'All copying paused'}</p>
-                    </TooltipContent>
-                  </Tooltip>
-                </TooltipProvider>
-              </div>
-            )}
-          </div>
-
-          {/* Right: actions */}
           <div className="flex items-center gap-2">
-            <TooltipProvider>
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Button variant="outline" size="sm">
-                    <HelpCircle className="h-4 w-4" />
-                  </Button>
-                </TooltipTrigger>
-                <TooltipContent>
-                  <p>Learn how trade copying works</p>
-                </TooltipContent>
-              </Tooltip>
-            </TooltipProvider>
             <TooltipProvider>
               <Tooltip>
                 <TooltipTrigger asChild>
@@ -228,103 +160,16 @@ const TradeCopier = () => {
           </div>
         </div>
 
-        {/* Stats Cards */}
-        {groups.length > 0 && (
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 stagger-children">
-            <TooltipProvider>
-              <Card className="border-border/50 bg-card/50 group hover:border-primary/30 transition-colors">
-                <CardHeader className="flex flex-row items-center justify-between pb-2">
-                  <CardTitle className="text-sm font-medium text-muted-foreground">Active Groups</CardTitle>
-                  <Tooltip>
-                    <TooltipTrigger>
-                      <Copy className="h-4 w-4 text-primary" />
-                    </TooltipTrigger>
-                    <TooltipContent>
-                      <p>Leader-to-follower copy groups running</p>
-                    </TooltipContent>
-                  </Tooltip>
-                </CardHeader>
-                <CardContent>
-                  <p className="text-2xl font-bold text-foreground">{summary.activeGroups}</p>
-                  <p className="text-xs text-muted-foreground mt-1">
-                    {summary.totalGroups} total · {summary.activeFollowers} active follower{summary.activeFollowers !== 1 ? 's' : ''}
-                  </p>
-                </CardContent>
-              </Card>
-
-              <Card className="border-border/50 bg-card/50 group hover:border-primary/30 transition-colors">
-                <CardHeader className="flex flex-row items-center justify-between pb-2">
-                  <CardTitle className="text-sm font-medium text-muted-foreground">Trades Copied</CardTitle>
-                  <Tooltip>
-                    <TooltipTrigger>
-                      <ArrowRightLeft className="h-4 w-4 text-muted-foreground" />
-                    </TooltipTrigger>
-                    <TooltipContent>
-                      <p>Total trades copied today across all groups</p>
-                    </TooltipContent>
-                  </Tooltip>
-                </CardHeader>
-                <CardContent>
-                  <p className="text-2xl font-bold text-foreground">{summary.tradesToday}</p>
-                  <p className="text-xs text-muted-foreground mt-1">Today</p>
-                </CardContent>
-              </Card>
-
-              <Card className="border-border/50 bg-card/50 group hover:border-primary/30 transition-colors">
-                <CardHeader className="flex flex-row items-center justify-between pb-2">
-                  <CardTitle className="text-sm font-medium text-muted-foreground">Avg. Latency</CardTitle>
-                  <Tooltip>
-                    <TooltipTrigger>
-                      <Zap className={`h-4 w-4 ${summary.avgLatency > 0 && summary.avgLatency < 50 ? 'text-green-500' : 'text-muted-foreground'}`} />
-                    </TooltipTrigger>
-                    <TooltipContent>
-                      <p>Average time to copy a trade</p>
-                    </TooltipContent>
-                  </Tooltip>
-                </CardHeader>
-                <CardContent>
-                  <p className="text-2xl font-bold text-foreground">
-                    {summary.avgLatency > 0 ? `${summary.avgLatency}ms` : '-'}
-                  </p>
-                  <p className="text-xs text-muted-foreground mt-1">
-                    {summary.avgLatency > 0 && summary.avgLatency < 50 ? 'Ultra-fast' : 'No data yet'}
-                  </p>
-                </CardContent>
-              </Card>
-
-              <Card className="border-border/50 bg-card/50 group hover:border-primary/30 transition-colors">
-                <CardHeader className="flex flex-row items-center justify-between pb-2">
-                  <CardTitle className="text-sm font-medium text-muted-foreground">Copier P&L</CardTitle>
-                  <Tooltip>
-                    <TooltipTrigger>
-                      <TrendingUp className={`h-4 w-4 ${summary.totalProfit >= 0 ? 'text-green-500' : 'text-red-500'}`} />
-                    </TooltipTrigger>
-                    <TooltipContent>
-                      <p>Combined profit/loss from all copied trades</p>
-                    </TooltipContent>
-                  </Tooltip>
-                </CardHeader>
-                <CardContent>
-                  <p className={`text-2xl font-bold ${summary.totalProfit >= 0 ? 'text-green-500' : 'text-red-500'}`}>
-                    {summary.totalProfit >= 0 ? '+' : ''}${Math.abs(summary.totalProfit).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                  </p>
-                  <p className="text-xs text-muted-foreground mt-1">All time</p>
-                </CardContent>
-              </Card>
-            </TooltipProvider>
-          </div>
-        )}
-
         {/* Copier Group Cards */}
-        {filteredGroups.length > 0 && (
+        {groups.length > 0 && (
           <div className="space-y-3">
             <div className="flex items-center gap-2">
               <Activity className="h-5 w-5 text-primary" />
               <h2 className="text-lg font-semibold text-foreground">Copier Groups</h2>
-              <Badge variant="outline" className="text-xs">{filteredGroups.length}</Badge>
+              <Badge variant="outline" className="text-xs">{groups.length}</Badge>
             </div>
             <div className="space-y-3">
-              {filteredGroups.map(group => (
+              {groups.map(group => (
                 <CopierGroupCard
                   key={group.id}
                   group={group}
@@ -390,14 +235,6 @@ const TradeCopier = () => {
         {/* Notification Preferences */}
         {groups.length > 0 && (
           <NotificationPreferencesPanel />
-        )}
-
-        {/* Empty search result */}
-        {groups.length > 0 && filteredGroups.length === 0 && searchQuery && (
-          <div className="text-center py-12">
-            <Search className="h-8 w-8 text-muted-foreground mx-auto mb-3" />
-            <p className="text-muted-foreground">No groups match "{searchQuery}"</p>
-          </div>
         )}
 
         {/* Empty State */}
@@ -493,6 +330,7 @@ const TradeCopier = () => {
           onOpenChange={(open) => { if (!open) setConfigureGroup(null); }}
           group={configureGroup}
           onSave={handleConfigureSave}
+          accounts={accounts}
         />
       </div>
     </PageBackground>

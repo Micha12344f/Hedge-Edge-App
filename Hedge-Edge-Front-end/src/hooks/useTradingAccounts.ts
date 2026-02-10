@@ -27,6 +27,8 @@ export interface TradingAccount {
   evaluation_fee?: number | null;
   evaluation_phase?: number | null; // 1, 2, 3, or 4
   previous_account_id?: string | null; // Link to archived account for progression tracking
+  /** Hedge P/L at time of archival — used to compute cumulative costs for subsequent phases */
+  archived_hedge_pnl?: number | null;
   last_sync_at: string | null;
   created_at: string;
   updated_at: string;
@@ -49,6 +51,7 @@ export interface CreateAccountData {
   evaluation_fee?: number;
   evaluation_phase?: number;
   previous_account_id?: string;
+  archived_hedge_pnl?: number;
 }
 
 // Local storage key for demo accounts
@@ -151,6 +154,7 @@ export const useTradingAccounts = () => {
         evaluation_fee: data.evaluation_fee || null,
         evaluation_phase: data.evaluation_phase || null,
         previous_account_id: data.previous_account_id || null,
+        archived_hedge_pnl: null,
         last_sync_at: null,
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
@@ -252,11 +256,15 @@ export const useTradingAccounts = () => {
     dispatchAccountsChanged();
   };
 
-  const archiveAccount = async (id: string) => {
+  const archiveAccount = async (id: string, hedgePnL?: number) => {
+    const archiveData: Record<string, unknown> = { is_archived: true, is_active: false };
+    if (hedgePnL !== undefined) {
+      archiveData.archived_hedge_pnl = hedgePnL;
+    }
     if (user && isSupabaseEnabled && supabase) {
       const { error } = await supabase
         .from('trading_accounts')
-        .update({ is_archived: true, is_active: false })
+        .update(archiveData)
         .eq('id', id);
 
       if (error) {
@@ -271,7 +279,7 @@ export const useTradingAccounts = () => {
       // Demo mode
       const localAccounts = getLocalAccounts();
       const updated = localAccounts.map(acc => 
-        acc.id === id ? { ...acc, is_archived: true, is_active: false, updated_at: new Date().toISOString() } : acc
+        acc.id === id ? { ...acc, ...archiveData, updated_at: new Date().toISOString() } : acc
       );
       saveLocalAccounts(updated);
     }

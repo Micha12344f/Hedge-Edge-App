@@ -91,8 +91,8 @@ export function PageBackground({ className, children, showLogo = true }: PageBac
 
       {/* Logo watermark - top right */}
       {showLogo && (
-        <div className="absolute top-6 right-6 pointer-events-none z-10">
-          <TrendingUp className="w-32 h-32 text-primary opacity-20" />
+        <div className="absolute top-6 right-6 pointer-events-none z-[1]">
+          <TrendingUp className="w-32 h-32 text-primary opacity-[0.07]" />
         </div>
       )}
 
