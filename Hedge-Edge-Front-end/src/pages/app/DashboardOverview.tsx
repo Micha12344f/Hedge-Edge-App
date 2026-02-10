@@ -36,7 +36,7 @@ import {
 
 const DashboardOverview = () => {
   const { accounts, loading, createAccount, deleteAccount, archiveAccount, restoreAccount, syncAccountFromMT5 } = useTradingAccounts();
-  const { snapshots, getSnapshot, disconnect, refreshFromEA, manualRefreshAll } = useConnectionsFeed({ autoStart: true, debug: true });
+  const { snapshots, getSnapshot, disconnect, archiveDisconnect, refreshFromEA, manualRefreshAll } = useConnectionsFeed({ autoStart: true, debug: true });
   const { groups: copierGroups } = useCopierGroupsContext();
   const { getAggregateHedgeStats, getAccountHedgeStats } = useHedgeStats(accounts, copierGroups, getSnapshot);
   const [addModalOpen, setAddModalOpen] = useState(false);
@@ -220,11 +220,12 @@ const DashboardOverview = () => {
     }
 
     if (account?.login) {
-      // Disconnect from MT5 first
-      console.log('[DashboardOverview] Disconnecting account before archive:', account.login);
-      await disconnect(account.login, 'Account archived');
+      // Archive-disconnect: fully removes session so health-check won't auto-reconnect
+      // The ZMQ bridge stays alive so the terminal can be re-used for a new account
+      console.log('[DashboardOverview] Archive-disconnecting account:', account.login);
+      await archiveDisconnect(account.login, 'Account archived');
       // Also try with account id in case that's the key used
-      await disconnect(account.id, 'Account archived');
+      await archiveDisconnect(account.id, 'Account archived');
     }
     // Then archive the account (with hedge P/L persisted)
     return archiveAccount(id, hedgePnL);
@@ -306,10 +307,10 @@ const DashboardOverview = () => {
   // Total P&L = P - (H + HD + E)
   const totalPnL = totalReceivedPayouts - (Math.abs(cumulativeHedgePnL) + hedgeDiscrepancy + totalEvalFees);
 
-  // ROI = (P / (|H| + HD + E)) * 100
+  // Net ROI = ((P - C) / C) * 100  where C = |H| + HD + E
   const totalCosts = Math.abs(cumulativeHedgePnL) + hedgeDiscrepancy + totalEvalFees;
   const roiPercent = totalCosts > 0
-    ? (totalReceivedPayouts / totalCosts) * 100
+    ? ((totalReceivedPayouts - totalCosts) / totalCosts) * 100
     : 0;
 
   const evaluationCount = activeAccounts.filter(a => a.phase === 'evaluation').length;
@@ -355,7 +356,7 @@ const DashboardOverview = () => {
       type: 'percent' as const,
       className: roiPercent >= 0 ? 'text-primary' : 'text-destructive',
       iconClassName: 'text-muted-foreground',
-      tooltip: 'ROI = (Payouts Received / (|Hedge P/L| + Hedge Discrepancy + Eval Fees)) × 100',
+      tooltip: 'Net ROI = ((Payouts − Costs) / Costs) × 100.  Costs = |Hedge P/L| + Hedge Discrepancy + Eval Fees',
       colorByValue: true,
     },
     {

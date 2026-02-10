@@ -255,6 +255,7 @@ interface ConnectionsAPI {
   list: () => Promise<ConnectionSnapshotMap>;
   connect: (params: ConnectParams) => Promise<{ success: boolean; error?: string }>;
   disconnect: (params: DisconnectParams) => Promise<{ success: boolean; error?: string }>;
+  archiveDisconnect: (params: DisconnectParams) => Promise<{ success: boolean; error?: string }>;
   status: (accountId: string) => Promise<ConnectionSnapshot | null>;
   refresh: (accountId: string) => Promise<{ success: boolean; error?: string }>;
   reconnect: () => Promise<{ reconnected: number; failed: number }>;

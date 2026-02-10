@@ -605,6 +605,22 @@ const connectionsAPI = {
   },
 
   /**
+   * Archive-disconnect: fully removes the session so the health-check
+   * won't auto-reconnect. The ZMQ bridge stays alive for re-use.
+   */
+  archiveDisconnect: async (params: DisconnectParams): Promise<{ success: boolean; error?: string }> => {
+    if (!params.accountId) {
+      return { success: false, error: 'Account ID is required' };
+    }
+    try {
+      return await ipcRenderer.invoke('connections:archiveDisconnect', params);
+    } catch (err) {
+      console.error('[Preload] connections:archiveDisconnect error:', err);
+      return { success: false, error: err instanceof Error ? err.message : String(err) };
+    }
+  },
+
+  /**
    * Get status for a specific account
    */
   status: async (accountId: string): Promise<ConnectionSnapshot | null> => {

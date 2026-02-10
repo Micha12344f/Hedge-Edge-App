@@ -233,6 +233,28 @@ export function useConnectionsFeed(options?: UseConnectionsFeedOptions): UseConn
   }, [apiAvailable, log]);
 
   /**
+   * Archive-disconnect: fully removes session so the health-check won't
+   * auto-reconnect. The ZMQ bridge stays alive for re-use by a new account.
+   */
+  const archiveDisconnect = useCallback(async (
+    accountId: string,
+    reason?: string
+  ): Promise<{ success: boolean; error?: string }> => {
+    if (!apiAvailable) {
+      return { success: false, error: 'Desktop API not available' };
+    }
+
+    log('Archive-disconnecting account', accountId, reason);
+
+    try {
+      return await connectionSupervisor.archiveDisconnect(accountId, reason);
+    } catch (err) {
+      const errorMsg = err instanceof Error ? err.message : 'Archive disconnect failed';
+      return { success: false, error: errorMsg };
+    }
+  }, [apiAvailable, log]);
+
+  /**
    * Refresh a specific account's data
    */
   const refresh = useCallback(async (accountId: string): Promise<void> => {
@@ -302,6 +324,7 @@ export function useConnectionsFeed(options?: UseConnectionsFeedOptions): UseConn
     getSnapshot,
     connect,
     disconnect,
+    archiveDisconnect,
     refresh,
     refreshAll,
     manualRefreshAll,

@@ -277,6 +277,9 @@ export interface UseConnectionsFeedReturn {
   /** Disconnect an account */
   disconnect: (accountId: string, reason?: string) => Promise<{ success: boolean; error?: string }>;
   
+  /** Archive-disconnect: fully removes session so health-check won't auto-reconnect */
+  archiveDisconnect: (accountId: string, reason?: string) => Promise<{ success: boolean; error?: string }>;
+  
   /** Refresh a specific account's data */
   refresh: (accountId: string) => Promise<void>;
   

@@ -303,16 +303,16 @@ const DashboardAnalytics = () => {
     return profitTarget - currentPnLVal;
   }, [selectedAccount]);
 
-  // ROI calculation
-  // All Accounts: Payouts / |Hedge P/L + Challenge Fees + Hedge Discrepancy|
-  // Funded account: Account Payouts / |proportional Hedge P/L + account challenge fee + account hedge discrepancy|
+  // Net ROI = ((Payouts - Costs) / Costs) × 100
+  // All Accounts: costs = |Hedge P/L| + Challenge Fees + Hedge Discrepancy
+  // Funded account: costs = |proportional Hedge P/L| + account challenge fee + account hedge discrepancy
   // Evaluation account: replaced with $ to Target (handled in rendering)
   const totalCosts = Math.abs(hedgePnL) + totalChallengeFees + hedgeDiscrepancy;
   const selectedAccountCosts = Math.abs(selectedAccountProportionalHedgePnL) + selectedAccountChallengeFee + selectedAccountHedgeDiscrepancy;
   const roi = selectedAccountId === 'all'
-    ? (totalCosts !== 0 ? (totalReceivedPayouts / Math.abs(totalCosts)) * 100 : 0)
+    ? (totalCosts > 0 ? ((totalReceivedPayouts - totalCosts) / totalCosts) * 100 : 0)
     : (selectedAccount?.phase === 'funded'
-      ? (selectedAccountCosts !== 0 ? (selectedAccountPayouts / Math.abs(selectedAccountCosts)) * 100 : 0)
+      ? (selectedAccountCosts > 0 ? ((selectedAccountPayouts - selectedAccountCosts) / selectedAccountCosts) * 100 : 0)
       : 0);
 
   // Calculate totals for the chart header - funded and evaluation account balances (active only)

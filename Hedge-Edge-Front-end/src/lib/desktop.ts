@@ -286,6 +286,26 @@ class ConnectionSupervisor {
   }
 
   /**
+   * Archive-disconnect: fully removes session so health-check won't auto-reconnect.
+   * The ZMQ bridge stays alive so the terminal can be re-discovered for a new account.
+   */
+  async archiveDisconnect(accountId: string, reason?: string): Promise<{ success: boolean; error?: string }> {
+    if (!isConnectionsApiAvailable()) {
+      return { success: false, error: 'Connections API not available' };
+    }
+
+    const result = await window.electronAPI!.connections.archiveDisconnect({ accountId, reason });
+
+    // Refresh state after archive-disconnect
+    const snapshots = await window.electronAPI!.connections.list();
+    this.state.snapshots = snapshots;
+    this.state.lastUpdate = new Date();
+    this.notifyListeners();
+
+    return result;
+  }
+
+  /**
    * Refresh data for a specific account
    */
   async refresh(accountId: string): Promise<{ success: boolean; error?: string }> {

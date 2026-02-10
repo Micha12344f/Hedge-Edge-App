@@ -1087,9 +1087,10 @@ export const AddAccountModal = ({
 
   const renderListeningStep = () => {
     // Filter out accounts that are already connected (match by login + server)
+    // Archived accounts are excluded so their terminal can be re-used
     const existingLoginServers = new Set(
       existingAccounts
-        .filter(acc => acc.login && acc.server)
+        .filter(acc => acc.login && acc.server && !acc.is_archived)
         .map(acc => `${acc.login}@${acc.server}`)
     );
     const availableDetectedAccounts = detectedAccounts.filter(

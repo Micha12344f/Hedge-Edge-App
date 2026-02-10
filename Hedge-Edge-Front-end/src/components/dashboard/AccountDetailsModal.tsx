@@ -384,7 +384,7 @@ export function AccountDetailsModal({
   const roiValue = useMemo(() => {
     if (!account || account.phase !== 'funded') return 0;
     const costs = Math.abs(selectedAccountProportionalHedgePnL) + selectedAccountChallengeFee + selectedAccountHedgeDiscrepancy;
-    return costs !== 0 ? (selectedAccountPayouts / Math.abs(costs)) * 100 : 0;
+    return costs > 0 ? ((selectedAccountPayouts - costs) / costs) * 100 : 0;
   }, [account, selectedAccountProportionalHedgePnL, selectedAccountChallengeFee, selectedAccountHedgeDiscrepancy, selectedAccountPayouts]);
 
   // Get the appropriate bridge based on platform

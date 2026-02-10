@@ -776,6 +776,54 @@ function disconnectAccount(accountId: string, reason?: string): { success: boole
   return { success: true };
 }
 
+/**
+ * Archive-disconnect an account — fully removes the session so the health-check
+ * won't auto-reconnect it.  The ZMQ bridge stays alive so the terminal can be
+ * re-discovered later for a new account via the "Connect Account" modal.
+ */
+function archiveDisconnectAccount(accountId: string, reason?: string): { success: boolean; error?: string } {
+  // Find every session that matches this accountId OR the same login number
+  const keysToRemove: string[] = [];
+  let login: string | undefined;
+
+  for (const [key, session] of connectionSessions) {
+    if (key === accountId || session.accountId === accountId) {
+      keysToRemove.push(key);
+      if (session._credentials?.login) login = session._credentials.login;
+    }
+  }
+
+  // Also search by login if provided as accountId (DashboardOverview calls with login)
+  if (keysToRemove.length === 0) {
+    for (const [key, session] of connectionSessions) {
+      if (session._credentials?.login === accountId) {
+        keysToRemove.push(key);
+        if (session._credentials?.login) login = session._credentials.login;
+      }
+    }
+  }
+
+  if (keysToRemove.length === 0) {
+    console.log(`[Main] archiveDisconnect: No session found for ${accountId}`);
+    return { success: true }; // Not an error — account may not have been connected
+  }
+
+  for (const key of keysToRemove) {
+    console.log(`[Main] archiveDisconnect: Removing session ${key} (reason: ${reason || 'archived'})`);
+    connectionSessions.delete(key);
+    connectionMetrics.delete(key);
+    connectionPositions.delete(key);
+    lastEADataTimestamp.delete(key);
+  }
+
+  // Also clear by login if known
+  if (login) {
+    lastEADataTimestamp.delete(login);
+  }
+
+  return { success: true };
+}
+
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
@@ -2613,6 +2661,20 @@ function setupIpcHandlers() {
     }
 
     return disconnectAccount(p.accountId, p.reason as string | undefined);
+  });
+
+  // Archive-disconnect: fully removes session so health-check won't auto-reconnect
+  ipcMain.handle('connections:archiveDisconnect', (_event, params: unknown) => {
+    if (!params || typeof params !== 'object') {
+      return { success: false, error: 'Invalid parameters' };
+    }
+
+    const p = params as Record<string, unknown>;
+    if (typeof p.accountId !== 'string' || !p.accountId) {
+      return { success: false, error: 'Account ID is required' };
+    }
+
+    return archiveDisconnectAccount(p.accountId, p.reason as string | undefined);
   });
 
   // Get status for a specific account
