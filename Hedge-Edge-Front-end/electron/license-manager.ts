@@ -79,7 +79,9 @@ interface ConnectedAgent {
 // Constants
 // ============================================================================
 
-const LICENSE_API_BASE = 'https://api.hedge-edge.com';
+// Use embedded API server on localhost:3002 (started in main process)
+const LICENSE_VALIDATE_URL = process.env.HEDGE_EDGE_LICENSE_VALIDATE_URL
+  || 'http://localhost:3002/api/validate-license';
 const TOKEN_REFRESH_BUFFER_MS = 5 * 60 * 1000; // Refresh 5 minutes before expiry
 const EXPIRY_WARNING_HOURS = 24; // Warn 24 hours before license expiry
 const DEVICE_CHECK_INTERVAL_MS = 60 * 1000; // Check devices every minute
@@ -199,58 +201,56 @@ export class LicenseManager extends EventEmitter {
     console.log(`[LicenseManager] Validating license for device ${effectiveDeviceId.substring(0, 8)}...`);
 
     try {
-      const response = await fetch(`${LICENSE_API_BASE}/v1/license/validate`, {
+      // Use embedded API server format
+      const body = {
+        license_key: key.toUpperCase(),
+        device_id: effectiveDeviceId,
+        instance_name: `${os.hostname()}-${effectiveDeviceId.substring(0, 6)}`,
+        platform,
+      };
+
+      const response = await fetch(LICENSE_VALIDATE_URL, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           'User-Agent': `HedgeEdge/${app.getVersion()}`,
         },
-        body: JSON.stringify({
-          licenseKey: key.toUpperCase(),
-          deviceId: effectiveDeviceId,
-          platform,
-          version: app.getVersion(),
-        }),
+        body: JSON.stringify(body),
       });
 
       const data = await response.json();
 
       if (!response.ok) {
-        console.log(`[LicenseManager] Validation failed: ${data.message}`);
+        console.log(`[LicenseManager] Validation failed: ${data.message || data.error}`);
         return {
           valid: false,
-          message: data.message || `HTTP ${response.status}`,
+          message: data.message || data.error || `HTTP ${response.status}`,
         };
       }
 
+      const valid = data.valid === true;
       const result: LicenseResult = {
-        valid: data.valid,
+        valid,
         token: data.token,
         ttlSeconds: data.ttlSeconds,
-        message: data.message,
-        plan: data.plan,
-        tier: data.plan, // Map plan to tier
-        expiresAt: data.expiresAt,
+        message: data.message || data.error,
+        plan: data.plan || data.tier,
+        tier: data.plan || data.tier,
+        expiresAt: data.expiresAt || data.expires_at,
         features: data.features,
         email: data.email,
         maxDevices: data.maxDevices,
         currentDevices: data.currentDevices,
       };
 
-      if (result.valid && result.token) {
-        // Cache the validated license
-        this.cacheLicense(result);
+      if (result.valid) {
+        if (result.token) {
+          this.cacheLicense(result);
+          this.scheduleTokenRefresh(result.ttlSeconds || 3600);
+        }
 
-        // Update the license store
         await licenseStore.activate(key);
-
-        // Schedule token refresh
-        this.scheduleTokenRefresh(result.ttlSeconds || 3600);
-
-        // Check for expiry warning
         this.checkExpiryWarning(result.expiresAt);
-
-        // Emit license change event
         this.emitLicenseChange('validated', result);
       }
 
@@ -342,86 +342,23 @@ export class LicenseManager extends EventEmitter {
 
   /**
    * Deactivate a device from the license
+   * TODO: Implement via Creem API /v1/licenses/deactivate
    */
   async deactivateDevice(key: string, deviceId: string): Promise<boolean> {
     console.log(`[LicenseManager] Deactivating device ${deviceId.substring(0, 8)}...`);
-
-    try {
-      const response = await fetch(`${LICENSE_API_BASE}/v1/license/revoke`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'User-Agent': `HedgeEdge/${app.getVersion()}`,
-        },
-        body: JSON.stringify({
-          licenseKey: key.toUpperCase(),
-          deviceId,
-        }),
-      });
-
-      const data = await response.json();
-
-      if (data.success) {
-        console.log('[LicenseManager] Device deactivated successfully');
-        this.emitLicenseChange('device_removed');
-        return true;
-      }
-
-      console.log(`[LicenseManager] Device deactivation failed: ${data.message}`);
-      return false;
-    } catch (error) {
-      console.error('[LicenseManager] Deactivation error:', error);
-      return false;
-    }
+    // Stub: Device deactivation via Creem API not yet implemented
+    console.warn('[LicenseManager] Device deactivation not yet implemented');
+    return false;
   }
 
   /**
    * Get list of registered devices
+   * TODO: Implement via Creem API
    */
   async getRegisteredDevices(): Promise<DeviceInfo[]> {
-    const licenseKey = licenseStore.getLicenseKey();
-    if (!licenseKey) {
-      return [];
-    }
-
-    try {
-      const response = await fetch(`${LICENSE_API_BASE}/v1/license/devices`, {
-        method: 'GET',
-        headers: {
-          'Content-Type': 'application/json',
-          'User-Agent': `HedgeEdge/${app.getVersion()}`,
-          'X-License-Key': licenseKey,
-        },
-      });
-
-      if (!response.ok) {
-        return [];
-      }
-
-      const data = await response.json();
-      const currentDeviceId = this.deviceId;
-
-      // Transform API response to DeviceInfo array
-      const devices: DeviceInfo[] = [];
-      const licenseDevices = data.devices?.[licenseKey] || {};
-
-      for (const [deviceId, info] of Object.entries(licenseDevices)) {
-        const deviceInfo = info as { registered: string; platform: string; version: string; last_seen: string };
-        devices.push({
-          deviceId,
-          platform: deviceInfo.platform as 'desktop' | 'mt5' | 'mt4' | 'ctrader',
-          registeredAt: deviceInfo.registered,
-          lastSeenAt: deviceInfo.last_seen,
-          version: deviceInfo.version,
-          isCurrentDevice: deviceId === currentDeviceId,
-        });
-      }
-
-      return devices;
-    } catch (error) {
-      console.error('[LicenseManager] Failed to get devices:', error);
-      return [];
-    }
+    // Stub: Device listing via Creem API not yet implemented
+    console.warn('[LicenseManager] Device listing not yet implemented');
+    return [];
   }
 
   // ==========================================================================

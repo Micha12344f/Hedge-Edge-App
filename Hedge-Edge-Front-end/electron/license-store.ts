@@ -57,7 +57,14 @@ interface StoredLicenseData {
 // Constants
 // ============================================================================
 
-const LICENSE_API_URL = 'https://api.hedge-edge.com/v1/license/validate';
+// ============================================================================
+// Constants
+// ============================================================================
+
+/**
+ * License validation now happens via the embedded API server (localhost:3002)
+ * This store only handles persistence and format validation
+ */
 const LICENSE_FILE_NAME = 'license.dat';
 const CHECK_INTERVAL_MS = 24 * 60 * 60 * 1000; // 24 hours
 
@@ -198,164 +205,62 @@ export class LicenseStore {
    * Validate license key format
    */
   private isValidFormat(key: string): boolean {
-    // Expected format: XXXX-XXXX-XXXX-XXXX (alphanumeric)
-    return /^[A-Z0-9]{4}-[A-Z0-9]{4}-[A-Z0-9]{4}-[A-Z0-9]{4}$/i.test(key);
+    // Accept 4x4 or 5x5 groups (Creem keys are commonly 5x5)
+    return /^([A-Z0-9]{4}|[A-Z0-9]{5})(-([A-Z0-9]{4}|[A-Z0-9]{5})){3,4}$/i.test(key);
   }
   
   /**
-   * Validate license key with the API
-   */
-  async validateLicense(licenseKey: string): Promise<{
-    success: boolean;
-    info?: LicenseInfo;
-    error?: string;
-  }> {
-    // Format validation
-    if (!this.isValidFormat(licenseKey)) {
-      return {
-        success: false,
-        error: 'Invalid license key format. Expected: XXXX-XXXX-XXXX-XXXX',
-      };
-    }
-    
-    try {
-      const requestBody = {
-        licenseKey,
-        deviceId: this.getDeviceId(),
-        platform: 'desktop',
-        version: app.getVersion(),
-      };
-      
-      console.log('[LicenseStore] Validating license key...');
-      
-      const response = await fetch(LICENSE_API_URL, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'User-Agent': `HedgeEdge/${app.getVersion()}`,
-        },
-        body: JSON.stringify(requestBody),
-      });
-      
-      if (!response.ok) {
-        // Handle HTTP errors
-        if (response.status === 401 || response.status === 403) {
-          return {
-            success: false,
-            error: 'Invalid or expired license key',
-            info: { status: 'invalid', maskedKey: this.maskLicenseKey(licenseKey) },
-          };
-        }
-        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-      }
-      
-      const data: LicenseValidationResponse = await response.json();
-      
-      if (!data.valid) {
-        return {
-          success: false,
-          error: data.message || 'License validation failed',
-          info: {
-            status: 'invalid',
-            maskedKey: this.maskLicenseKey(licenseKey),
-            errorMessage: data.message,
-          },
-        };
-      }
-      
-      // Calculate days remaining
-      const now = new Date();
-      const expiresAt = data.expiresAt ? new Date(data.expiresAt) : null;
-      const daysRemaining = expiresAt 
-        ? Math.max(0, Math.ceil((expiresAt.getTime() - now.getTime()) / (24 * 60 * 60 * 1000)))
-        : undefined;
-      
-      const info: LicenseInfo = {
-        status: daysRemaining === 0 ? 'expired' : 'valid',
-        maskedKey: this.maskLicenseKey(licenseKey),
-        lastChecked: now.toISOString(),
-        nextCheckAt: new Date(now.getTime() + CHECK_INTERVAL_MS).toISOString(),
-        expiresAt: data.expiresAt,
-        daysRemaining,
-        tier: 'pro',
-        plan: data.plan,
-        features: ['trade-copying', 'hedge-detection', 'multi-account'],
-      };
-      
-      return { success: true, info };
-    } catch (error) {
-      console.error('[LicenseStore] License validation error:', error);
-      
-      // Network error - return error state but don't invalidate existing license
-      return {
-        success: false,
-        error: error instanceof Error ? error.message : 'License validation failed',
-        info: {
-          status: 'error',
-          maskedKey: this.maskLicenseKey(licenseKey),
-          errorMessage: 'Unable to reach license server. Check your internet connection.',
-        },
-      };
-    }
-  }
-  
-  /**
-   * Activate a license key
+   * Activate a license key (called after validation by license-manager)
+   * Simply persists the key to storage - validation happens in license-manager
    */
   async activate(licenseKey: string): Promise<{
     success: boolean;
-    info?: LicenseInfo;
     error?: string;
   }> {
     const trimmedKey = licenseKey.trim().toUpperCase();
     
-    // Validate with API
-    const result = await this.validateLicense(trimmedKey);
-    
-    if (result.success && result.info) {
-      // Store the key
-      this.licenseKey = trimmedKey;
-      this.licenseInfo = result.info;
-      
-      // Persist to encrypted storage
-      await this.persistLicense(result.info.tier, result.info.expiresAt);
-      
-      return { success: true, info: result.info };
+    // Format validation only
+    if (!this.isValidFormat(trimmedKey)) {
+      return {
+        success: false,
+        error: 'Invalid license key format',
+      };
     }
     
-    // Validation failed
-    this.licenseInfo = result.info || { status: 'invalid' };
-    return { success: false, error: result.error, info: result.info };
+    // Store the key - mark as valid since activate() is only called after successful validation
+    this.licenseKey = trimmedKey;
+    this.licenseInfo = {
+      status: 'valid',
+      maskedKey: this.maskLicenseKey(trimmedKey),
+    };
+    
+    // Persist to encrypted storage
+    await this.persistLicense();
+    
+    return { success: true };
   }
   
   /**
    * Refresh the current license status
+   * Note: Actual validation happens in license-manager
    */
   async refresh(): Promise<{
     success: boolean;
-    info?: LicenseInfo;
     error?: string;
   }> {
     if (!this.licenseKey) {
       return { success: false, error: 'No license key configured' };
     }
     
-    this.licenseInfo = { ...this.licenseInfo, status: 'checking' } as LicenseInfo;
+    // Update status to checking
+    this.licenseInfo = { 
+      ...this.licenseInfo, 
+      status: 'checking',
+      maskedKey: this.maskLicenseKey(this.licenseKey),
+    } as LicenseInfo;
     
-    const result = await this.validateLicense(this.licenseKey);
-    
-    if (result.success && result.info) {
-      this.licenseInfo = result.info;
-      // Update persisted data
-      await this.persistLicense(result.info.tier, result.info.expiresAt);
-      return { success: true, info: result.info };
-    }
-    
-    // Keep existing info but update status
-    if (result.info) {
-      this.licenseInfo = result.info;
-    }
-    return { success: false, error: result.error, info: result.info };
+    // Actual validation is delegated to license-manager
+    return { success: true };
   }
   
   /**

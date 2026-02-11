@@ -105,6 +105,8 @@ export interface ScanResult {
   curveEnabled?: boolean;
   /** v3+: Server public key for CURVE */
   curveServerKey?: string;
+  /** v4+: Explicit control port for liveness gate (ZMQ PAIR) */
+  controlPort?: number;
 }
 
 export interface PortManagerConfig {
@@ -476,8 +478,17 @@ export class PortManager extends EventEmitter {
       for (const file of jsonFiles) {
         const filePath = path.join(regDirPath, file);
         try {
-          const content = await fs.readFile(filePath, 'utf-8');
-          const cleanContent = content.replace(/^\uFEFF/, '').replace(/\0/g, '').trim();
+          const buffer = await fs.readFile(filePath);
+          let content: string;
+          // Handle MQL5 file encoding (UTF-16 LE BOM = FF FE)
+          if (buffer.length >= 2 && buffer[0] === 0xFF && buffer[1] === 0xFE) {
+            content = buffer.toString('utf16le').substring(1);
+          } else if (buffer.length >= 3 && buffer[0] === 0xEF && buffer[1] === 0xBB && buffer[2] === 0xBF) {
+            content = buffer.toString('utf-8').substring(1);
+          } else {
+            content = buffer.toString('utf-8');
+          }
+          const cleanContent = content.replace(/\0/g, '').trim();
           const reg = JSON.parse(cleanContent);
 
           if (!reg.dataPort && !reg.commandPort) continue;
@@ -568,7 +579,7 @@ export class PortManager extends EventEmitter {
    * @returns Array of ScanResults indicating which are alive
    */
   async discoverLivePorts(
-    candidates: Array<{ dataPort: number; commandPort: number; name: string; source: 'registration' | 'fallback'; role?: 'master' | 'slave'; curveEnabled?: boolean; curveServerKey?: string }>
+    candidates: Array<{ dataPort: number; commandPort: number; controlPort?: number; name: string; source: 'registration' | 'fallback'; role?: 'master' | 'slave'; curveEnabled?: boolean; curveServerKey?: string }>
   ): Promise<ScanResult[]> {
     const results: ScanResult[] = [];
 
@@ -589,6 +600,7 @@ export class PortManager extends EventEmitter {
         terminalId: probe.name,
         dataPort: probe.dataPort,
         commandPort: probe.commandPort,
+        controlPort: probe.controlPort,
         source: probe.source,
         alive: probe.alive,
         reason: probe.reason,

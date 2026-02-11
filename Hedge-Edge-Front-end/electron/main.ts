@@ -45,6 +45,7 @@ import {
 import { detectTerminals, detectTerminalsDeep, launchTerminal } from './terminal-detector.js';
 import { licenseStore } from './license-store.js';
 import { licenseManager } from './license-manager.js';
+import { licenseAPIServer } from './api-server.js';
 import { webRequestProxy } from './webrequest-proxy.js';
 import { portManager } from './port-manager.js';
 import { 
@@ -63,6 +64,7 @@ import {
   type AgentCommand,
 } from './agent-channel-reader.js';
 import { CopierEngine } from './copier-engine.js';
+import { eaControlServer, EAControlServer } from './ea-control-server.js';
 import { dailyLimitTracker, type AccountMetrics as DailyAccountMetrics, type DailyLimitResult } from './daily-limit-tracker.js';
 import {
   SessionManager,
@@ -1188,6 +1190,22 @@ function setupTradingEventForwarding(window: BrowserWindow): void {
   // ━━━ IMMEDIATE: Connection State Changes ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
   agentChannelReader.on('terminalConnected', (terminalId: string) => {
     console.log(`[Main] Terminal connected: ${terminalId}`);
+
+    // ── Open EA control channel (liveness gate) ──────────────────────
+    // Prefer explicit controlPort from registration file, else derive from data/command port
+    const termConfig = agentChannelReader.getTerminalConfig(terminalId);
+    if (termConfig && (termConfig.controlPort || termConfig.dataPort || termConfig.commandPort)) {
+      const controlPort = termConfig.controlPort
+        ?? (termConfig.dataPort
+          ? EAControlServer.controlPortFromDataPort(termConfig.dataPort)
+          : EAControlServer.controlPortFromCommandPort(termConfig.commandPort!));
+      eaControlServer.openChannel(terminalId, controlPort).then(ok => {
+        if (ok) console.log(`[Main] EA control channel opened for ${terminalId} on port ${controlPort}`);
+        else console.warn(`[Main] Failed to open EA control channel for ${terminalId}`);
+      }).catch(err => {
+        console.error(`[Main] EA control channel error for ${terminalId}:`, err);
+      });
+    }
     
     // Immediately try to match this terminal to any disconnected sessions
     // This provides instant reconnection instead of waiting for the next health check cycle
@@ -1234,6 +1252,11 @@ function setupTradingEventForwarding(window: BrowserWindow): void {
   
   agentChannelReader.on('terminalDisconnected', (terminalId: string) => {
     console.log(`[Main] Terminal disconnected: ${terminalId}`);
+
+    // ── Close EA control channel (liveness gate) ─────────────────────
+    eaControlServer.closeChannel(terminalId).catch(err => {
+      console.error(`[Main] EA control channel close error for ${terminalId}:`, err);
+    });
     
     // IMMEDIATELY mark ALL matching sessions as disconnected
     for (const [sessionKey, session] of connectionSessions) {
@@ -1902,6 +1925,11 @@ function setupIpcHandlers() {
         error: error instanceof Error ? error.message : 'Unknown error getting connected accounts' 
       };
     }
+  });
+
+  // ── EA control channel (liveness gate) IPC ─────────────────────────────
+  ipcMain.handle('agent:getControlChannels', () => {
+    return { success: true, data: eaControlServer.getChannelStates() };
   });
 
   // -------------------------------------------------------------------------
@@ -3103,6 +3131,22 @@ function setupIpcHandlers() {
     }
   });
 
+  // Get the actual license key (for copy/display purposes in settings)
+  ipcMain.handle('license:getKey', () => {
+    try {
+      const licenseKey = licenseStore.getLicenseKey();
+      if (!licenseKey) {
+        return { success: false, error: 'No license configured' };
+      }
+      return { success: true, data: licenseKey };
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to get license key',
+      };
+    }
+  });
+
   // Check if secure storage is available
   ipcMain.handle('license:isSecureStorageAvailable', () => {
     return { success: true, data: licenseStore.isEncryptionAvailable() };
@@ -3958,6 +4002,16 @@ app.whenReady().then(async () => {
   } catch (error) {
     console.error('[Main] Failed to initialize license manager:', error);
   }
+
+  // Start embedded license API server (runs on localhost:3002)
+  console.log('[Main] About to start license API server...');
+  try {
+    console.log('[Main] Calling licenseAPIServer.start()');
+    await licenseAPIServer.start();
+    console.log('[Main] License API server initialized');
+  } catch (error) {
+    console.error('[Main] Failed to start license API server:', error);
+  }
   
   // ── Port conflict detection at startup ──────────────────────────────────
   // Check all configured port assignments for collisions before starting
@@ -3998,6 +4052,18 @@ app.whenReady().then(async () => {
     console.error('[Main] Failed to initialize agent supervisor:', error);
   }
   
+  // Configure EA control server (liveness gate)
+  try {
+    const licStatus = licenseStore.getStatus();
+    eaControlServer.configure({
+      appVersion: app.getVersion(),
+      licenseHint: licStatus.maskedKey || '',
+    });
+    console.log('[Main] EA control server configured');
+  } catch (error) {
+    console.error('[Main] Failed to configure EA control server:', error);
+  }
+
   // Auto-reconnect accounts via ZeroMQ (restore connections on restart)
   try {
     await autoReconnectFromZMQ();
@@ -4062,10 +4128,18 @@ app.on('before-quit', async (event) => {
     await webRequestProxy.stop();
     console.log('[Main] WebRequest proxy shutdown complete');
     
+    // Shutdown license API server
+    await licenseAPIServer.stop();
+    console.log('[Main] License API server shutdown complete');
+    
     // Shutdown license manager
     await licenseManager.shutdown();
     console.log('[Main] License manager shutdown complete');
     
+    // Shutdown EA control server (drops all PAIR sockets → EAs disable instantly)
+    await eaControlServer.shutdown();
+    console.log('[Main] EA control server shutdown complete');
+
     // Shutdown copier engine (save correlations)
     if (copierEngine) {
       copierEngine.shutdown();

@@ -399,6 +399,19 @@ const agentAPI = {
   },
 
   /**
+   * Get EA control channel (liveness gate) states
+   */
+  getControlChannels: (): Promise<{ success: boolean; data?: Array<{
+    terminalId: string;
+    controlPort: number;
+    status: 'binding' | 'bound' | 'connected' | 'error' | 'closed';
+    lastEnableSent?: string;
+    error?: string;
+  }> }> => {
+    return ipcRenderer.invoke('agent:getControlChannels');
+  },
+
+  /**
    * Subscribe to agent status changes (polling-based for simplicity)
    * Returns an unsubscribe function
    */
@@ -900,6 +913,13 @@ const licenseAPI = {
    */
   remove: (): Promise<{ success: boolean; error?: string }> => {
     return ipcRenderer.invoke('license:remove');
+  },
+
+  /**
+   * Get the actual license key (for copy/display purposes)
+   */
+  getKey: (): Promise<{ success: boolean; data?: string; error?: string }> => {
+    return ipcRenderer.invoke('license:getKey');
   },
 
   /**

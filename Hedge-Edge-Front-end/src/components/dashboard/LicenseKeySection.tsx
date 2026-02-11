@@ -169,6 +169,8 @@ export function LicenseKeySection({
   // State
   const [licenseKey, setLicenseKey] = useState('');
   const [showKey, setShowKey] = useState(false);
+  const [actualKey, setActualKey] = useState<string | null>(null);
+  const [isFetchingKey, setIsFetchingKey] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -271,18 +273,60 @@ export function LicenseKeySection({
     }
   }, [onRemove, toast]);
 
-  // Copy masked key
-  const copyMaskedKey = async () => {
-    if (licenseInfo?.maskedKey) {
-      await navigator.clipboard.writeText(licenseInfo.maskedKey);
+  // Fetch the actual license key from secure storage
+  const fetchActualKey = useCallback(async (): Promise<string | null> => {
+    if (!isElectron()) return null;
+    
+    setIsFetchingKey(true);
+    try {
+      const result = await window.electronAPI.license.getKey();
+      if (result.success && result.data) {
+        setActualKey(result.data);
+        return result.data;
+      }
+      return null;
+    } catch (err) {
+      console.error('Failed to fetch license key:', err);
+      return null;
+    } finally {
+      setIsFetchingKey(false);
+    }
+  }, []);
+
+  // Toggle show/hide key
+  const handleToggleShowKey = useCallback(async () => {
+    if (!showKey && !actualKey) {
+      // Fetch the key when showing for the first time
+      await fetchActualKey();
+    }
+    setShowKey(!showKey);
+  }, [showKey, actualKey, fetchActualKey]);
+
+  // Copy actual license key
+  const copyLicenseKey = useCallback(async () => {
+    let keyToCopy = actualKey;
+    
+    // If we don't have the actual key yet, fetch it
+    if (!keyToCopy && isElectron()) {
+      keyToCopy = await fetchActualKey();
+    }
+    
+    if (keyToCopy) {
+      await navigator.clipboard.writeText(keyToCopy);
       setCopied(true);
       toast({
         title: "Copied!",
         description: "License key copied to clipboard.",
       });
       setTimeout(() => setCopied(false), 2000);
+    } else {
+      toast({
+        variant: "destructive",
+        title: "Copy Failed",
+        description: "Could not retrieve license key.",
+      });
     }
-  };
+  }, [actualKey, fetchActualKey, toast]);
 
   // Compact view for inline display
   if (compact) {
@@ -359,21 +403,29 @@ export function LicenseKeySection({
                 {licenseInfo?.maskedKey && (
                   <div className="flex items-center gap-2 mt-1">
                     <code className="text-xs bg-background/50 px-2 py-0.5 rounded">
-                      {showKey ? licenseInfo.maskedKey : '••••-••••-••••-••••'}
+                      {showKey && actualKey ? actualKey : (showKey ? licenseInfo.maskedKey : '••••-••••-••••-••••')}
                     </code>
                     <Button
                       variant="ghost"
                       size="sm"
                       className="h-6 w-6 p-0"
-                      onClick={() => setShowKey(!showKey)}
+                      onClick={handleToggleShowKey}
+                      disabled={isFetchingKey}
                     >
-                      {showKey ? <EyeOff className="h-3 w-3" /> : <Eye className="h-3 w-3" />}
+                      {isFetchingKey ? (
+                        <Loader2 className="h-3 w-3 animate-spin" />
+                      ) : showKey ? (
+                        <EyeOff className="h-3 w-3" />
+                      ) : (
+                        <Eye className="h-3 w-3" />
+                      )}
                     </Button>
                     <Button
                       variant="ghost"
                       size="sm"
                       className="h-6 w-6 p-0"
-                      onClick={copyMaskedKey}
+                      onClick={copyLicenseKey}
+                      disabled={isFetchingKey}
                     >
                       {copied ? <Check className="h-3 w-3 text-primary" /> : <Copy className="h-3 w-3" />}
                     </Button>

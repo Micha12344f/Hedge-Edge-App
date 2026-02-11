@@ -70,7 +70,7 @@ export interface ProxyStatus {
 const DEFAULT_CONFIG: WebRequestProxyConfig = {
   port: 9089,
   host: '127.0.0.1',
-  apiBaseUrl: 'https://api.hedge-edge.com',
+  apiBaseUrl: 'https://qgaikasjcfyfjcxezfqk.supabase.co',
   cacheEnabled: true,
   cacheTtlSeconds: 300, // 5 minutes
   offlineModeEnabled: true,

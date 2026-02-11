@@ -325,6 +325,7 @@ interface LicenseAPI {
   activate: (licenseKey: string) => Promise<{ success: boolean; license?: LicenseStatusData; error?: string }>;
   refresh: () => Promise<{ success: boolean; license?: LicenseStatusData; error?: string }>;
   remove: () => Promise<{ success: boolean; error?: string }>;
+  getKey: () => Promise<{ success: boolean; data?: string; error?: string }>;
   isSecureStorageAvailable: () => Promise<{ success: boolean; data?: boolean }>;
   getDevices: () => Promise<{ success: boolean; data?: LicenseDeviceInfo[]; error?: string }>;
   deactivateDevice: (deviceId: string) => Promise<{ success: boolean; error?: string }>;

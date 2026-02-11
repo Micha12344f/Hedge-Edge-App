@@ -480,6 +480,8 @@ export interface EARegistration {
   eventDriven?: boolean;
   /** v3+: Version string e.g. "3.0" */
   version?: string;
+  /** v4+: Explicit control port for liveness gate (ZMQ PAIR).  Falls back to dataPort+2 / commandPort+2 */
+  controlPort?: number;
 }
 
 export interface TerminalConfig {
@@ -488,6 +490,7 @@ export interface TerminalConfig {
   dataPath?: string;      // For file mode (MT5)
   dataPort?: number;      // For ZMQ mode (MT5)
   commandPort?: number;   // For ZMQ mode (MT5)
+  controlPort?: number;   // For liveness gate (ZMQ PAIR)
   host?: string;          // For ZMQ mode (MT5)
   dataPipeName?: string;  // For pipe mode (cTrader)
   commandPipeName?: string; // For pipe mode (cTrader)
@@ -732,8 +735,8 @@ export class AgentChannelReader extends EventEmitter {
       // Phase 1: Read EA registration files (primary discovery)
       // Registration files are cleaned of stale entries inside readEARegistrationFiles()
       // ═══════════════════════════════════════════════════════════════
-      let candidates: Array<{ dataPort: number; commandPort: number; name: string; source: 'registration' | 'fallback'; role?: 'master' | 'slave'; curveEnabled?: boolean; curveServerKey?: string }> = [];
-      let slaveCandidates: Array<{ commandPort: number; name: string; source: 'registration'; role: 'slave'; curveEnabled?: boolean }> = [];
+      let candidates: Array<{ dataPort: number; commandPort: number; controlPort?: number; name: string; source: 'registration' | 'fallback'; role?: 'master' | 'slave'; curveEnabled?: boolean; curveServerKey?: string }> = [];
+      let slaveCandidates: Array<{ commandPort: number; controlPort?: number; name: string; source: 'registration'; role: 'slave'; curveEnabled?: boolean }> = [];
       const discoveredPorts = new Set<number>();
       
       try {
@@ -749,6 +752,7 @@ export class AgentChannelReader extends EventEmitter {
             if (reg.role === 'slave' && !reg.dataPort) {
               slaveCandidates.push({
                 commandPort: reg.commandPort,
+                controlPort: reg.controlPort,
                 name,
                 source: 'registration',
                 role: 'slave',
@@ -762,6 +766,7 @@ export class AgentChannelReader extends EventEmitter {
             candidates.push({
               dataPort: reg.dataPort,
               commandPort: reg.commandPort,
+              controlPort: reg.controlPort,
               name,
               source: 'registration',
               role: reg.role,
@@ -843,6 +848,7 @@ export class AgentChannelReader extends EventEmitter {
           const connected = await this.connectMT5(scanResult.terminalId, {
             dataPort: scanResult.dataPort,
             commandPort: scanResult.commandPort,
+            controlPort: scanResult.controlPort,
             role: scanResult.role,
             curveEnabled: scanResult.curveEnabled,
             curveServerKey: scanResult.curveServerKey,
@@ -936,6 +942,7 @@ export class AgentChannelReader extends EventEmitter {
             
             const connected = await this.connectMT5Slave(slave.name, {
               commandPort: slave.commandPort,
+              controlPort: slave.controlPort,
               curveEnabled: slave.curveEnabled,
             });
             
@@ -1086,6 +1093,7 @@ export class AgentChannelReader extends EventEmitter {
     options: {
       dataPort?: number;
       commandPort?: number;
+      controlPort?: number;
       host?: string;
       /** Role of the EA (master or slave) — affects bridge config */
       role?: 'master' | 'slave';
@@ -1120,6 +1128,7 @@ export class AgentChannelReader extends EventEmitter {
       platform: 'MT5',
       dataPort,
       commandPort,
+      controlPort: options.controlPort,
       host,
       mode: 'zmq',
     };
@@ -1165,6 +1174,7 @@ export class AgentChannelReader extends EventEmitter {
     terminalId: string,
     options: {
       commandPort: number;
+      controlPort?: number;
       host?: string;
       curveEnabled?: boolean;
       curveServerKey?: string;
@@ -1197,6 +1207,7 @@ export class AgentChannelReader extends EventEmitter {
       terminalId,
       platform: 'MT5',
       commandPort,
+      controlPort: options.controlPort,
       host,
       mode: 'zmq',
     };
@@ -1790,6 +1801,14 @@ export class AgentChannelReader extends EventEmitter {
     return config?.platform || null;
   }
   
+  /**
+   * Get the full terminal config (ports, host, platform, mode).
+   * Used by the EA control server to derive the control port.
+   */
+  getTerminalConfig(terminalId: string): TerminalConfig | null {
+    return this.terminalConfigs.get(terminalId) || null;
+  }
+
   /**
    * Check if terminal is using ZMQ mode (MT5)
    */
