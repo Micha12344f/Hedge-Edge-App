@@ -96,7 +96,7 @@ class Config:
     LOG_LEVEL: str = os.getenv("LOG_LEVEL", "INFO")
     
     # API settings
-    API_VERSION: str = "1.1.0"
+    API_VERSION: str = "2.1.0"
     API_TITLE: str = "Hedge Edge License API"
 
 config = Config()
@@ -338,8 +338,8 @@ async def validate_license_with_creem(license_key: str, instance_name: Optional[
     Returns dict with: valid (bool), status (str), expires_at (str|None), error (str|None)
     """
     if not config.CREEM_API_KEY:
-        logger.warning("CREEM_API_KEY not configured — skipping Creem validation")
-        return {"valid": True, "status": "unchecked", "error": None}
+        logger.error("CREEM_API_KEY not configured — REJECTING validation (fail-closed)")
+        return {"valid": False, "status": "misconfigured", "error": "Payment verification unavailable. Please contact support."}
     
     headers = {
         "Content-Type": "application/json",

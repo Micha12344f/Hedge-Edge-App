@@ -82,9 +82,12 @@ interface ConnectedAgent {
 // Constants
 // ============================================================================
 
-// Railway-hosted license API, with local fallback for dev
+// License validation goes through the Railway-hosted backend's correct endpoint.
+// The /v1/license/validate endpoint validates against Creem + Supabase server-side.
+const RAILWAY_BACKEND_BASE = process.env.HEDGE_EDGE_LICENSE_API_URL
+  || 'https://hedgeedge-railway-backend-production.up.railway.app';
 const LICENSE_VALIDATE_URL = process.env.HEDGE_EDGE_LICENSE_VALIDATE_URL
-  || 'https://hedgeedge-railway-backend-production.up.railway.app/api/validate-license';
+  || `${RAILWAY_BACKEND_BASE}/v1/license/validate`;
 const TOKEN_REFRESH_BUFFER_MS = 5 * 60 * 1000; // Refresh 5 minutes before expiry
 const EXPIRY_WARNING_HOURS = 24; // Warn 24 hours before license expiry
 const DEVICE_CHECK_INTERVAL_MS = 60 * 1000; // Check devices every minute
@@ -265,6 +268,23 @@ export class LicenseManager extends EventEmitter {
         };
       }
 
+      // Server-response integrity check: the backend must return serverTime
+      // to prove it actually processed the request (not a stub/mock response).
+      if (!data.serverTime || typeof data.serverTime !== 'number') {
+        console.warn('[LicenseManager] Rejecting response: missing serverTime — backend may be misconfigured');
+        return {
+          valid: false,
+          message: 'License server returned an invalid response. Please contact support.',
+        };
+      }
+
+      // Clock-drift check: if server time differs by >5 minutes, something is wrong
+      const serverTimeMs = data.serverTime * 1000;
+      const drift = Math.abs(Date.now() - serverTimeMs);
+      if (drift > 5 * 60 * 1000) {
+        console.warn(`[LicenseManager] Server time drift too large: ${Math.round(drift / 1000)}s`);
+      }
+
       const valid = data.valid === true;
       const result: LicenseResult = {
         valid,
@@ -300,10 +320,13 @@ export class LicenseManager extends EventEmitter {
 
       return result;
     } catch (error) {
-      console.error('[LicenseManager] Validation error:', error);
+      // FAIL CLOSED: network errors must NOT grant access
+      console.error('[LicenseManager] Validation error (failing closed):', error);
       return {
         valid: false,
-        message: error instanceof Error ? error.message : 'Network error',
+        message: error instanceof Error
+          ? `License server unreachable: ${error.message}. Please check your internet connection.`
+          : 'License server unreachable. Please check your internet connection.',
       };
     }
   }

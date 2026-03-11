@@ -134,6 +134,11 @@ export class LicenseAPIServer extends EventEmitter {
       // Allow health endpoint without nonce
       if (req.path === '/api/health') return next();
 
+      // Allow loopback requests from the main process (license-manager)
+      const remoteAddr = req.ip || req.socket.remoteAddress || '';
+      const isLoopback = remoteAddr === '127.0.0.1' || remoteAddr === '::1' || remoteAddr === '::ffff:127.0.0.1';
+      if (isLoopback && req.headers['user-agent']?.startsWith('HedgeEdge/')) return next();
+
       const nonce = req.headers['x-api-nonce'] as string;
       if (!nonce || nonce !== API_NONCE) {
         return res.status(401).json({ error: 'Unauthorized' });
