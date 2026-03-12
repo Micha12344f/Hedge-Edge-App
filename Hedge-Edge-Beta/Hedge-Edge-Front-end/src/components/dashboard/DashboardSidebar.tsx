@@ -18,6 +18,7 @@ import {
 } from 'lucide-react';
 import { useConnectionsFeed } from '@/hooks/useConnectionsFeed';
 import { GradientText } from '@/components/ui/gradient-text';
+import { isElectron } from '@/lib/desktop';
 
 const navItems = [
   { icon: Gauge, label: 'Overview', path: '/app/overview' },
@@ -47,7 +48,11 @@ export const DashboardSidebar = () => {
 
   const handleSignOut = async () => {
     await signOut();
-    navigate('/auth');
+    // Remove the license key so the LicenseGate re-engages
+    if (isElectron() && window.electronAPI?.license?.remove) {
+      await window.electronAPI.license.remove();
+    }
+    window.location.reload();
   };
 
   return (

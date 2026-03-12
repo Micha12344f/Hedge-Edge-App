@@ -62,7 +62,7 @@ const API_PORT = 3002;
 // Railway backend — the ONLY upstream for license validation.
 // Desktop app NEVER talks to Creem directly (secrets stay server-side).
 const RAILWAY_BACKEND_URL = process.env.HEDGE_EDGE_LICENSE_API_URL
-  || 'https://hedgeedge-railway-backend-production.up.railway.app';
+  || 'https://hedge-edge-app-backend-production.up.railway.app';
 
 console.log(`[APIServer] Railway backend: ${RAILWAY_BACKEND_URL}`);
 

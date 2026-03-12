@@ -253,6 +253,8 @@ export function LicenseKeySection({
           title: "License Removed",
           description: "Your license key has been removed from this device.",
         });
+        // Reload to re-engage the LicenseGate
+        window.location.reload();
       } else {
         setError(result.error || 'Failed to remove license');
         toast({

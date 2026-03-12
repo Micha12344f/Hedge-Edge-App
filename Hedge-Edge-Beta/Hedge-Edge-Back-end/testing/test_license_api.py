@@ -5,8 +5,10 @@ Uses httpx.AsyncClient with FastAPI's TestClient pattern.
 """
 
 import pytest
+import pytest_asyncio
 import hashlib
 import hmac
+import json
 import os
 from unittest.mock import patch, MagicMock, AsyncMock
 from datetime import datetime, timezone
@@ -30,7 +32,7 @@ def anyio_backend():
     return "asyncio"
 
 
-@pytest.fixture
+@pytest_asyncio.fixture
 async def client():
     """Async test client for FastAPI."""
     transport = ASGITransport(app=app)
@@ -135,6 +137,72 @@ class TestDeactivateEndpoint:
         })
         # Will fail at business logic level but should not be 422
         assert resp.status_code != 422
+
+
+# ============================================================================
+# Webhook Endpoint
+# ============================================================================
+
+class TestWebhookEndpoint:
+    @pytest.mark.asyncio
+    async def test_webhook_rejects_invalid_signature(self, client: AsyncClient):
+        payload = {"type": "checkout.completed", "data": {"license_key": "TEST-KEY-1234"}}
+        resp = await client.post(
+            "/v1/webhooks/creem",
+            content=json.dumps(payload).encode(),
+            headers={"x-creem-signature": "bad-signature", "Content-Type": "application/json"},
+        )
+
+        assert resp.status_code == 401
+        assert resp.json()["error"] == "Invalid signature"
+
+    @pytest.mark.asyncio
+    async def test_webhook_checkout_completed_provisions_license(self, client: AsyncClient):
+        payload = {
+            "type": "checkout.completed",
+            "data": {
+                "license_key": "TEST-KEY-1234",
+                "customer": {"email": "user@example.com"},
+                "product": {"name": "Hedge Edge Pro"},
+                "license": {"expires_at": "2027-12-31T00:00:00Z"},
+            },
+        }
+        raw_payload = json.dumps(payload).encode()
+        signature = hmac.new(
+            os.environ["CREEM_WEBHOOK_SECRET"].encode(),
+            raw_payload,
+            hashlib.sha256,
+        ).hexdigest()
+
+        mock_db = MagicMock()
+        mock_db.table.return_value.upsert.return_value.execute.return_value.data = [{"id": "license-1"}]
+
+        with patch("license_api_production.get_supabase", return_value=mock_db), patch(
+            "license_api_production.validate_license_with_creem",
+            new=AsyncMock(return_value={
+                "valid": True,
+                "status": "active",
+                "expires_at": "2027-12-31T00:00:00Z",
+                "error": None,
+            }),
+        ):
+            resp = await client.post(
+                "/v1/webhooks/creem",
+                content=raw_payload,
+                headers={"x-creem-signature": signature, "Content-Type": "application/json"},
+            )
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["processed"] is True
+        assert data["action"] == "provisioned"
+        assert data["plan"] == "professional"
+
+        mock_db.table.assert_called_with("licenses")
+        upsert_args = mock_db.table.return_value.upsert.call_args.args[0]
+        assert upsert_args["license_key"] == "TEST-KEY-1234"
+        assert upsert_args["email"] == "user@example.com"
+        assert upsert_args["is_active"] is True
 
 
 # ============================================================================

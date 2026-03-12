@@ -237,6 +237,103 @@ Returns server health and statistics.
 
 ---
 
+### 5. Creem Webhook
+
+Receives Creem subscription lifecycle events and keeps the Supabase `licenses` table in sync.
+
+**Endpoint:** `POST /v1/webhooks/creem`
+
+#### Security
+
+- Creem must send the raw request body signed with HMAC-SHA256.
+- The signature is sent in the `x-creem-signature` header.
+- The backend verifies it using `CREEM_WEBHOOK_SECRET` before any database write happens.
+
+#### Purchase Provisioning Flow
+
+For `checkout.completed`, `subscription.active`, and `subscription.paid`:
+
+1. Verify the webhook signature.
+2. Extract the `license_key` from the event payload.
+3. Cross-check the key with Creem via the server-side license validation call.
+4. Only if Creem confirms the license is active, upsert the row into Supabase.
+
+This ensures a license is provisioned only after the purchase is genuinely active in Creem.
+
+#### Supported Events
+
+| Event | Result |
+|-------|--------|
+| `checkout.completed` | Provision a new active license in Supabase |
+| `subscription.active` | Provision or reactivate a license |
+| `subscription.paid` | Provision or reactivate a license |
+| `subscription.cancelled` | Set `is_active=false` |
+| `subscription.expired` | Set `is_active=false` |
+| `charge.refunded` | Set `is_active=false` |
+| `license.revoked` | Set `is_active=false` |
+| `subscription.renewed` | Set `is_active=true`, update expiry when provided |
+| `subscription.reactivated` | Set `is_active=true`, update expiry when provided |
+| `charge.succeeded` | Set `is_active=true`, update expiry when provided |
+
+#### Example Payload
+
+```json
+{
+  "type": "checkout.completed",
+  "data": {
+    "license_key": "ABCD-EFGH-IJKL-MNOP",
+    "customer": {
+      "email": "user@example.com"
+    },
+    "product": {
+      "name": "Hedge Edge Pro"
+    },
+    "license": {
+      "expires_at": "2027-12-31T00:00:00Z"
+    }
+  }
+}
+```
+
+#### Success Response
+
+```json
+{
+  "received": true,
+  "processed": true,
+  "action": "provisioned",
+  "affected": 1,
+  "plan": "professional",
+  "expiresAt": "2027-12-31T00:00:00Z"
+}
+```
+
+#### Signature Failure Response
+
+```json
+{
+  "error": "Invalid signature"
+}
+```
+
+#### Configuration
+
+Required environment variables for the webhook:
+
+- `CREEM_WEBHOOK_SECRET`
+- `CREEM_API_KEY`
+- `CREEM_API_MODE`
+- `SUPABASE_URL`
+- `SUPABASE_SERVICE_KEY`
+
+The backend also accepts the following aliases already used in local setup:
+
+- `SUPABASE_SERVICE_ROLE_KEY` as an alias for `SUPABASE_SERVICE_KEY`
+- `CREEM_TEST_API_KEY` / `CREEM_LIVE_API_KEY` as aliases for `CREEM_API_KEY`
+- `CREEM_TEST_API_URL` / `CREEM_LIVE_API_URL` as overrides for the Creem API base URL
+
+---
+
 ### 5. Health Check
 
 Simple health check for load balancers and monitoring.

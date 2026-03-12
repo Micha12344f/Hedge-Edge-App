@@ -1,4 +1,0 @@
-﻿MetaTrader5>=5.0.45
-Flask>=2.3.0
-Flask-CORS>=4.0.0
-python-dotenv>=1.0.0

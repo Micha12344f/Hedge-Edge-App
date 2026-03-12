@@ -85,7 +85,7 @@ interface ConnectedAgent {
 // License validation goes through the Railway-hosted backend's correct endpoint.
 // The /v1/license/validate endpoint validates against Creem + Supabase server-side.
 const RAILWAY_BACKEND_BASE = process.env.HEDGE_EDGE_LICENSE_API_URL
-  || 'https://hedgeedge-railway-backend-production.up.railway.app';
+  || 'https://hedge-edge-app-backend-production.up.railway.app';
 const LICENSE_VALIDATE_URL = process.env.HEDGE_EDGE_LICENSE_VALIDATE_URL
   || `${RAILWAY_BACKEND_BASE}/v1/license/validate`;
 const TOKEN_REFRESH_BUFFER_MS = 5 * 60 * 1000; // Refresh 5 minutes before expiry
@@ -238,23 +238,6 @@ export class LicenseManager extends EventEmitter {
   ): Promise<LicenseResult> {
     const effectiveDeviceId = deviceId || this.deviceId || this.generateDeviceId();
 
-    // Developer mode bypass — no network call, always valid in local dev builds
-    if (process.env.NODE_ENV === 'development') {
-      console.log('[LicenseManager] DEV MODE: bypassing license validation');
-      const devResult: LicenseResult = {
-        valid: true,
-        token: 'dev-token-' + Date.now(),
-        ttlSeconds: 3600 * 24 * 365,
-        message: 'Developer mode — license bypassed',
-        plan: 'developer',
-        tier: 'developer',
-        features: ['all'],
-      };
-      await licenseStore.activate(key.trim() || 'HEDGE-DEV-2026-MASTER');
-      this.emitLicenseChange('validated', devResult);
-      return devResult;
-    }
-
     console.log(`[LicenseManager] Validating license for device ${effectiveDeviceId.substring(0, 8)}...`);
 
     try {
@@ -337,7 +320,7 @@ export class LicenseManager extends EventEmitter {
 
       return result;
     } catch (error) {
-      // FAIL CLOSED: network errors must NOT grant access
+      // FAIL CLOSED for initial validation: network errors must NOT grant access
       console.error('[LicenseManager] Validation error (failing closed):', error);
       return {
         valid: false,
@@ -350,6 +333,7 @@ export class LicenseManager extends EventEmitter {
 
   /**
    * Refresh the current session token
+   * Uses offline grace: if network fails but cached license is still valid, returns cached result.
    */
   async refreshToken(token?: string): Promise<RefreshResult> {
     const currentToken = token || this.cachedLicense?.token;
@@ -376,6 +360,16 @@ export class LicenseManager extends EventEmitter {
             message: 'Token refreshed successfully',
           };
         }
+        // Validation returned invalid — check if we can use offline grace
+        if (this.cachedLicense && this.cachedLicense.expiresAt > Date.now()) {
+          console.log('[LicenseManager] Validation failed but cached license still valid — granting offline grace');
+          return {
+            success: true,
+            token: this.cachedLicense.token,
+            ttlSeconds: Math.floor((this.cachedLicense.expiresAt - Date.now()) / 1000),
+            message: 'Using cached license (offline grace)',
+          };
+        }
         return {
           success: false,
           error: result.message || 'Refresh failed',
@@ -387,6 +381,16 @@ export class LicenseManager extends EventEmitter {
         error: 'No stored license key',
       };
     } catch (error) {
+      // Offline grace: if network call throws but cached license is still valid, allow access
+      if (this.cachedLicense && this.cachedLicense.expiresAt > Date.now()) {
+        console.log('[LicenseManager] Network error but cached license still valid — granting offline grace');
+        return {
+          success: true,
+          token: this.cachedLicense.token,
+          ttlSeconds: Math.floor((this.cachedLicense.expiresAt - Date.now()) / 1000),
+          message: 'Using cached license (offline grace)',
+        };
+      }
       console.error('[LicenseManager] Refresh error:', error);
       return {
         success: false,
@@ -438,7 +442,7 @@ export class LicenseManager extends EventEmitter {
 
     try {
       const railwayBase = process.env.HEDGE_EDGE_LICENSE_API_URL
-        || 'https://hedgeedge-railway-backend-production.up.railway.app';
+        || 'https://hedge-edge-app-backend-production.up.railway.app';
 
       const response = await fetch(`${railwayBase}/v1/license/deactivate`, {
         method: 'POST',
@@ -511,16 +515,6 @@ export class LicenseManager extends EventEmitter {
    * Get current license status
    */
   getLicenseStatus(): LicenseInfo {
-    // Developer mode bypass — skips all license checks in local dev builds
-    if (process.env.NODE_ENV === 'development') {
-      return {
-        status: 'valid',
-        tier: 'developer',
-        plan: 'developer',
-        maskedKey: 'DEV-••••-••••-MODE',
-      };
-    }
-
     const storeStatus = licenseStore.getStatus();
 
     // Enhance with cached data

@@ -111,6 +111,7 @@ export function LicenseGate({ children }: LicenseGateProps) {
   const [errorMessage, setErrorMessage] = useState("");
   const [licenseInfo, setLicenseInfo] = useState<{ plan?: string; expiresAt?: string } | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  const revalidateRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   useEffect(() => {
     console.log('[LicenseGate] Component mounted, checking license...');
@@ -124,6 +125,30 @@ export function LicenseGate({ children }: LicenseGateProps) {
     checkExistingLicense().finally(() => clearTimeout(timeoutId));
   }, []);
 
+  // Periodic revalidation: re-check license every 5 minutes while valid
+  useEffect(() => {
+    if (state === "valid" && isElectron()) {
+      revalidateRef.current = setInterval(async () => {
+        try {
+          const result = await window.electronAPI?.license?.getStatus();
+          if (!result?.success || result.data?.status !== 'valid') {
+            console.warn('[LicenseGate] Periodic revalidation failed — re-engaging license gate');
+            setState('needs-license');
+            setErrorMessage('Your license is no longer valid. Please re-enter your license key.');
+          }
+        } catch (err) {
+          console.error('[LicenseGate] Periodic revalidation error:', err);
+        }
+      }, 5 * 60 * 1000);
+    }
+    return () => {
+      if (revalidateRef.current) {
+        clearInterval(revalidateRef.current);
+        revalidateRef.current = null;
+      }
+    };
+  }, [state]);
+
   // Auto-focus input when form appears
   useEffect(() => {
     if (state === "needs-license" || state === "error") {
@@ -136,8 +161,9 @@ export function LicenseGate({ children }: LicenseGateProps) {
     setErrorMessage("");
 
     if (!isElectron()) {
-      console.log('[LicenseGate] Not running in Electron, skipping license check');
-      setState("valid");
+      console.log('[LicenseGate] Not running in Electron — desktop app required');
+      setErrorMessage('Please launch Hedge Edge from the desktop application.');
+      setState('error');
       return;
     }
 

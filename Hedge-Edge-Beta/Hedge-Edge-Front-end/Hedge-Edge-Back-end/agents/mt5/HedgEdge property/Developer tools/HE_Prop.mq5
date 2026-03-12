@@ -39,7 +39,7 @@
 input group "=== License Settings ==="
 input string InpLicenseKey = "";                     // License Key
 input string InpDeviceId = "";                       // Device ID (auto if blank)
-input string InpEndpointUrl = "https://hedgeedge-railway-backend-production.up.railway.app/v1/license/validate"; // API Endpoint
+input string InpEndpointUrl = "https://hedge-edge-app-backend-production.up.railway.app/v1/license/validate"; // API Endpoint
 input int    InpPollIntervalSeconds = 600;           // License Check Interval (s)
 input bool   InpDevMode = false;                     // DEV MODE (skip license)
 
@@ -1032,7 +1032,7 @@ bool ValidateLicenseViaWebRequest(string overrideKey = "")
    {
       // httpCode == -1: WebRequest failed entirely
       if(lastErr == 4060)
-         g_lastError = "URL not whitelisted in MT5. Add: https://hedgeedge-railway-backend-production.up.railway.app";
+         g_lastError = "URL not whitelisted in MT5. Add: https://hedge-edge-app-backend-production.up.railway.app";
       else if(lastErr == 4014)
          g_lastError = "WebRequest not allowed (enable in Tools > Options > Expert Advisors)";
       else

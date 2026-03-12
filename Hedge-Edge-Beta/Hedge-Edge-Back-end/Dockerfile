@@ -17,6 +17,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     && rm -rf /var/lib/apt/lists/*
 
+# Cache-bust: change this value to force rebuild
+ARG CACHEBUST=5
+
 # Copy requirements first for better caching
 COPY requirements.production.txt .
 
