@@ -8,13 +8,13 @@ import { cn } from '@/lib/utils';
 import {
   CheckCircle2,
   XCircle,
-  AlertTriangle,
+  ShieldAlert,
   ChevronDown,
   ChevronRight,
-  Shield,
-  Cpu,
+  ShieldCheck,
+  CircuitBoard,
   Globe,
-  RefreshCw,
+  RotateCw,
   ExternalLink,
   Copy,
   Check,
@@ -118,7 +118,7 @@ export function PermissionsChecklist({
       <Collapsible open={expanded} onOpenChange={setExpanded} className={className}>
         <CollapsibleTrigger asChild>
           <button className="w-full flex items-center gap-2 p-3 rounded-lg border border-yellow-500/30 bg-yellow-500/5 hover:bg-yellow-500/10 transition-colors text-left">
-            <AlertTriangle className="h-4 w-4 text-yellow-500 flex-shrink-0" />
+            <ShieldAlert className="h-4 w-4 text-yellow-500 flex-shrink-0" />
             <span className="text-sm text-yellow-600 dark:text-yellow-400 flex-1">
               {platformName} Permissions
             </span>
@@ -137,10 +137,10 @@ export function PermissionsChecklist({
             {permissions.filter(p => p.required).map((perm) => (
               <div key={perm.id} className="flex items-center gap-2 text-sm">
                 <div className="w-5 h-5 rounded-full bg-primary/10 flex items-center justify-center flex-shrink-0">
-                  {perm.id === 'algo-trading' && <Cpu className="h-3 w-3 text-primary" />}
-                  {perm.id === 'dll-imports' && <Shield className="h-3 w-3 text-primary" />}
+                  {perm.id === 'algo-trading' && <CircuitBoard className="h-3 w-3 text-primary" />}
+                  {perm.id === 'dll-imports' && <ShieldCheck className="h-3 w-3 text-primary" />}
                   {perm.id === 'webrequest' && <Globe className="h-3 w-3 text-primary" />}
-                  {perm.id === 'cbot-permissions' && <Cpu className="h-3 w-3 text-primary" />}
+                  {perm.id === 'cbot-permissions' && <CircuitBoard className="h-3 w-3 text-primary" />}
                 </div>
                 <span className="text-foreground flex-1">{perm.label}</span>
                 <Tooltip>
@@ -158,7 +158,7 @@ export function PermissionsChecklist({
             
             {isMetaTrader && (
               <div className="flex items-center gap-2 pt-2 border-t border-border/30 mt-2">
-                <RefreshCw className="h-3 w-3 text-yellow-500" />
+                <RotateCw className="h-3 w-3 text-yellow-500" />
                 <span className="text-xs text-muted-foreground">Restart terminal after changes</span>
               </div>
             )}
@@ -184,7 +184,7 @@ export function CTraderGuidance({ className }: CTraderGuidanceProps) {
     <Collapsible open={expanded} onOpenChange={setExpanded} className={className}>
       <CollapsibleTrigger asChild>
         <button className="w-full flex items-center gap-2 p-3 rounded-lg border border-blue-500/30 bg-blue-500/5 hover:bg-blue-500/10 transition-colors text-left">
-          <Shield className="h-4 w-4 text-blue-500 flex-shrink-0" />
+          <ShieldCheck className="h-4 w-4 text-blue-500 flex-shrink-0" />
           <span className="text-sm text-blue-600 dark:text-blue-400 flex-1">
             cTrader Setup Guide
           </span>

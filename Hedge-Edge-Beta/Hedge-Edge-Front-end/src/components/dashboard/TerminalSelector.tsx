@@ -10,11 +10,11 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { 
   Loader2, 
-  RefreshCw, 
+  RotateCw, 
   Monitor, 
   Play, 
   CheckCircle2, 
-  AlertCircle,
+  ShieldAlert,
   Folder
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
@@ -186,7 +186,7 @@ export function TerminalSelector({
     return (
       <div className={cn("p-4 rounded-lg bg-yellow-500/10 border border-yellow-500/20", className)}>
         <div className="flex items-start gap-3">
-          <AlertCircle className="h-5 w-5 text-yellow-500 shrink-0 mt-0.5" />
+          <ShieldAlert className="h-5 w-5 text-yellow-500 shrink-0 mt-0.5" />
           <div className="flex-1 min-w-0">
             <p className="text-sm text-yellow-400 mb-2">{error}</p>
             <p className="text-xs text-muted-foreground mb-3">
@@ -198,7 +198,7 @@ export function TerminalSelector({
               onClick={() => detectTerminals()}
               className="gap-2"
             >
-              <RefreshCw className="h-3 w-3" />
+              <RotateCw className="h-3 w-3" />
               Retry
             </Button>
           </div>
@@ -224,7 +224,7 @@ export function TerminalSelector({
           disabled={loading}
           className="h-7 px-2 text-xs gap-1"
         >
-          <RefreshCw className={cn("h-3 w-3", loading && "animate-spin")} />
+          <RotateCw className={cn("h-3 w-3", loading && "animate-spin")} />
           Refresh
         </Button>
       </div>

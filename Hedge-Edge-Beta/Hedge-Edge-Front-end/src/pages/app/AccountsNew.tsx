@@ -8,11 +8,11 @@ import { Input } from '@/components/ui/input';
 import { useToast } from '@/hooks/use-toast';
 import { cn } from '@/lib/utils';
 import { 
-  Plus, 
+  PlusCircle, 
   Search, 
   Zap, 
   Link2,
-  AlertCircle
+  ShieldAlert
 } from 'lucide-react';
 
 // Local storage keys
@@ -220,7 +220,7 @@ const Accounts = () => {
               Hedge accounts are the core of your setup. Add one first to start linking your evaluation and funded accounts.
             </p>
             <Button onClick={handleAddHedge} className="gap-2">
-              <Plus className="h-4 w-4" />
+              <PlusCircle className="h-4 w-4" />
               Add Hedge Account
             </Button>
           </div>
@@ -276,7 +276,7 @@ const Accounts = () => {
                   Add your evaluation and funded accounts to link them with your hedge accounts.
                 </p>
                 <Button onClick={handleAddLinked} variant="outline" className="gap-2">
-                  <Plus className="h-4 w-4" />
+                  <PlusCircle className="h-4 w-4" />
                   Add Linked Account
                 </Button>
               </div>

@@ -8,7 +8,7 @@ import { TradingAccount } from '@/hooks/useTradingAccounts';
 import { cn } from '@/lib/utils';
 import { 
   ChevronRight, 
-  DollarSign, 
+  CircleDollarSign, 
   Layers,
   Link,
   Archive,
@@ -104,7 +104,7 @@ export const AccountProgressionModal = ({
           {/* Evaluation Fee */}
           <div className="space-y-2">
             <Label className="flex items-center gap-2">
-              <DollarSign className="h-4 w-4 text-muted-foreground" />
+              <CircleDollarSign className="h-4 w-4 text-muted-foreground" />
               Evaluation Fee (Optional)
             </Label>
             <div className="relative">

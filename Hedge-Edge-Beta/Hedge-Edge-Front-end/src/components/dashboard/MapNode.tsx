@@ -3,11 +3,11 @@ import { cn } from '@/lib/utils';
 import { PROP_FIRMS, PLATFORMS } from './AddAccountModal';
 import { 
   Zap, 
-  Target,
-  Shield,
-  AlertTriangle,
-  TrendingUp,
-  TrendingDown
+  Layers,
+  ShieldCheck,
+  ShieldAlert,
+  ArrowUpRight,
+  ArrowDownRight
 } from 'lucide-react';
 
 import type { ConnectionStatus } from '@/contexts/CopierGroupsContext';
@@ -178,11 +178,11 @@ export const MapNode = ({ account, isSelected, isDragging, isLinkSource, copierS
           isRisk ? 'bg-red-500' : isProfit ? 'bg-emerald-500' : 'bg-red-500'
         )}>
           {isRisk ? (
-            <AlertTriangle className="w-3.5 h-3.5 text-white" />
+            <ShieldAlert className="w-3.5 h-3.5 text-white" />
           ) : isProfit ? (
-            <TrendingUp className="w-3.5 h-3.5 text-white" />
+            <ArrowUpRight className="w-3.5 h-3.5 text-white" />
           ) : (
-            <TrendingDown className="w-3.5 h-3.5 text-white" />
+            <ArrowDownRight className="w-3.5 h-3.5 text-white" />
           )}
         </div>
 
@@ -218,9 +218,9 @@ export const MapNode = ({ account, isSelected, isDragging, isLinkSource, copierS
           isProfit ? 'text-emerald-400' : 'text-red-400'
         )}>
           {isProfit ? (
-            <TrendingUp className="w-3 h-3" />
+            <ArrowUpRight className="w-3 h-3" />
           ) : (
-            <TrendingDown className="w-3 h-3" />
+            <ArrowDownRight className="w-3 h-3" />
           )}
           <span className="text-xs font-bold">
             {isProfit ? '+' : ''}{formatCurrency(pnl)}

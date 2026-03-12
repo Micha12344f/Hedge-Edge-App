@@ -363,6 +363,135 @@ All colors MUST be HSL.
     animation: marquee-rtl 30s linear infinite;
   }
 
+  /* Icon container with gradient background */
+  .icon-container {
+    @apply relative flex items-center justify-center rounded-lg p-2;
+    background: linear-gradient(
+      135deg,
+      hsl(var(--primary) / 0.12),
+      hsl(var(--primary) / 0.04)
+    );
+  }
+
+  .icon-container-gold {
+    @apply relative flex items-center justify-center rounded-lg p-2;
+    background: linear-gradient(
+      135deg,
+      hsl(var(--secondary) / 0.15),
+      hsl(var(--secondary) / 0.04)
+    );
+  }
+
+  /* Subtle card lift on hover */
+  .card-lift {
+    @apply transition-all duration-300 ease-out;
+  }
+
+  .card-lift:hover {
+    transform: translateY(-2px);
+    box-shadow: 
+      0 8px 25px -5px hsl(var(--primary) / 0.08),
+      0 4px 10px -5px hsl(var(--background) / 0.4);
+  }
+
+  /* Active sidebar indicator bar */
+  .nav-active-bar {
+    @apply relative;
+  }
+
+  .nav-active-bar::after {
+    content: '';
+    @apply absolute left-0 top-1/2 -translate-y-1/2 w-[3px] rounded-r-full transition-all duration-300;
+    height: 0;
+    background: hsl(var(--primary));
+    box-shadow: 0 0 8px 1px hsl(var(--primary) / 0.5);
+  }
+
+  .nav-active-bar.active::after {
+    height: 60%;
+  }
+
+  /* Status pulse dot animation */
+  @keyframes status-pulse {
+    0%, 100% { 
+      box-shadow: 0 0 0 0 hsl(var(--primary) / 0.5);
+    }
+    50% { 
+      box-shadow: 0 0 0 4px hsl(var(--primary) / 0);
+    }
+  }
+
+  .status-dot-pulse {
+    @apply w-2 h-2 rounded-full bg-primary;
+    animation: status-pulse 2s ease-in-out infinite;
+  }
+
+  .status-dot-warning {
+    @apply w-2 h-2 rounded-full bg-yellow-500;
+    animation: status-pulse 2s ease-in-out infinite;
+  }
+
+  /* Gradient divider line */
+  .gradient-divider {
+    height: 1px;
+    background: linear-gradient(
+      90deg,
+      transparent,
+      hsl(var(--primary) / 0.3),
+      hsl(var(--secondary) / 0.2),
+      transparent
+    );
+  }
+
+  /* Enhanced focus ring for accessibility */
+  .focus-ring {
+    @apply focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 focus-visible:ring-offset-2 focus-visible:ring-offset-background;
+  }
+
+  /* Subtle text gradient for labels */
+  .text-gradient-subtle {
+    background: linear-gradient(135deg, hsl(var(--foreground)), hsl(var(--muted-foreground)));
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+
+  /* Smooth hover glow for interactive elements */
+  .hover-glow {
+    @apply transition-all duration-300;
+  }
+
+  .hover-glow:hover {
+    box-shadow: 0 0 20px -4px hsl(var(--primary) / 0.2);
+  }
+
+  /* Badge shimmer effect */
+  @keyframes badge-shimmer {
+    0% { background-position: -200% center; }
+    100% { background-position: 200% center; }
+  }
+
+  .badge-shimmer {
+    background: linear-gradient(
+      90deg,
+      hsl(var(--primary) / 0.1) 0%,
+      hsl(var(--primary) / 0.25) 50%,
+      hsl(var(--primary) / 0.1) 100%
+    );
+    background-size: 200% 100%;
+    animation: badge-shimmer 3s ease-in-out infinite;
+  }
+
+  /* Stat value highlight on hover */
+  .stat-value-hover {
+    @apply transition-all duration-300;
+  }
+
+  .stat-value-hover:hover {
+    text-shadow: 0 0 12px hsl(var(--primary) / 0.4);
+    transform: scale(1.02);
+  }
+
   /* Zcal embed mobile responsiveness */
   .zcal-inline-widget {
     width: 100% !important;

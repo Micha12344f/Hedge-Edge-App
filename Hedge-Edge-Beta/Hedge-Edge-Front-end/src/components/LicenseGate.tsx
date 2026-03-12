@@ -1,5 +1,5 @@
 import { useEffect, useState, useRef } from "react";
-import { Loader2, Key, AlertCircle, CheckCircle, TrendingUp } from "lucide-react";
+import { Loader2, KeyRound, ShieldAlert, CheckCircle, TrendingUp } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -339,7 +339,7 @@ export function LicenseGate({ children }: LicenseGateProps) {
             transition={{ delay: 0.3, duration: 0.4 }}
           >
             <div className="p-2 rounded-lg bg-primary/10 border border-primary/20">
-              <Key className="w-[18px] h-[18px] text-primary" strokeWidth={1.5} />
+              <KeyRound className="w-[18px] h-[18px] text-primary" strokeWidth={1.5} />
             </div>
             <div>
               <h2 className="text-base font-semibold text-foreground leading-tight">
@@ -381,7 +381,7 @@ export function LicenseGate({ children }: LicenseGateProps) {
                   className="overflow-hidden"
                 >
                   <div className="flex items-start gap-2.5 p-3 bg-destructive/10 border border-destructive/20 rounded-xl">
-                    <AlertCircle className="w-4 h-4 text-destructive flex-shrink-0 mt-0.5" strokeWidth={1.5} />
+                    <ShieldAlert className="w-4 h-4 text-destructive flex-shrink-0 mt-0.5" strokeWidth={1.5} />
                     <p className="text-sm text-destructive leading-snug">{errorMessage}</p>
                   </div>
                 </motion.div>

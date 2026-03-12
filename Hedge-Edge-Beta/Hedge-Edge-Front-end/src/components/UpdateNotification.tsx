@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
-import { X, Download, RotateCcw } from 'lucide-react';
+import { X, CloudDownload, RotateCcw } from 'lucide-react';
 
 interface UpdateInfo {
     version: string;
@@ -82,7 +82,7 @@ export function UpdateNotification() {
                     </div>
                 ) : (
                     <Button size="sm" variant="outline" onClick={handleDownload} className="w-full">
-                        <Download className="h-4 w-4 mr-2" />
+                        <CloudDownload className="h-4 w-4 mr-2" />
                         Download Update
                     </Button>
                 )}

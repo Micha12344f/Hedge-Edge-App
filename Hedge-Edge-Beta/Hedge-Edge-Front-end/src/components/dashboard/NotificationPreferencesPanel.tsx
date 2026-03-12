@@ -12,7 +12,7 @@ import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
-import { Bell, Mail, Shield, AlertTriangle, BarChart3, Save, Loader2 } from 'lucide-react';
+import { BellRing, Mail, ShieldCheck, ShieldAlert, LineChart, Save, Loader2 } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
 import { useToast } from '@/hooks/use-toast';
 
@@ -143,7 +143,7 @@ export function NotificationPreferencesPanel() {
     <Card className="border-border/50 bg-card/50">
       <CardHeader>
         <CardTitle className="flex items-center gap-2 text-base">
-          <Bell className="h-4 w-4 text-primary" />
+          <BellRing className="h-4 w-4 text-primary" />
           Email Notifications
           {dirty && <Badge variant="secondary" className="text-[10px]">Unsaved</Badge>}
         </CardTitle>
@@ -187,7 +187,7 @@ export function NotificationPreferencesPanel() {
 
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2">
-                  <AlertTriangle className="h-3.5 w-3.5 text-red-400" />
+                  <ShieldAlert className="h-3.5 w-3.5 text-red-400" />
                   <Label htmlFor="notify-failure" className="text-sm">Trade copy fails</Label>
                 </div>
                 <Switch
@@ -199,7 +199,7 @@ export function NotificationPreferencesPanel() {
 
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2">
-                  <AlertTriangle className="h-3.5 w-3.5 text-orange-400" />
+                  <ShieldAlert className="h-3.5 w-3.5 text-orange-400" />
                   <Label htmlFor="notify-circuit" className="text-sm">Circuit breaker trips</Label>
                 </div>
                 <Switch
@@ -211,7 +211,7 @@ export function NotificationPreferencesPanel() {
 
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2">
-                  <BarChart3 className="h-3.5 w-3.5 text-blue-400" />
+                  <LineChart className="h-3.5 w-3.5 text-blue-400" />
                   <Label htmlFor="notify-summary" className="text-sm">Daily summary report</Label>
                 </div>
                 <Switch

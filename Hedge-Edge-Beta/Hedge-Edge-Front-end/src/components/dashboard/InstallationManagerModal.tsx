@@ -10,19 +10,19 @@ import { cn } from '@/lib/utils';
 import { isElectron } from '@/lib/desktop';
 import {
   Loader2,
-  Download,
+  CloudDownload,
   CheckCircle2,
   XCircle,
-  AlertTriangle,
-  AlertCircle,
+  ShieldAlert,
+  OctagonAlert,
   Monitor,
   HardDrive,
-  RefreshCw,
+  RotateCw,
   ExternalLink,
   FolderOpen,
   Package,
-  Shield,
-  Cpu,
+  ShieldCheck,
+  CircuitBoard,
 } from 'lucide-react';
 import type {
   InstallableAsset,
@@ -426,7 +426,7 @@ export function InstallationManagerModal({
                     {loading ? (
                       <Loader2 className="h-4 w-4 animate-spin mr-2" />
                     ) : (
-                      <RefreshCw className="h-4 w-4 mr-2" />
+                      <RotateCw className="h-4 w-4 mr-2" />
                     )}
                     {terminals.length > 0 ? 'Rescan' : 'Scan'}
                   </Button>
@@ -471,7 +471,7 @@ export function InstallationManagerModal({
 
             {error && (
               <Alert variant="destructive">
-                <AlertCircle className="h-4 w-4" />
+                <OctagonAlert className="h-4 w-4" />
                 <AlertDescription>{error}</AlertDescription>
               </Alert>
             )}
@@ -563,7 +563,7 @@ export function InstallationManagerModal({
 
                 {precheck.messages.length > 0 && (
                   <Alert variant="destructive">
-                    <AlertTriangle className="h-4 w-4" />
+                    <ShieldAlert className="h-4 w-4" />
                     <AlertDescription>
                       <ul className="list-disc list-inside space-y-1">
                         {precheck.messages.map((msg, i) => (
@@ -593,7 +593,7 @@ export function InstallationManagerModal({
                 {loading ? (
                   <Loader2 className="h-4 w-4 animate-spin mr-2" />
                 ) : (
-                  <Download className="h-4 w-4 mr-2" />
+                  <CloudDownload className="h-4 w-4 mr-2" />
                 )}
                 Install
               </Button>
@@ -676,7 +676,7 @@ export function InstallationManagerModal({
                         <p className="font-medium text-sm">{asset?.name}</p>
                         {verification?.verified && (
                           <Badge variant="outline" className="text-[10px] text-primary border-primary/30">
-                            <Shield className="h-3 w-3 mr-1" />
+                            <ShieldCheck className="h-3 w-3 mr-1" />
                             Verified
                           </Badge>
                         )}
@@ -703,7 +703,7 @@ export function InstallationManagerModal({
             {/* Restart Notice */}
             {installResult?.restartRequired && (
               <Alert>
-                <AlertTriangle className="h-4 w-4" />
+                <ShieldAlert className="h-4 w-4" />
                 <AlertDescription>
                   Please restart your terminal for changes to take effect
                 </AlertDescription>
@@ -714,7 +714,7 @@ export function InstallationManagerModal({
             {installResult?.success && (
               <div className="space-y-3 p-4 rounded-lg bg-muted/30">
                 <h4 className="font-medium text-sm flex items-center gap-2">
-                  <Shield className="h-4 w-4" />
+                  <ShieldCheck className="h-4 w-4" />
                   Next Steps
                 </h4>
                 <ol className="list-decimal list-inside space-y-2 text-sm text-muted-foreground">
@@ -740,7 +740,7 @@ export function InstallationManagerModal({
       <DialogContent className="max-w-lg">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
-            <Cpu className="h-5 w-5" />
+            <CircuitBoard className="h-5 w-5" />
             Installation Manager
           </DialogTitle>
           <DialogDescription>
@@ -774,7 +774,7 @@ function PrecheckItem({ label, passed, warning, warningText }: PrecheckItemProps
       {passed ? (
         <CheckCircle2 className="h-4 w-4 text-primary flex-shrink-0" />
       ) : warning ? (
-        <AlertTriangle className="h-4 w-4 text-yellow-500 flex-shrink-0" />
+        <ShieldAlert className="h-4 w-4 text-yellow-500 flex-shrink-0" />
       ) : (
         <XCircle className="h-4 w-4 text-destructive flex-shrink-0" />
       )}

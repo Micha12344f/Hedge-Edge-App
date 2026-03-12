@@ -15,7 +15,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
-import { Plus, DollarSign, Check, X, Trash2, Lock, RefreshCw } from 'lucide-react';
+import { PlusCircle, CircleDollarSign, Check, X, Trash2, Lock, RotateCw } from 'lucide-react';
 import {
   Select,
   SelectContent,
@@ -726,7 +726,7 @@ const DashboardAnalytics = () => {
                     }}
                     title="Refresh chart data &amp; trade history"
                   >
-                    <RefreshCw className={`h-3.5 w-3.5 ${isRefreshingChart ? 'animate-spin' : ''}`} />
+                    <RotateCw className={`h-3.5 w-3.5 ${isRefreshingChart ? 'animate-spin' : ''}`} />
                   </Button>
                   </div>
                 </div>
@@ -1038,7 +1038,7 @@ const DashboardAnalytics = () => {
                       onClick={() => setIsAddingPayout(true)}
                       className="h-8 gap-1"
                     >
-                      <Plus className="h-3.5 w-3.5" />
+                      <PlusCircle className="h-3.5 w-3.5" />
                       Add
                     </Button>
                   )}
@@ -1050,7 +1050,7 @@ const DashboardAnalytics = () => {
                     <Label className="text-xs text-muted-foreground">Payout Amount</Label>
                     <div className="flex items-center gap-2 mt-1">
                       <div className="relative flex-1">
-                        <DollarSign className="absolute left-2 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                        <CircleDollarSign className="absolute left-2 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                         <Input
                           type="text"
                           inputMode="decimal"
@@ -1191,7 +1191,7 @@ const DashboardAnalytics = () => {
                   {payouts.filter(p => selectedAccountId === 'all' || p.accountId === selectedAccountId).length === 0 && (
                     <div className="flex items-center justify-center h-40">
                       <div className="text-center text-muted-foreground">
-                        <DollarSign className="h-8 w-8 mx-auto mb-2 opacity-30" />
+                        <CircleDollarSign className="h-8 w-8 mx-auto mb-2 opacity-30" />
                         <p className="text-sm">No payouts yet</p>
                         <p className="text-xs mt-1">
                           {selectedAccount 

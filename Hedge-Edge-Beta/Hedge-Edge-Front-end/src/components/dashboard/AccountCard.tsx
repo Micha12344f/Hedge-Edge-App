@@ -3,7 +3,7 @@ import { Card, CardContent, CardHeader } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Progress } from '@/components/ui/progress';
-import { MoreHorizontal, TrendingUp, TrendingDown, RefreshCw, Trash2, Server, User, Zap, ExternalLink, Wifi, WifiOff, Loader2, Power, PowerOff, Key, AlertTriangle } from 'lucide-react';
+import { MoreHorizontal, ArrowUpRight, ArrowDownRight, RotateCw, Trash2, Server, CircleUser, Zap, ExternalLink, Signal, SignalZero, Loader2, PlugZap, Unplug, KeyRound, ShieldAlert } from 'lucide-react';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -230,7 +230,7 @@ export const AccountCard = ({
             </Badge>
             {isDisconnected && (
               <Badge variant="outline" className="text-[10px] bg-muted/30 text-muted-foreground border-muted-foreground/30 flex items-center gap-1">
-                <WifiOff className="h-3 w-3" />
+                <SignalZero className="h-3 w-3" />
                 Disconnected
               </Badge>
             )}
@@ -242,13 +242,13 @@ export const AccountCard = ({
             )}
             {isConnected && (
               <Badge variant="outline" className="text-[10px] bg-primary/10 text-primary border-primary/30 flex items-center gap-1">
-                <Wifi className="h-3 w-3" />
+                <Signal className="h-3 w-3" />
                 Connected
               </Badge>
             )}
             {hasConnectionError && (
               <Badge variant="outline" className="text-[10px] bg-destructive/10 text-destructive border-destructive/30 flex items-center gap-1">
-                <AlertTriangle className="h-3 w-3" />
+                <ShieldAlert className="h-3 w-3" />
                 Error
               </Badge>
             )}
@@ -269,7 +269,7 @@ export const AccountCard = ({
           <DropdownMenuContent align="end" className="animate-scale-in">
             {onSync && (
               <DropdownMenuItem onClick={() => onSync(account.id)} className="cursor-pointer">
-                <RefreshCw className="mr-2 h-4 w-4" />
+                <RotateCw className="mr-2 h-4 w-4" />
                 Sync Account
               </DropdownMenuItem>
             )}
@@ -279,7 +279,7 @@ export const AccountCard = ({
                 onClick={(e) => { e.stopPropagation(); onConnect(account); }} 
                 className="cursor-pointer"
               >
-                <Power className="mr-2 h-4 w-4" />
+                <PlugZap className="mr-2 h-4 w-4" />
                 Connect
               </DropdownMenuItem>
             )}
@@ -288,7 +288,7 @@ export const AccountCard = ({
                 onClick={(e) => { e.stopPropagation(); onDisconnect(account); }} 
                 className="cursor-pointer"
               >
-                <PowerOff className="mr-2 h-4 w-4" />
+                <Unplug className="mr-2 h-4 w-4" />
                 Disconnect
               </DropdownMenuItem>
             )}
@@ -339,11 +339,11 @@ export const AccountCard = ({
               )}>
                 <div className="flex items-center gap-2">
                   {isLicenseExpired ? (
-                    <AlertTriangle className="h-3.5 w-3.5 text-yellow-500" />
+                    <ShieldAlert className="h-3.5 w-3.5 text-yellow-500" />
                   ) : hasLicenseError ? (
-                    <Key className="h-3.5 w-3.5 text-destructive" />
+                    <KeyRound className="h-3.5 w-3.5 text-destructive" />
                   ) : (
-                    <Key className="h-3.5 w-3.5 text-muted-foreground" />
+                    <KeyRound className="h-3.5 w-3.5 text-muted-foreground" />
                   )}
                   <span className={cn(
                     "text-xs font-medium",
@@ -367,7 +367,7 @@ export const AccountCard = ({
             {isConnected && isLicenseValid && connectionSnapshot?.license?.daysRemaining != null && connectionSnapshot.license.daysRemaining <= 30 && (
               <div className="flex items-center justify-between p-2 rounded-lg mb-3 bg-primary/5">
                 <div className="flex items-center gap-2">
-                  <Key className="h-3.5 w-3.5 text-primary" />
+                  <KeyRound className="h-3.5 w-3.5 text-primary" />
                   <span className="text-xs font-medium text-primary">Licensed</span>
                 </div>
                 <Badge variant="outline" className="text-[10px] bg-primary/10 text-primary border-primary/30">
@@ -415,7 +415,7 @@ export const AccountCard = ({
             {/* Account Details */}
             <div className="grid grid-cols-2 gap-4">
               <div className="flex items-center gap-2 p-2 rounded-lg bg-muted/30 transition-colors hover:bg-muted/50">
-                <User className="h-4 w-4 text-muted-foreground" />
+                <CircleUser className="h-4 w-4 text-muted-foreground" />
                 <div>
                   <p className="text-xs text-muted-foreground">Login</p>
                   <p className="text-sm font-medium text-foreground">{account.login || '—'}</p>
@@ -443,7 +443,7 @@ export const AccountCard = ({
                   {isConnecting ? (
                     <Loader2 className="w-3.5 h-3.5 mr-2 animate-spin" />
                   ) : (
-                    <Power className="w-3.5 h-3.5 mr-2" />
+                    <PlugZap className="w-3.5 h-3.5 mr-2" />
                   )}
                   Connect Account
                 </Button>
@@ -483,9 +483,9 @@ export const AccountCard = ({
                 <p className="text-xs text-muted-foreground">P&L</p>
                 <div className="flex items-center gap-1">
                   {isProfit ? (
-                    <TrendingUp className="h-4 w-4 text-primary animate-pulse" />
+                    <ArrowUpRight className="h-4 w-4 text-primary animate-pulse" />
                   ) : (
-                    <TrendingDown className="h-4 w-4 text-destructive" />
+                    <ArrowDownRight className="h-4 w-4 text-destructive" />
                   )}
                   <span className={cn('text-lg font-semibold transition-colors', isProfit ? 'text-primary' : 'text-destructive')}>
                     {formatCurrency(pnl)} ({pnlPercent.toFixed(2)}%)

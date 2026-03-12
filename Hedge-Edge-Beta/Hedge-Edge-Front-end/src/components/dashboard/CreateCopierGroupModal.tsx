@@ -24,10 +24,10 @@ import {
 import { Separator } from '@/components/ui/separator';
 import {
   Crown,
-  Users,
-  Shield,
-  ArrowRightLeft,
-  Plus,
+  UsersRound,
+  ShieldCheck,
+  Route,
+  PlusCircle,
   Repeat2,
   Info,
   Zap,
@@ -188,7 +188,7 @@ export function CreateCopierGroupModal({
       <DialogContent className="max-w-2xl max-h-[85vh] flex flex-col overflow-hidden">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
-            <Plus className="h-5 w-5 text-primary" />
+            <PlusCircle className="h-5 w-5 text-primary" />
             {editGroup ? 'Edit Copier Group' : 'Create Copier Group'}
           </DialogTitle>
           <DialogDescription>
@@ -199,15 +199,15 @@ export function CreateCopierGroupModal({
         <Tabs value={activeTab} onValueChange={setActiveTab} className="flex-1 min-h-0 flex flex-col">
           <TabsList className="grid w-full grid-cols-3 bg-muted/50 shrink-0">
             <TabsTrigger value="accounts" className="text-xs data-[state=active]:bg-primary/20 data-[state=active]:text-primary">
-              <Users className="h-3.5 w-3.5 mr-1" />
+              <UsersRound className="h-3.5 w-3.5 mr-1" />
               Accounts
             </TabsTrigger>
             <TabsTrigger value="risk" className="text-xs data-[state=active]:bg-primary/20 data-[state=active]:text-primary">
-              <Shield className="h-3.5 w-3.5 mr-1" />
+              <ShieldCheck className="h-3.5 w-3.5 mr-1" />
               Risk
             </TabsTrigger>
             <TabsTrigger value="symbols" className="text-xs data-[state=active]:bg-primary/20 data-[state=active]:text-primary">
-              <ArrowRightLeft className="h-3.5 w-3.5 mr-1" />
+              <Route className="h-3.5 w-3.5 mr-1" />
               Symbols
             </TabsTrigger>
           </TabsList>
@@ -273,7 +273,7 @@ export function CreateCopierGroupModal({
               {/* Follower Selection */}
               <div className="space-y-3">
                 <div className="flex items-center gap-2">
-                  <Users className="h-4 w-4 text-blue-500" />
+                  <UsersRound className="h-4 w-4 text-blue-500" />
                   <Label className="font-semibold">Follower Accounts</Label>
                   <Badge variant="secondary" className="text-[10px]">
                     {selectedFollowerIds.length} selected
@@ -437,7 +437,7 @@ export function CreateCopierGroupModal({
             Cancel
           </Button>
           <Button disabled={!canCreate} onClick={handleCreate}>
-            <Plus className="h-4 w-4 mr-1" />
+            <PlusCircle className="h-4 w-4 mr-1" />
             {editGroup ? 'Save Changes' : 'Create Group'}
           </Button>
         </DialogFooter>

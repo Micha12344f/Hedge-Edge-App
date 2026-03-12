@@ -7,7 +7,7 @@ import { useCopierGroupsContext } from '@/contexts/CopierGroupsContext';
 import { isBridgeAvailable, mt5, type AccountSnapshot } from '@/lib/local-trading-bridge';
 import type { ConnectionSnapshot } from '@/types/connections';
 import { AccountCard } from '@/components/dashboard/AccountCard';
-import { AddAccountModal } from '@/components/dashboard/AddAccountModal';
+import { AddAccountModal, PROP_FIRMS, PLATFORMS } from '@/components/dashboard/AddAccountModal';
 import { AccountDetailsModal } from '@/components/dashboard/AccountDetailsModal';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -20,19 +20,16 @@ import { AnimatedCurrency } from '@/components/ui/animated-counter';
 import { ShinyText } from '@/components/ui/shiny-text';
 import { SpotlightCard } from '@/components/ui/spotlight-card';
 import { 
-  Plus, 
-  TrendingUp, 
-  TrendingDown, 
-  Wallet, 
-  Target, 
-  BarChart3,
-  RefreshCw,
-  Sparkles,
-  HelpCircle,
+  PlusCircle, 
+  ArrowUpRight, 
+  ArrowDownRight, 
+  Landmark, 
+  PieChart, 
+  Layers,
+  RotateCw,
+  TrendingUp,
   ArrowRight,
-  Settings,
-  Zap,
-  Shield,
+  CircleDollarSign,
 } from 'lucide-react';
 
 const DashboardOverview = () => {
@@ -334,7 +331,7 @@ const DashboardOverview = () => {
   const statsCards = [
     {
       title: 'Total P&L',
-      icon: totalPnL >= 0 ? TrendingUp : TrendingDown,
+      icon: CircleDollarSign,
       value: totalPnL,
       type: 'currency' as const,
       className: totalPnL >= 0 ? 'text-primary' : 'text-destructive',
@@ -345,7 +342,7 @@ const DashboardOverview = () => {
     },
     {
       title: 'Assets Under Management',
-      icon: Wallet,
+      icon: Landmark,
       value: totalAUM,
       type: 'currency' as const,
       className: 'text-foreground',
@@ -355,7 +352,7 @@ const DashboardOverview = () => {
     },
     {
       title: 'ROI',
-      icon: BarChart3,
+      icon: PieChart,
       value: roiPercent,
       type: 'percent' as const,
       className: roiPercent >= 0 ? 'text-primary' : 'text-destructive',
@@ -365,7 +362,7 @@ const DashboardOverview = () => {
     },
     {
       title: 'Active Accounts',
-      icon: Target,
+      icon: Layers,
       value: accounts.length,
       type: 'number' as const,
       subtitle: `(${evaluationCount} eval, ${fundedCount} funded, ${hedgeCount} hedge)`,
@@ -388,7 +385,7 @@ const DashboardOverview = () => {
             >
               Overview
             </GradientText>
-            <Sparkles className="w-5 h-5 text-secondary animate-pulse" />
+            <TrendingUp className="w-5 h-5 text-secondary animate-pulse" />
             <Badge variant="secondary" className="text-xs">Beta</Badge>
           </h1>
           <p className="text-muted-foreground">Manage all your trading accounts in one place</p>
@@ -410,7 +407,7 @@ const DashboardOverview = () => {
                   onClick={handleManualRefresh}
                   disabled={isRefreshing}
                 >
-                  <RefreshCw className={`mr-2 h-4 w-4 transition-transform group-hover:scale-110 ${isRefreshing ? 'animate-spin' : ''}`} />
+                  <RotateCw className={`mr-2 h-4 w-4 transition-transform group-hover:scale-110 ${isRefreshing ? 'animate-spin' : ''}`} />
                   {isRefreshing ? 'Refreshing...' : 'Refresh'}
                 </Button>
               </TooltipTrigger>
@@ -421,7 +418,7 @@ const DashboardOverview = () => {
           </TooltipProvider>
 
           <Button onClick={() => setAddModalOpen(true)} className="group">
-            <Plus className="mr-2 h-4 w-4 transition-transform group-hover:rotate-90" />
+            <PlusCircle className="mr-2 h-4 w-4 transition-transform group-hover:rotate-90" />
             Add Account
           </Button>
         </div>
@@ -443,7 +440,9 @@ const DashboardOverview = () => {
                   <CardTitle className="text-sm font-medium text-muted-foreground">{stat.title}</CardTitle>
                   <Tooltip>
                     <TooltipTrigger>
-                      <stat.icon className={`h-4 w-4 transition-all duration-300 group-hover:scale-110 ${stat.iconClassName}`} />
+                  <div className="icon-container">
+                    <stat.icon className={`h-5 w-5 transition-all duration-300 group-hover:scale-110 ${stat.iconClassName}`} />
+                  </div>
                     </TooltipTrigger>
                     <TooltipContent>
                       <p>{stat.tooltip}</p>
@@ -548,7 +547,7 @@ const DashboardOverview = () => {
                     <div className="bg-gradient-to-r from-primary/10 via-secondary/10 to-primary/10 p-6 border-b border-border/30">
                       <div className="flex items-center gap-4">
                         <div className="w-16 h-16 rounded-full bg-gradient-to-br from-primary/20 to-secondary/20 flex items-center justify-center">
-                          <Sparkles className="w-8 h-8 text-primary" />
+                          <TrendingUp className="w-8 h-8 text-primary" />
                         </div>
                         <div>
                           <h3 className="text-xl font-bold text-foreground">Welcome to Hedge Edge!</h3>
@@ -596,28 +595,64 @@ const DashboardOverview = () => {
                       </div>
                     </div>
                     
-                    {/* Features Preview */}
-                    <div className="p-6 pt-0">
-                      <div className="flex flex-wrap gap-3 text-sm">
-                        <div className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-primary/10 text-primary">
-                          <Zap className="w-3.5 h-3.5" />
-                          <span>Real-time Sync</span>
+                    {/* Supported Platforms */}
+                    <div className="px-6 pb-2">
+                      <p className="text-xs font-semibold uppercase tracking-widest text-muted-foreground/60 mb-4 text-center">Supported Platforms</p>
+                      <div className="flex justify-center gap-5">
+                        {PLATFORMS.map((platform) => (
+                          <div
+                            key={platform.id}
+                            className="group/plat relative flex flex-col items-center gap-2.5 px-6 py-4 rounded-2xl border border-border/40 bg-card/60 backdrop-blur-sm transition-all duration-300 hover:scale-105 hover:border-border/80"
+                            style={{ ['--plat-color' as string]: platform.hoverColor }}
+                          >
+                            <div className="relative">
+                              <div className="absolute inset-0 rounded-full blur-xl opacity-0 group-hover/plat:opacity-40 transition-opacity duration-300" style={{ background: platform.hoverColor }} />
+                              <img
+                                src={platform.logo}
+                                alt={platform.name}
+                                className="relative w-14 h-14 rounded-xl object-contain drop-shadow-lg transition-transform duration-300 group-hover/plat:scale-110"
+                              />
+                            </div>
+                            <span className="text-sm font-semibold text-foreground/90 group-hover/plat:text-foreground transition-colors">{platform.name}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* Trusted by Prop Firms */}
+                    <div className="px-6 pb-2 pt-4">
+                      <p className="text-xs font-semibold uppercase tracking-widest text-muted-foreground/60 mb-4 text-center">Works with 35+ Prop Firms</p>
+                      <div className="relative overflow-hidden rounded-2xl border border-border/30 bg-card/40 backdrop-blur-sm py-5">
+                        {/* Fade edges */}
+                        <div className="pointer-events-none absolute inset-y-0 left-0 w-16 z-10 bg-gradient-to-r from-card/90 to-transparent" />
+                        <div className="pointer-events-none absolute inset-y-0 right-0 w-16 z-10 bg-gradient-to-l from-card/90 to-transparent" />
+                        
+                        {/* Row 1 - left scroll */}
+                        <div className="flex gap-6 mb-4 animate-marquee">
+                          {[...PROP_FIRMS, ...PROP_FIRMS].map((firm, i) => (
+                            <div key={`r1-${i}`} className="flex-none flex items-center gap-2.5 px-4 py-2 rounded-xl bg-background/50 border border-border/20 hover:border-primary/30 hover:bg-primary/5 transition-all duration-200">
+                              <img src={firm.logo} alt={firm.name} className="w-7 h-7 rounded-md object-contain" />
+                              <span className="text-xs font-medium text-foreground/70 whitespace-nowrap">{firm.name}</span>
+                            </div>
+                          ))}
                         </div>
-                        <div className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-secondary/10 text-secondary">
-                          <Shield className="w-3.5 h-3.5" />
-                          <span>Secure Local Connection</span>
-                        </div>
-                        <div className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-accent/20 text-foreground">
-                          <TrendingUp className="w-3.5 h-3.5" />
-                          <span>Performance Analytics</span>
+                        
+                        {/* Row 2 - right scroll */}
+                        <div className="flex gap-6 animate-marquee-rtl">
+                          {[...PROP_FIRMS.slice(10), ...PROP_FIRMS.slice(0, 10), ...PROP_FIRMS.slice(10), ...PROP_FIRMS.slice(0, 10)].map((firm, i) => (
+                            <div key={`r2-${i}`} className="flex-none flex items-center gap-2.5 px-4 py-2 rounded-xl bg-background/50 border border-border/20 hover:border-secondary/30 hover:bg-secondary/5 transition-all duration-200">
+                              <img src={firm.logo} alt={firm.name} className="w-7 h-7 rounded-md object-contain" />
+                              <span className="text-xs font-medium text-foreground/70 whitespace-nowrap">{firm.name}</span>
+                            </div>
+                          ))}
                         </div>
                       </div>
                     </div>
-                    
+
                     {/* CTA */}
-                    <div className="p-6 pt-0 flex justify-center">
+                    <div className="p-6 pt-4 flex justify-center">
                       <Button size="lg" onClick={() => setAddModalOpen(true)} className="group">
-                        <Plus className="mr-2 h-5 w-5 transition-transform group-hover:rotate-90" />
+                        <PlusCircle className="mr-2 h-5 w-5 transition-transform group-hover:rotate-90" />
                         Add Your First Account
                       </Button>
                     </div>

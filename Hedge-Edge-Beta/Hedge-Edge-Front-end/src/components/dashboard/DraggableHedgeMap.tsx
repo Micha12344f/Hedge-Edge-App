@@ -20,8 +20,8 @@ import {
   ZoomIn, 
   ZoomOut, 
   Maximize2,
-  Plus,
-  Sparkles,
+  PlusCircle,
+  TrendingUp,
   Trash2,
   Link2,
   GitBranch,
@@ -1106,7 +1106,7 @@ export const DraggableHedgeMap = ({
             <Maximize2 className="h-4 w-4" />
           </Button>
           <Button variant="ghost" size="icon" onClick={autoAlign} className="h-8 w-8" title="Auto-align nodes">
-            <Sparkles className="h-4 w-4" />
+            <TrendingUp className="h-4 w-4" />
           </Button>
         </div>
       </div>
@@ -1210,7 +1210,7 @@ export const DraggableHedgeMap = ({
           </Button>
         )}
         <Button onClick={onAddAccount} className="gap-2">
-          <Plus className="h-4 w-4" />
+          <PlusCircle className="h-4 w-4" />
           Add Account
         </Button>
       </div>
@@ -1287,7 +1287,7 @@ export const DraggableHedgeMap = ({
                 onClick={onAddAccount}
                 className="w-20 h-20 rounded-full bg-muted/30 flex items-center justify-center mx-auto transition-all hover:bg-muted/50 hover:scale-110 cursor-pointer"
               >
-                <Plus className="w-10 h-10 text-muted-foreground" />
+                <PlusCircle className="w-10 h-10 text-muted-foreground" />
               </button>
               <div>
                 <h3 className="text-lg font-medium text-foreground">No accounts yet</h3>

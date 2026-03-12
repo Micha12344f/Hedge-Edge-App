@@ -3,10 +3,10 @@ import { Badge } from '@/components/ui/badge';
 import { Progress } from '@/components/ui/progress';
 import { cn } from '@/lib/utils';
 import { 
-  TrendingUp, 
-  TrendingDown, 
-  Target,
-  Shield,
+  ArrowUpRight, 
+  ArrowDownRight, 
+  Layers,
+  ShieldCheck,
   Link2,
   LinkIcon,
   Zap
@@ -124,9 +124,9 @@ export const LinkedAccountCard = ({
           <p className="text-[10px] text-muted-foreground uppercase">P&L</p>
           <div className="flex items-center gap-1">
             {isProfit ? (
-              <TrendingUp className="w-3.5 h-3.5 text-emerald-400" />
+              <ArrowUpRight className="w-3.5 h-3.5 text-emerald-400" />
             ) : (
-              <TrendingDown className="w-3.5 h-3.5 text-red-400" />
+              <ArrowDownRight className="w-3.5 h-3.5 text-red-400" />
             )}
             <span className={cn(
               'text-sm font-semibold',

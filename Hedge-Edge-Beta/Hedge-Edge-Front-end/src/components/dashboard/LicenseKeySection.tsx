@@ -12,23 +12,24 @@ import { isElectron } from '@/lib/desktop';
 import { useToast } from '@/hooks/use-toast';
 import {
   Key,
+  KeyRound,
   CheckCircle2,
   XCircle,
-  AlertTriangle,
+  ShieldAlert,
   Loader2,
-  RefreshCw,
+  RotateCw,
   Eye,
   EyeOff,
   Copy,
   Check,
-  Clock,
+  Timer,
   Calendar,
-  Shield,
+  ShieldCheck,
   Trash2,
   Lock,
   LockOpen,
-  HelpCircle,
-  Sparkles,
+  LifeBuoy,
+  Gem,
 } from 'lucide-react';
 import type { LicenseInfo, LicenseStatus } from '@/types/connections';
 
@@ -75,7 +76,7 @@ function getLicenseStatusConfig(status: LicenseStatus): {
       };
     case 'expired':
       return {
-        icon: AlertTriangle,
+        icon: ShieldAlert,
         color: 'text-yellow-500',
         bgColor: 'bg-yellow-500/10',
         borderColor: 'border-yellow-500/30',
@@ -99,7 +100,7 @@ function getLicenseStatusConfig(status: LicenseStatus): {
       };
     case 'error':
       return {
-        icon: AlertTriangle,
+        icon: ShieldAlert,
         color: 'text-destructive',
         bgColor: 'bg-destructive/10',
         borderColor: 'border-destructive/30',
@@ -359,7 +360,7 @@ export function LicenseKeySection({
         <div className="flex items-start justify-between">
           <div>
             <CardTitle className="flex items-center gap-2">
-              <Key className="h-5 w-5" />
+              <KeyRound className="h-5 w-5" />
               License Key
             </CardTitle>
             <CardDescription>
@@ -445,7 +446,7 @@ export function LicenseKeySection({
                 onClick={handleRefresh}
                 disabled={isRefreshing}
               >
-                <RefreshCw className={cn('h-4 w-4', isRefreshing && 'animate-spin')} />
+                <RotateCw className={cn('h-4 w-4', isRefreshing && 'animate-spin')} />
               </Button>
             )}
           </div>
@@ -455,7 +456,7 @@ export function LicenseKeySection({
             <div className="grid grid-cols-2 gap-4 mt-4 pt-4 border-t border-border/30">
               {licenseInfo.tier && (
                 <div className="flex items-center gap-2">
-                  <Shield className="h-4 w-4 text-muted-foreground" />
+                  <ShieldCheck className="h-4 w-4 text-muted-foreground" />
                   <div>
                     <p className="text-xs text-muted-foreground">Plan</p>
                     <p className="text-sm font-medium capitalize">{licenseInfo.tier}</p>
@@ -473,7 +474,7 @@ export function LicenseKeySection({
               )}
               {licenseInfo.lastChecked && (
                 <div className="flex items-center gap-2">
-                  <Clock className="h-4 w-4 text-muted-foreground" />
+                  <Timer className="h-4 w-4 text-muted-foreground" />
                   <div>
                     <p className="text-xs text-muted-foreground">Last Verified</p>
                     <p className="text-sm font-medium">{formatRelativeTime(licenseInfo.lastChecked)}</p>
@@ -482,7 +483,7 @@ export function LicenseKeySection({
               )}
               {licenseInfo.nextCheckAt && (
                 <div className="flex items-center gap-2">
-                  <RefreshCw className="h-4 w-4 text-muted-foreground" />
+                  <RotateCw className="h-4 w-4 text-muted-foreground" />
                   <div>
                     <p className="text-xs text-muted-foreground">Next Check</p>
                     <p className="text-sm font-medium">{formatRelativeTime(licenseInfo.nextCheckAt)}</p>
@@ -535,7 +536,7 @@ export function LicenseKeySection({
           
           {error && (
             <Alert variant="destructive">
-              <AlertTriangle className="h-4 w-4" />
+              <ShieldAlert className="h-4 w-4" />
               <AlertDescription>{error}</AlertDescription>
             </Alert>
           )}

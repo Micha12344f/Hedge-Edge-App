@@ -4,32 +4,30 @@ import { useSidebar } from '@/contexts/SidebarContext';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 import {
-  LayoutDashboard,
-  BarChart3,
-  Settings,
+  Gauge,
+  LineChart,
+  SlidersHorizontal,
   LogOut,
   ChevronLeft,
   ChevronRight,
   TrendingUp,
-  Wallet,
-  Copy,
-  HelpCircle,
-  Wifi,
-  WifiOff,
+  Network,
+  Repeat2,
+  Signal,
+  SignalZero,
 } from 'lucide-react';
 import { useConnectionsFeed } from '@/hooks/useConnectionsFeed';
 import { GradientText } from '@/components/ui/gradient-text';
 
 const navItems = [
-  { icon: LayoutDashboard, label: 'Overview', path: '/app/overview' },
-  { icon: Copy, label: 'Trade Copier', path: '/app/copier' },
-  { icon: Wallet, label: 'Hedge Map', path: '/app/accounts' },
-  { icon: BarChart3, label: 'Analytics', path: '/app/analytics' },
+  { icon: Gauge, label: 'Overview', path: '/app/overview' },
+  { icon: Repeat2, label: 'Trade Copier', path: '/app/copier' },
+  { icon: Network, label: 'Hedge Map', path: '/app/accounts' },
+  { icon: LineChart, label: 'Analytics', path: '/app/analytics' },
 ];
 
 const bottomNavItems = [
-  { icon: HelpCircle, label: 'Help', path: '/app/help' },
-  { icon: Settings, label: 'Settings', path: '/app/settings' },
+  { icon: SlidersHorizontal, label: 'Settings', path: '/app/settings' },
 ];
 
 export const DashboardSidebar = () => {
@@ -63,7 +61,7 @@ export const DashboardSidebar = () => {
       <div className="h-16 flex items-center justify-between px-4 border-b border-border/30">
         {!collapsed && (
           <div className="flex items-center gap-1 animate-fade-in-up">
-            <TrendingUp className="w-6 h-6 text-primary" strokeWidth={3} />
+            <TrendingUp className="w-6 h-6 text-primary" strokeWidth={2.5} />
             <GradientText 
               colors={['hsl(120, 100%, 54%)', 'hsl(45, 100%, 56%)', 'hsl(120, 100%, 54%)']} 
               animationSpeed={5}
@@ -94,14 +92,14 @@ export const DashboardSidebar = () => {
             allConnected ? "bg-primary/10" : someConnected ? "bg-yellow-500/10" : "bg-muted/30"
           )}>
             {allConnected ? (
-              <Wifi className="h-4 w-4 text-primary flex-shrink-0" />
+              <Signal className="h-4 w-4 text-primary flex-shrink-0" />
             ) : someConnected ? (
-              <Wifi className="h-4 w-4 text-yellow-500 flex-shrink-0" />
+              <Signal className="h-4 w-4 text-yellow-500 flex-shrink-0" />
             ) : (
-              <WifiOff className="h-4 w-4 text-muted-foreground flex-shrink-0" />
+              <SignalZero className="h-4 w-4 text-muted-foreground flex-shrink-0" />
             )}
             {!collapsed && (
-              <div className="flex-1 min-w-0">
+              <div className="flex-1 min-w-0 flex items-center gap-2">
                 <p className={cn(
                   "text-xs font-medium truncate",
                   allConnected ? "text-primary" : someConnected ? "text-yellow-500" : "text-muted-foreground"
@@ -112,6 +110,8 @@ export const DashboardSidebar = () => {
                     ? 'Partially Connected'
                     : 'No Connections'}
                 </p>
+                {allConnected && <span className="status-dot-pulse" />}
+                {someConnected && <span className="status-dot-warning" />}
               </div>
             )}
           </div>
@@ -137,12 +137,17 @@ export const DashboardSidebar = () => {
             {({ isActive }) => (
               <>
                 {isActive && (
-                  <span className="absolute left-0 top-1/2 -translate-y-1/2 w-0.5 h-6 bg-primary rounded-full" />
+                  <span className="absolute left-0 top-1/2 -translate-y-1/2 w-[3px] h-7 bg-primary rounded-r-full shadow-[0_0_8px_1px_hsl(var(--primary)/0.5)]" />
                 )}
-                <item.icon className={cn(
-                  "w-5 h-5 shrink-0 transition-transform duration-200",
-                  isActive && "scale-110"
-                )} />
+                <div className={cn(
+                  "flex items-center justify-center w-8 h-8 rounded-md shrink-0 transition-all duration-200",
+                  isActive ? "bg-primary/10" : "group-hover:bg-muted/60"
+                )}>
+                  <item.icon className={cn(
+                    "w-[18px] h-[18px] transition-transform duration-200",
+                    isActive && "scale-110"
+                  )} />
+                </div>
                 {!collapsed && (
                   <span className="text-sm font-medium transition-all duration-200">
                     {item.label}
@@ -172,7 +177,7 @@ export const DashboardSidebar = () => {
             {({ isActive }) => (
               <>
                 {isActive && (
-                  <span className="absolute left-0 top-1/2 -translate-y-1/2 w-0.5 h-6 bg-primary rounded-full" />
+                  <span className="absolute left-0 top-1/2 -translate-y-1/2 w-[3px] h-7 bg-primary rounded-r-full shadow-[0_0_8px_1px_hsl(var(--primary)/0.5)]" />
                 )}
                 <item.icon className="w-5 h-5 shrink-0" />
                 {!collapsed && <span className="text-sm font-medium">{item.label}</span>}

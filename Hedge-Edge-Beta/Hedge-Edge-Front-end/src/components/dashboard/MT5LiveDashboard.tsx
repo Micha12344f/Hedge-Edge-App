@@ -14,18 +14,16 @@ import {
 import type { TradingPlatform } from "@/lib/local-trading-bridge";
 import { 
   Loader2, 
-  RefreshCw, 
-  TrendingUp, 
-  TrendingDown, 
-  Wallet, 
+  RotateCw, 
+  Landmark, 
   PiggyBank,
-  AlertCircle,
+  ShieldAlert,
   Activity,
   ArrowUpRight,
   ArrowDownRight,
-  Clock,
-  Wifi,
-  WifiOff,
+  Timer,
+  Signal,
+  SignalZero,
   Terminal
 } from "lucide-react";
 
@@ -55,7 +53,7 @@ export function MT5LiveDashboard() {
         <CardHeader>
           <div className="flex items-center justify-between mb-4">
             <CardTitle className="flex items-center gap-2 text-destructive">
-              <AlertCircle className="h-5 w-5" />
+              <ShieldAlert className="h-5 w-5" />
               Connection Error
             </CardTitle>
             <PlatformSelector platform={platform} onChange={setPlatform} />
@@ -80,7 +78,7 @@ export function MT5LiveDashboard() {
             <span>Agent Status: {terminalRunning ? 'Running' : 'Not Running'}</span>
           </div>
           <Button onClick={refresh} variant="outline" className="w-full">
-            <RefreshCw className="h-4 w-4 mr-2" />
+            <RotateCw className="h-4 w-4 mr-2" />
             Retry Connection
           </Button>
         </CardContent>
@@ -101,7 +99,7 @@ export function MT5LiveDashboard() {
         <CardContent className="p-8 text-center">
           <p className="text-muted-foreground">No live feed data available.</p>
           <Button onClick={refresh} variant="outline" className="mt-4">
-            <RefreshCw className="h-4 w-4 mr-2" />
+            <RotateCw className="h-4 w-4 mr-2" />
             Refresh
           </Button>
         </CardContent>
@@ -120,12 +118,12 @@ export function MT5LiveDashboard() {
           <PlatformSelector platform={platform} onChange={setPlatform} />
           {isConnected ? (
             <Badge variant="outline" className="bg-primary/10 text-primary border-primary/20">
-              <Wifi className="h-3 w-3 mr-1" />
+              <Signal className="h-3 w-3 mr-1" />
               Connected
             </Badge>
           ) : (
             <Badge variant="outline" className="bg-red-500/10 text-red-500 border-red-500/20">
-              <WifiOff className="h-3 w-3 mr-1" />
+              <SignalZero className="h-3 w-3 mr-1" />
               Disconnected
             </Badge>
           )}
@@ -136,7 +134,7 @@ export function MT5LiveDashboard() {
         <div className="flex items-center gap-2">
           {lastUpdate && (
             <span className="text-xs text-muted-foreground flex items-center gap-1">
-              <Clock className="h-3 w-3" />
+              <Timer className="h-3 w-3" />
               {lastUpdate.toLocaleTimeString()}
             </span>
           )}
@@ -146,7 +144,7 @@ export function MT5LiveDashboard() {
             onClick={refresh}
             disabled={isLoading}
           >
-            <RefreshCw className={`h-4 w-4 ${isLoading ? 'animate-spin' : ''}`} />
+            <RotateCw className={`h-4 w-4 ${isLoading ? 'animate-spin' : ''}`} />
           </Button>
         </div>
       </div>
@@ -156,7 +154,7 @@ export function MT5LiveDashboard() {
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-medium">Balance</CardTitle>
-            <Wallet className="h-4 w-4 text-muted-foreground" />
+            <Landmark className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold">
@@ -202,9 +200,9 @@ export function MT5LiveDashboard() {
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-medium">Floating P/L</CardTitle>
             {(snapshot.profit || 0) >= 0 ? (
-              <TrendingUp className="h-4 w-4 text-primary" />
+              <ArrowUpRight className="h-4 w-4 text-primary" />
             ) : (
-              <TrendingDown className="h-4 w-4 text-red-500" />
+              <ArrowDownRight className="h-4 w-4 text-red-500" />
             )}
           </CardHeader>
           <CardContent>

@@ -9,65 +9,39 @@ import { CopierGroupCard } from '@/components/dashboard/CopierGroupCard';
 import { CreateCopierGroupModal } from '@/components/dashboard/CreateCopierGroupModal';
 import { ConfigureCopierGroupModal } from '@/components/dashboard/ConfigureCopierGroupModal';
 import { NotificationPreferencesPanel } from '@/components/dashboard/NotificationPreferencesPanel';
+import { PROP_FIRMS } from '@/components/dashboard/AddAccountModal';
 import { useCopierGroupsContext } from '@/contexts/CopierGroupsContext';
 import type { CopierGroup } from '@/types/copier';
 import {
-  Zap,
-  Shield,
-  ArrowRightLeft,
-  Plus,
-  Settings,
+  Route,
+  PlusCircle,
   ArrowRight,
   CheckCircle2,
-  Clock,
-  AlertTriangle,
+  ShieldAlert,
   Activity,
-  Users,
+  UsersRound,
 } from 'lucide-react';
 
-// ─── Features & Setup Steps for Empty State ─────────────────────────────────
-
-const features = [
-  {
-    icon: Zap,
-    title: 'Ultra-Low Latency',
-    description: 'Trades copied in under 50ms via local IPC connection',
-  },
-  {
-    icon: Shield,
-    title: 'Smart Symbol Mapping',
-    description: 'Automatic symbol mapping with suffix handling and alias support',
-  },
-  {
-    icon: ArrowRightLeft,
-    title: 'Reverse Copying',
-    description: 'Copy trades in reverse for hedging strategies across accounts',
-  },
-  {
-    icon: Settings,
-    title: 'Symbol Mapping',
-    description: 'Map symbols between different brokers with suffix and alias support',
-  },
-];
+// ─── Setup Steps for Empty State ─────────────────────────────────
 
 const setupSteps = [
   {
     step: 1,
     title: 'Create a Copier Group',
     description: 'Give it a name and select a leader (master) account',
-    icon: Plus,
+    icon: PlusCircle,
   },
   {
     step: 2,
     title: 'Add Follower Accounts',
     description: 'Choose one or more accounts to receive copied trades',
-    icon: Users,
+    icon: UsersRound,
   },
   {
     step: 3,
     title: 'Configure Risk Settings',
     description: 'Set volume sizing and lot multipliers for each follower',
-    icon: Shield,
+    icon: Route,
   },
   {
     step: 4,
@@ -145,7 +119,7 @@ const TradeCopier = () => {
                       onClick={() => setCreateOpen(true)}
                       disabled={loading || activeAccounts.length < 2}
                     >
-                      <Plus className="mr-2 h-4 w-4" />
+                      <PlusCircle className="mr-2 h-4 w-4" />
                       New Copier Group
                     </Button>
                   </span>
@@ -188,7 +162,8 @@ const TradeCopier = () => {
 
         {/* Live Activity Log */}
         {groups.length > 0 && activityLog.length > 0 && (
-          <Card className="border-border/50 bg-card/50">
+          <Card className="border-border/50 bg-card/50 overflow-hidden">
+            <div className="gradient-divider" />
             <CardHeader className="pb-3">
               <CardTitle className="text-sm font-medium flex items-center gap-2">
                 <Activity className="h-4 w-4 text-primary" />
@@ -211,7 +186,7 @@ const TradeCopier = () => {
                       {entry.status === 'success' ? (
                         <CheckCircle2 className="h-3 w-3 text-green-500 flex-shrink-0" />
                       ) : (
-                        <AlertTriangle className="h-3 w-3 text-red-500 flex-shrink-0" />
+                        <ShieldAlert className="h-3 w-3 text-red-500 flex-shrink-0" />
                       )}
                       <span className="font-medium">{entry.symbol}</span>
                       <span className={entry.action === 'buy' ? 'text-green-400' : 'text-red-400'}>
@@ -240,15 +215,6 @@ const TradeCopier = () => {
         {/* Empty State */}
         {groups.length === 0 && !loading && (
           <Card className="border-border/50 bg-gradient-to-br from-card/80 to-card/40 overflow-hidden">
-            <CardHeader className="border-b border-border/30">
-              <CardTitle className="flex items-center gap-2">
-                <Clock className="h-5 w-5 text-primary" />
-                Get Started with Trade Copying
-              </CardTitle>
-              <CardDescription>
-                Follow these steps to set up your first copier group
-              </CardDescription>
-            </CardHeader>
             <CardContent className="p-6">
               {/* Setup Steps */}
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
@@ -260,40 +226,43 @@ const TradeCopier = () => {
                     {index < setupSteps.length - 1 && (
                       <ArrowRight className="hidden lg:block absolute -right-2 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground z-10" />
                     )}
-                    <div className="w-12 h-12 rounded-full bg-primary/10 flex items-center justify-center mb-3 group-hover:bg-primary/20 group-hover:scale-110 transition-all">
-                      <step.icon className="w-5 h-5 text-primary" />
+                    <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-primary/15 to-primary/5 flex items-center justify-center mb-3 group-hover:bg-primary/20 group-hover:scale-110 group-hover:shadow-lg group-hover:shadow-primary/10 transition-all">
+                      <span className="text-2xl font-black text-primary leading-none">{step.step}</span>
                     </div>
-                    <Badge variant="outline" className="text-[10px] mb-2">Step {step.step}</Badge>
                     <h4 className="font-medium text-foreground text-sm">{step.title}</h4>
                     <p className="text-xs text-muted-foreground mt-1">{step.description}</p>
                   </div>
                 ))}
               </div>
 
-              {/* Features */}
-              <div className="border-t border-border/30 pt-6">
-                <h4 className="text-sm font-medium text-foreground mb-4 flex items-center gap-2">
-                  <CheckCircle2 className="h-4 w-4 text-primary" />
-                  What you'll get
-                </h4>
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-                  {features.map((feature) => (
+              {/* Prop Firms Showcase */}
+              <div className="relative mt-2 mb-2">
+                <div className="flex items-center gap-3 mb-4">
+                  <div className="h-px flex-1 bg-gradient-to-r from-transparent via-border/50 to-transparent" />
+                  <span className="text-[11px] font-semibold uppercase tracking-[0.2em] text-muted-foreground/50">Compatible with 35+ prop firms</span>
+                  <div className="h-px flex-1 bg-gradient-to-r from-transparent via-border/50 to-transparent" />
+                </div>
+                <div className="grid grid-cols-6 sm:grid-cols-8 md:grid-cols-10 lg:grid-cols-12 gap-2">
+                  {PROP_FIRMS.map((firm) => (
                     <div
-                      key={feature.title}
-                      className="flex items-start gap-3 p-3 rounded-lg border border-border/30 hover:border-primary/30 transition-colors"
+                      key={firm.name}
+                      title={firm.name}
+                      className="group/firm relative flex items-center justify-center p-2.5 rounded-xl bg-muted/20 border border-border/20 hover:bg-primary/8 hover:border-primary/25 hover:scale-110 transition-all duration-200 cursor-default"
                     >
-                      <feature.icon className="w-5 h-5 text-primary flex-shrink-0 mt-0.5" />
-                      <div>
-                        <h5 className="font-medium text-foreground text-sm">{feature.title}</h5>
-                        <p className="text-xs text-muted-foreground mt-0.5">{feature.description}</p>
-                      </div>
+                      <img
+                        src={firm.logo}
+                        alt={firm.name}
+                        className="w-7 h-7 rounded-lg object-contain opacity-60 group-hover/firm:opacity-100 transition-opacity duration-200"
+                        loading="lazy"
+                      />
+                      <div className="absolute inset-0 rounded-xl opacity-0 group-hover/firm:opacity-100 transition-opacity duration-200 bg-primary/5 ring-1 ring-primary/20" />
                     </div>
                   ))}
                 </div>
               </div>
 
               {/* CTA */}
-              <div className="flex flex-col sm:flex-row items-center justify-center gap-4 mt-8 pt-6 border-t border-border/30">
+              <div className="flex flex-col sm:flex-row items-center justify-center gap-4 mt-6 pt-6 border-t border-border/30">
                 {loading ? (
                   <div className="flex items-center gap-2 text-sm text-muted-foreground">
                     <Activity className="h-4 w-4 animate-pulse text-primary" />
@@ -301,12 +270,12 @@ const TradeCopier = () => {
                   </div>
                 ) : activeAccounts.length < 2 ? (
                   <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                    <AlertTriangle className="h-4 w-4 text-yellow-500" />
+                    <ShieldAlert className="h-4 w-4 text-yellow-500" />
                     You need at least 2 active accounts to create a copier group
                   </div>
                 ) : (
                   <Button size="lg" className="group" onClick={() => setCreateOpen(true)}>
-                    <Plus className="mr-2 h-4 w-4" />
+                    <PlusCircle className="mr-2 h-4 w-4" />
                     Create Your First Copier Group
                   </Button>
                 )}

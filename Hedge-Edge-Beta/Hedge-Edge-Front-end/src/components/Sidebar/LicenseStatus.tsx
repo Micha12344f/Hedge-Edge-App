@@ -14,16 +14,16 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/comp
 import { cn } from '@/lib/utils';
 import { useLicense, type LicenseTier } from '@/contexts/LicenseContext';
 import {
-  Key,
+  KeyRound,
   CheckCircle2,
   XCircle,
-  AlertTriangle,
+  ShieldAlert,
   Loader2,
   Crown,
   Star,
   Zap,
   Activity,
-  Clock,
+  Timer,
 } from 'lucide-react';
 
 // ============================================================================
@@ -87,11 +87,11 @@ function getStatusIcon(status: string | undefined, isLoading: boolean) {
       return <XCircle className="h-4 w-4 text-destructive" />;
     case 'invalid':
     case 'error':
-      return <AlertTriangle className="h-4 w-4 text-destructive" />;
+      return <ShieldAlert className="h-4 w-4 text-destructive" />;
     case 'checking':
       return <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />;
     default:
-      return <Key className="h-4 w-4 text-muted-foreground" />;
+      return <KeyRound className="h-4 w-4 text-muted-foreground" />;
   }
 }
 
@@ -137,7 +137,7 @@ export function LicenseStatus({
               "flex items-center gap-1",
               isExpiringSoon ? "text-yellow-500" : "text-muted-foreground"
             )}>
-              <Clock className="h-3 w-3" />
+              <Timer className="h-3 w-3" />
               {license.daysRemaining} days remaining
             </div>
           )}
@@ -263,7 +263,7 @@ export function LicenseStatus({
                   {isValid ? `${tierInfo.label} License` : 'No License'}
                 </span>
                 {isExpiringSoon && (
-                  <AlertTriangle className="h-3 w-3 text-yellow-500" />
+                  <ShieldAlert className="h-3 w-3 text-yellow-500" />
                 )}
               </div>
               <div className="text-xs text-muted-foreground">

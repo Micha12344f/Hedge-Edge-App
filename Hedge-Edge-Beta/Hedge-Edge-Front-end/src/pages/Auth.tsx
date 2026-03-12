@@ -7,7 +7,7 @@ import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useToast } from '@/hooks/use-toast';
-import { Loader2, TrendingUp, Sparkles, AlertTriangle } from 'lucide-react';
+import { Loader2, TrendingUp, ShieldAlert } from 'lucide-react';
 import { AnimatedBackground } from '@/components/ui/animated-background';
 import { 
   emailSchema, 
@@ -186,7 +186,7 @@ const Auth = () => {
       <div className="w-full max-w-md animate-fade-in-up">
         {/* Logo */}
         <div className="flex items-center justify-center gap-1 mb-8">
-          <TrendingUp className="w-10 h-10 text-primary" strokeWidth={3} />
+          <TrendingUp className="w-10 h-10 text-primary" strokeWidth={2.5} />
           <span className="text-3xl font-bold text-primary">HedgeEdge</span>
         </div>
 
@@ -194,7 +194,7 @@ const Auth = () => {
           <CardHeader className="text-center space-y-2">
             <CardTitle className="text-2xl flex items-center justify-center gap-2">
               Welcome back
-              <Sparkles className="w-5 h-5 text-secondary animate-pulse" />
+              <TrendingUp className="w-5 h-5 text-secondary animate-pulse" />
             </CardTitle>
             <CardDescription className="text-base">
               Sign in to manage your trading accounts
@@ -221,7 +221,7 @@ const Auth = () => {
                 <form onSubmit={handleSignIn} className="space-y-4">
                   {lockoutMessage && (
                     <div className="flex items-center gap-2 p-3 rounded-lg bg-destructive/10 border border-destructive/20 text-destructive text-sm">
-                      <AlertTriangle className="h-4 w-4 flex-shrink-0" />
+                      <ShieldAlert className="h-4 w-4 flex-shrink-0" />
                       <span>{lockoutMessage}</span>
                     </div>
                   )}

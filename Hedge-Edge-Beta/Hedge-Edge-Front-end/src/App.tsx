@@ -18,7 +18,6 @@ const Accounts = lazy(() => import("./pages/app/Accounts"));
 const DashboardAnalytics = lazy(() => import("./pages/app/DashboardAnalytics"));
 const TradeCopier = lazy(() => import("./pages/app/TradeCopier"));
 const Settings = lazy(() => import("./pages/app/Settings"));
-const Help = lazy(() => import("./pages/app/Help"));
 const Auth = lazy(() => import("./pages/Auth"));
 
 const PageLoader = () => (
@@ -66,7 +65,6 @@ const App = () => {
                   <Route path="analytics" element={<DashboardAnalytics />} />
                   <Route path="copier" element={<TradeCopier />} />
                   <Route path="settings" element={<Settings />} />
-                  <Route path="help" element={<Help />} />
                 </Route>
 
                 {/* Auth page (for idle timeout redirect with ?reason=idle) */}

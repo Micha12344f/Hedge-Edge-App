@@ -4,20 +4,20 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { 
-  HelpCircle, 
-  MessageCircle, 
-  FileText, 
+  LifeBuoy, 
+  Headset, 
+  BookMarked, 
   Video, 
   ExternalLink, 
   ChevronDown,
   Keyboard,
   Rocket,
-  Shield,
+  ShieldCheck,
   Zap,
-  BookOpen,
-  Settings,
-  BarChart3,
-  Copy,
+  GraduationCap,
+  KeyRound,
+  LineChart,
+  Repeat2,
   Calculator,
   CheckCircle2,
 } from 'lucide-react';
@@ -32,13 +32,13 @@ const helpResources = [
     badge: 'New',
   },
   {
-    icon: FileText,
+    icon: BookMarked,
     title: 'Documentation',
     description: 'Read detailed guides and API documentation',
     action: 'Read Docs',
   },
   {
-    icon: MessageCircle,
+    icon: Headset,
     title: 'Contact Support',
     description: 'Get help from our support team within 24 hours',
     action: 'Contact Us',
@@ -47,17 +47,17 @@ const helpResources = [
 
 const quickStartSteps = [
   {
-    icon: Settings,
+    icon: KeyRound,
     title: 'Activate License',
     description: 'Enter your license key in Settings to unlock all features',
   },
   {
-    icon: BarChart3,
+    icon: LineChart,
     title: 'Add Your Accounts',
     description: 'Connect your MT5 or cTrader trading accounts to track performance',
   },
   {
-    icon: Copy,
+    icon: Repeat2,
     title: 'Set Up Trade Copier',
     description: 'Configure master and follower accounts for automatic trade copying',
   },
@@ -89,7 +89,7 @@ const faqCategories = [
   },
   {
     title: 'Connections & Security',
-    icon: Shield,
+    icon: ShieldCheck,
     faqs: [
       {
         question: 'Can I connect my MT5 or cTrader account?',
@@ -146,7 +146,7 @@ const Help = () => {
       <div className="animate-fade-in-up">
         <h1 className="text-2xl font-bold text-foreground flex items-center gap-2">
           Help & Support
-          <BookOpen className="w-5 h-5 text-primary" />
+          <GraduationCap className="w-5 h-5 text-primary" />
           <Badge variant="secondary" className="text-xs">Beta</Badge>
         </h1>
         <p className="text-muted-foreground">Everything you need to master Hedge Edge</p>
@@ -185,11 +185,11 @@ const Help = () => {
         {helpResources.map((resource) => (
           <Card 
             key={resource.title} 
-            className="border-border/50 bg-card/50 hover:border-primary/30 hover:shadow-lg hover:shadow-primary/5 transition-all duration-300 group"
+            className="border-border/50 bg-card/50 hover:border-primary/30 hover:shadow-lg hover:shadow-primary/5 transition-all duration-300 group card-lift"
           >
             <CardContent className="pt-6">
               <div className="flex flex-col items-center text-center">
-                <div className="w-12 h-12 rounded-full bg-primary/10 flex items-center justify-center mb-4 group-hover:scale-110 transition-transform">
+                <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-primary/15 to-primary/5 flex items-center justify-center mb-4 group-hover:scale-110 group-hover:shadow-lg group-hover:shadow-primary/10 transition-all duration-300">
                   <resource.icon className="w-6 h-6 text-primary" />
                 </div>
                 <div className="flex items-center gap-2 mb-1">
@@ -214,12 +214,12 @@ const Help = () => {
       {/* FAQ Sections */}
       <div className="space-y-4">
         <h2 className="text-lg font-semibold text-foreground flex items-center gap-2">
-          <HelpCircle className="h-5 w-5" />
+          <LifeBuoy className="h-5 w-5" />
           Frequently Asked Questions
         </h2>
         
         {faqCategories.map((category) => (
-          <Card key={category.title} className="border-border/50 bg-card/50 overflow-hidden">
+          <Card key={category.title} className="border-border/50 bg-card/50 overflow-hidden card-lift">
             <Collapsible 
               open={openCategories.includes(category.title)}
               onOpenChange={() => toggleCategory(category.title)}

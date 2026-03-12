@@ -8,7 +8,6 @@
 import React, { Component, ReactNode } from 'react';
 import { logger } from '@/lib/logger';
 import { Button } from '@/components/ui/button';
-import { AlertTriangle, RefreshCw, Home } from 'lucide-react';
 
 // ============================================================================
 // Types
@@ -103,7 +102,7 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
       return (
         <div className="flex min-h-[400px] flex-col items-center justify-center p-8 text-center">
           <div className="rounded-full bg-destructive/10 p-4 mb-4">
-            <AlertTriangle className="h-12 w-12 text-destructive" />
+            <span className="block h-12 w-12 text-destructive text-4xl font-bold leading-[3rem] text-center">!</span>
           </div>
           
           <h2 className="text-2xl font-semibold mb-2">Something went wrong</h2>
@@ -113,11 +112,9 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
 
           <div className="flex gap-3 mb-6">
             <Button onClick={this.handleRetry} variant="default">
-              <RefreshCw className="h-4 w-4 mr-2" />
               Try Again
             </Button>
             <Button onClick={this.handleGoHome} variant="outline">
-              <Home className="h-4 w-4 mr-2" />
               Go Home
             </Button>
           </div>
@@ -185,7 +182,7 @@ export function PageErrorBoundary({ children, pageName }: PageErrorBoundaryProps
       fallback={
         <div className="flex min-h-screen flex-col items-center justify-center p-8 bg-background">
           <div className="rounded-full bg-destructive/10 p-6 mb-6">
-            <AlertTriangle className="h-16 w-16 text-destructive" />
+            <span className="block h-16 w-16 text-destructive text-5xl font-bold leading-[4rem] text-center">!</span>
           </div>
           
           <h1 className="text-3xl font-bold mb-2">Page Error</h1>
@@ -196,11 +193,9 @@ export function PageErrorBoundary({ children, pageName }: PageErrorBoundaryProps
 
           <div className="flex gap-4">
             <Button onClick={() => window.location.reload()} size="lg">
-              <RefreshCw className="h-5 w-5 mr-2" />
               Reload Page
             </Button>
             <Button onClick={() => window.location.href = '/'} variant="outline" size="lg">
-              <Home className="h-5 w-5 mr-2" />
               Go to Dashboard
             </Button>
           </div>

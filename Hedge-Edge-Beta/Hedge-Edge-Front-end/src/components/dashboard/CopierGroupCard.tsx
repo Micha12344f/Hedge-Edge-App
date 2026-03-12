@@ -14,17 +14,17 @@ import {
   Play,
   Pause,
   MoreVertical,
-  Settings,
+  SlidersHorizontal,
   Trash2,
-  Copy,
+  Repeat2 as CopyIcon,
   Zap,
-  TrendingUp,
-  TrendingDown,
+  ArrowUpRight,
+  ArrowDownRight,
   CircleDot,
-  AlertTriangle,
-  Clock,
+  ShieldAlert,
+  Timer,
   ArrowRight,
-  Users,
+  UsersRound,
   ChevronDown,
   ChevronUp,
   Repeat2,
@@ -44,8 +44,8 @@ const fmt = (v: number) =>
 const statusConfig: Record<string, { color: string; bg: string; icon: typeof CircleDot; label: string }> = {
   active: { color: 'text-green-500', bg: 'bg-green-500/10 border-green-500/30', icon: CircleDot, label: 'Active' },
   paused: { color: 'text-yellow-500', bg: 'bg-yellow-500/10 border-yellow-500/30', icon: Pause, label: 'Paused' },
-  error:  { color: 'text-red-500',    bg: 'bg-red-500/10 border-red-500/30',    icon: AlertTriangle, label: 'Error' },
-  pending:{ color: 'text-blue-500',   bg: 'bg-blue-500/10 border-blue-500/30',  icon: Clock, label: 'Pending' },
+  error:  { color: 'text-red-500',    bg: 'bg-red-500/10 border-red-500/30',    icon: ShieldAlert, label: 'Error' },
+  pending:{ color: 'text-blue-500',   bg: 'bg-blue-500/10 border-blue-500/30',  icon: Timer, label: 'Pending' },
 };
 
 const phaseConfig: Record<string, { badge: string; label: string }> = {
@@ -95,15 +95,15 @@ function FollowerRow({
       <div className="hidden sm:flex items-center gap-4 text-xs text-muted-foreground">
         <span>{volumeLabel[follower.volumeSizing] || follower.volumeSizing}</span>
         <span className="flex items-center gap-1">
-          <Copy className="h-3 w-3" />
+          <CopyIcon className="h-3 w-3" />
           {follower.stats.tradesToday} today
         </span>
         <span className="flex items-center gap-1">
-          <AlertTriangle className="h-3 w-3" />
+          <ShieldAlert className="h-3 w-3" />
           {follower.stats.failedCopies} missed
         </span>
         <span className={`flex items-center gap-1 ${profit >= 0 ? 'text-green-500' : 'text-red-500'}`}>
-          {profit >= 0 ? <TrendingUp className="h-3 w-3" /> : <TrendingDown className="h-3 w-3" />}
+          {profit >= 0 ? <ArrowUpRight className="h-3 w-3" /> : <ArrowDownRight className="h-3 w-3" />}
           {fmt(profit)}
         </span>
       </div>
@@ -138,7 +138,7 @@ export function CopierGroupCard({
   const isProfit = profit >= 0;
 
   return (
-    <Card className="border-border/40 bg-gradient-to-br from-card/80 to-card/40 hover:border-primary/20 transition-all overflow-hidden">
+    <Card className="border-border/40 bg-gradient-to-br from-card/80 to-card/40 hover:border-primary/20 transition-all overflow-hidden card-lift">
       <CardContent className="p-0">
         {/* ── Header Row ────────────────────────────────────────────── */}
         <div className="flex items-center justify-between gap-3 p-4">
@@ -157,7 +157,7 @@ export function CopierGroupCard({
                   {group.leaderAccountName}
                 </span>
                 <ArrowRight className="h-3 w-3 text-muted-foreground shrink-0" />
-                <Users className="h-3 w-3 text-muted-foreground shrink-0" />
+                <UsersRound className="h-3 w-3 text-muted-foreground shrink-0" />
                 <span className="text-xs text-muted-foreground">
                   {group.stats.activeFollowers}/{group.stats.totalFollowers}
                 </span>
@@ -230,7 +230,7 @@ export function CopierGroupCard({
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end">
                 <DropdownMenuItem onClick={() => onEdit(group.id)}>
-                  <Settings className="mr-2 h-4 w-4" />
+                  <SlidersHorizontal className="mr-2 h-4 w-4" />
                   Configure
                 </DropdownMenuItem>
                 <DropdownMenuSeparator />
@@ -256,13 +256,13 @@ export function CopierGroupCard({
         {/* ── Mobile stat row ───────────────────────────────────────── */}
         <div className="flex lg:hidden items-center gap-4 px-4 pb-3 text-xs text-muted-foreground">
           <span className="flex items-center gap-1">
-            <Copy className="h-3 w-3" /> {group.stats.tradesToday} trades
+            <CopyIcon className="h-3 w-3" /> {group.stats.tradesToday} trades
           </span>
           <span className="flex items-center gap-1">
             <Zap className="h-3 w-3" /> {group.stats.avgLatency}ms
           </span>
           <span className={`flex items-center gap-1 ${isProfit ? 'text-green-500' : 'text-red-500'}`}>
-            {isProfit ? <TrendingUp className="h-3 w-3" /> : <TrendingDown className="h-3 w-3" />}
+            {isProfit ? <ArrowUpRight className="h-3 w-3" /> : <ArrowDownRight className="h-3 w-3" />}
             {fmt(profit)}
           </span>
 

@@ -16,15 +16,15 @@ import {
   ChevronRight,
   ChevronLeft,
   Play,
-  RefreshCw,
-  AlertCircle,
+  RotateCw,
+  ShieldAlert,
   Building2,
   Search,
   Radio,
-  Wifi,
-  WifiOff,
-  User,
-  DollarSign,
+  Signal,
+  SignalZero,
+  CircleUser,
+  CircleDollarSign,
   Server,
   Archive,
   Link2
@@ -636,14 +636,14 @@ export const AddAccountModal = ({
         {/* Error state */}
         {!detectingTerminals && terminalError && filteredTerminals.length === 0 && (
           <div className="p-6 rounded-xl bg-yellow-500/10 border border-yellow-500/20 text-center">
-            <AlertCircle className="h-10 w-10 text-yellow-500 mx-auto mb-3" />
+            <ShieldAlert className="h-10 w-10 text-yellow-500 mx-auto mb-3" />
             <p className="text-sm text-yellow-400 font-medium mb-2">{terminalError}</p>
             <p className="text-xs text-muted-foreground mb-4">
               Make sure {platform} is installed on this computer.
             </p>
             <div className="flex justify-center gap-2">
               <Button variant="outline" size="sm" onClick={() => detectTerminals()}>
-                <RefreshCw className="h-4 w-4 mr-2" />
+                <RotateCw className="h-4 w-4 mr-2" />
                 Retry
               </Button>
             </div>
@@ -663,7 +663,7 @@ export const AddAccountModal = ({
                 onClick={() => detectTerminals()}
                 className="h-7 px-2 text-xs"
               >
-                <RefreshCw className="h-3 w-3 mr-1" />
+                <RotateCw className="h-3 w-3 mr-1" />
                 Refresh
               </Button>
             </div>
@@ -978,7 +978,7 @@ export const AddAccountModal = ({
         {/* Evaluation Fee - Using NumberInput for consistent styling */}
         <div className="flex items-center gap-3">
           <Label className="text-sm font-medium whitespace-nowrap flex items-center gap-1.5">
-            <DollarSign className="h-3.5 w-3.5 text-muted-foreground" />
+            <CircleDollarSign className="h-3.5 w-3.5 text-muted-foreground" />
             Eval Fee
           </Label>
           <NumberInput
@@ -1118,7 +1118,7 @@ export const AddAccountModal = ({
           availableCount > 0 ? "bg-emerald-500/20" : "bg-primary/20"
         )}>
           {availableCount > 0 ? (
-            <Wifi className="h-5 w-5 text-emerald-400" />
+            <Signal className="h-5 w-5 text-emerald-400" />
           ) : (
             <>
               <Radio className="h-5 w-5 text-primary animate-pulse" />
@@ -1180,7 +1180,7 @@ export const AddAccountModal = ({
               >
                 <div className="flex items-start gap-3">
                   <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-primary/20 to-primary/5 flex items-center justify-center shrink-0">
-                    <User className="h-5 w-5 text-primary" />
+                    <CircleUser className="h-5 w-5 text-primary" />
                   </div>
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center justify-between">
@@ -1191,7 +1191,7 @@ export const AddAccountModal = ({
                     </div>
                     <div className="flex items-center gap-2 text-xs text-muted-foreground mt-1">
                       <span className="flex items-center gap-1">
-                        <User className="h-3 w-3" />
+                        <CircleUser className="h-3 w-3" />
                         {account.login}
                       </span>
                       <span>•</span>
@@ -1202,7 +1202,7 @@ export const AddAccountModal = ({
                     </div>
                     <div className="flex items-center gap-3 mt-1.5">
                       <span className="text-xs font-medium text-emerald-400 flex items-center gap-1">
-                        <DollarSign className="h-3 w-3" />
+                        <CircleDollarSign className="h-3 w-3" />
                         {account.currency} {account.balance?.toLocaleString() || '—'}
                       </span>
                       {account.leverage && (

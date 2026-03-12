@@ -3,16 +3,16 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { 
-  TrendingUp, 
-  TrendingDown, 
+  ArrowUpRight, 
+  ArrowDownRight, 
   Zap, 
-  AlertTriangle, 
-  Clock,
-  Target,
-  Shield,
+  ShieldAlert, 
+  Timer,
+  Layers,
+  ShieldCheck,
   Flame,
   ExternalLink,
-  WifiOff
+  SignalZero
 } from 'lucide-react';
 
 import type { ConnectionStatus as CopierConnectionStatus } from '@/contexts/CopierGroupsContext';
@@ -108,7 +108,7 @@ export const HedgeNode = ({ account, isSelected, isDragging, isLinkSource, copie
       glow: 'shadow-[0_0_20px_rgba(234,179,8,0.15)]',
       hoverGlow: 'hover:shadow-[0_0_25px_rgba(234,179,8,0.25)]',
       label: 'EVALUATION',
-      icon: TrendingUp,
+      icon: ArrowUpRight,
     },
     funded: {
       badge: 'bg-emerald-500/20 text-emerald-400 border-emerald-500/40',
@@ -116,7 +116,7 @@ export const HedgeNode = ({ account, isSelected, isDragging, isLinkSource, copie
       glow: 'shadow-[0_0_20px_rgba(16,185,129,0.15)]',
       hoverGlow: 'hover:shadow-[0_0_25px_rgba(16,185,129,0.25)]',
       label: 'FUNDED',
-      icon: TrendingUp,
+      icon: ArrowUpRight,
     },
     live: {
       badge: 'bg-blue-500/20 text-blue-400 border-blue-500/40',
@@ -124,7 +124,7 @@ export const HedgeNode = ({ account, isSelected, isDragging, isLinkSource, copie
       glow: 'shadow-[0_0_20px_rgba(59,130,246,0.15)]',
       hoverGlow: 'hover:shadow-[0_0_25px_rgba(59,130,246,0.25)]',
       label: 'HEDGE',
-      icon: TrendingUp,
+      icon: ArrowUpRight,
     },
   };
 
@@ -137,19 +137,19 @@ export const HedgeNode = ({ account, isSelected, isDragging, isLinkSource, copie
     },
     lagging: {
       badge: 'bg-yellow-500/20 text-yellow-400 border-yellow-500/40',
-      icon: Clock,
+      icon: Timer,
       label: 'Lagging',
       pulse: false,
     },
     risk: {
       badge: 'bg-red-500/20 text-red-400 border-red-500/40',
-      icon: AlertTriangle,
+      icon: ShieldAlert,
       label: 'Risk',
       pulse: true,
     },
     disconnected: {
       badge: 'bg-muted/30 text-muted-foreground border-muted-foreground/30',
-      icon: WifiOff,
+      icon: SignalZero,
       label: 'Disconnected',
       pulse: false,
     },
@@ -367,7 +367,7 @@ export const HedgeNode = ({ account, isSelected, isDragging, isLinkSource, copie
                 ? 'bg-emerald-500/20 text-emerald-400' 
                 : 'bg-muted/30 text-muted-foreground'
             )}>
-              <Target className="w-3 h-3" />
+              <Layers className="w-3 h-3" />
               <span>Pass: {distanceToPass !== null ? `${distanceToPass.toFixed(1)}%` : '—'}</span>
             </div>
           </div>
@@ -379,9 +379,9 @@ export const HedgeNode = ({ account, isSelected, isDragging, isLinkSource, copie
           isProfit ? 'bg-emerald-500/10' : 'bg-red-500/10'
         )}>
           {isProfit ? (
-            <TrendingUp className="w-4 h-4 text-emerald-400" />
+            <ArrowUpRight className="w-4 h-4 text-emerald-400" />
           ) : (
-            <TrendingDown className="w-4 h-4 text-red-400" />
+            <ArrowDownRight className="w-4 h-4 text-red-400" />
           )}
           <span className={cn(
             'text-sm font-bold',

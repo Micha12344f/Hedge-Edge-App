@@ -40,18 +40,18 @@ import {
 } from '@/components/ui/tooltip';
 import { Badge } from '@/components/ui/badge';
 import { 
-  Wifi, 
-  WifiOff, 
+  Signal, 
+  SignalZero, 
   Server, 
-  Settings, 
-  RefreshCw, 
+  SlidersHorizontal, 
+  RotateCw, 
   Play, 
   Square,
-  AlertCircle,
+  ShieldAlert,
   CheckCircle2,
   Loader2,
   ExternalLink,
-  HelpCircle,
+  LifeBuoy,
 } from 'lucide-react';
 
 // ============================================================================
@@ -112,17 +112,17 @@ function getStatusIcon(status: AgentStatus) {
     case 'connected':
       return <CheckCircle2 className="h-4 w-4 text-green-500" />;
     case 'running':
-      return <Wifi className="h-4 w-4 text-blue-500" />;
+      return <Signal className="h-4 w-4 text-blue-500" />;
     case 'starting':
       return <Loader2 className="h-4 w-4 text-yellow-500 animate-spin" />;
     case 'stopped':
-      return <WifiOff className="h-4 w-4 text-gray-500" />;
+      return <SignalZero className="h-4 w-4 text-gray-500" />;
     case 'error':
-      return <AlertCircle className="h-4 w-4 text-red-500" />;
+      return <ShieldAlert className="h-4 w-4 text-red-500" />;
     case 'not-available':
-      return <HelpCircle className="h-4 w-4 text-gray-400" />;
+      return <LifeBuoy className="h-4 w-4 text-gray-400" />;
     default:
-      return <WifiOff className="h-4 w-4 text-gray-500" />;
+      return <SignalZero className="h-4 w-4 text-gray-500" />;
   }
 }
 
@@ -310,7 +310,7 @@ function AgentStatusCard({
                 onClick={handleRestart}
                 disabled={isActioning || isLoading}
               >
-                {isActioning ? <Loader2 className="mr-1 h-3 w-3 animate-spin" /> : <RefreshCw className="mr-1 h-3 w-3" />}
+                {isActioning ? <Loader2 className="mr-1 h-3 w-3 animate-spin" /> : <RotateCw className="mr-1 h-3 w-3" />}
                 Restart
               </Button>
             )}
@@ -319,7 +319,7 @@ function AgentStatusCard({
               variant="ghost" 
               onClick={onConfigure}
             >
-              <Settings className="mr-1 h-3 w-3" />
+              <SlidersHorizontal className="mr-1 h-3 w-3" />
               Configure
             </Button>
           </div>
@@ -622,7 +622,7 @@ export function ConnectionPanel({ compact = false, platform }: ConnectionPanelPr
         <div className="flex items-center justify-between">
           <span className="text-xs font-medium text-muted-foreground">Trading Agents</span>
           <Button variant="ghost" size="sm" className="h-6 w-6 p-0" onClick={loadData}>
-            <RefreshCw className="h-3 w-3" />
+            <RotateCw className="h-3 w-3" />
           </Button>
         </div>
         {platforms.map((p) => {
@@ -647,7 +647,7 @@ export function ConnectionPanel({ compact = false, platform }: ConnectionPanelPr
                     className="h-6 w-6 p-0"
                     onClick={() => setConfigDialogPlatform(p)}
                   >
-                    <Settings className="h-3 w-3" />
+                    <SlidersHorizontal className="h-3 w-3" />
                   </Button>
                 </TooltipTrigger>
                 <TooltipContent>
@@ -681,7 +681,7 @@ export function ConnectionPanel({ compact = false, platform }: ConnectionPanelPr
       <div className="flex items-center justify-between">
         <h3 className="text-lg font-semibold">Trading Agent Connections</h3>
         <Button variant="outline" size="sm" onClick={loadData} disabled={isLoading}>
-          <RefreshCw className={`mr-2 h-4 w-4 ${isLoading ? 'animate-spin' : ''}`} />
+          <RotateCw className={`mr-2 h-4 w-4 ${isLoading ? 'animate-spin' : ''}`} />
           Refresh
         </Button>
       </div>

@@ -36,29 +36,28 @@ import {
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import {
   Loader2,
-  RefreshCw,
-  AlertCircle,
+  RotateCw,
+  ShieldAlert,
   Activity,
   ArrowUpRight,
   ArrowDownRight,
-  Clock,
-  Wifi,
-  WifiOff,
+  Timer,
+  Signal,
+  SignalZero,
   Lock,
   Server,
-  Power,
-  PowerOff,
+  PlugZap,
+  Unplug,
   Archive,
-  Settings,
+  SlidersHorizontal,
   Crown,
-  Users,
-  ArrowRightLeft,
+  UsersRound,
+  Route,
   Repeat2,
   Info,
   CircleDot,
   Pause,
-  AlertTriangle,
-  BarChart3,
+  LineChart,
   Hash,
   ArrowRight,
   Save,
@@ -597,11 +596,11 @@ export function AccountDetailsModal({
                   className={getStatusBadgeClass(supervisedStatus)}
                 >
                   {isSupervisedConnected ? (
-                    <Wifi className="h-3 w-3 mr-1" />
+                    <Signal className="h-3 w-3 mr-1" />
                   ) : supervisedStatus === 'connecting' || supervisedStatus === 'reconnecting' ? (
                     <Loader2 className="h-3 w-3 mr-1 animate-spin" />
                   ) : (
-                    <WifiOff className="h-3 w-3 mr-1" />
+                    <SignalZero className="h-3 w-3 mr-1" />
                   )}
                   {formatConnectionStatus(supervisedStatus)}
                 </Badge>
@@ -614,7 +613,7 @@ export function AccountDetailsModal({
                     variant="outline"
                     className="bg-primary/10 text-primary border-primary/20"
                   >
-                    <Wifi className="h-3 w-3 mr-1" />
+                    <Signal className="h-3 w-3 mr-1" />
                     MT5 Connected
                   </Badge>
                 ) : (
@@ -622,7 +621,7 @@ export function AccountDetailsModal({
                     variant="outline"
                     className="bg-red-500/10 text-red-500 border-red-500/20"
                   >
-                    <WifiOff className="h-3 w-3 mr-1" />
+                    <SignalZero className="h-3 w-3 mr-1" />
                     Disconnected
                   </Badge>
                 )
@@ -645,7 +644,7 @@ export function AccountDetailsModal({
               {/* Last update time */}
               {(connectionSnapshot?.timestamp || lastUpdate) && (
                 <span className="text-xs text-muted-foreground flex items-center gap-1">
-                  <Clock className="h-3 w-3" />
+                  <Timer className="h-3 w-3" />
                   {connectionSnapshot?.timestamp 
                     ? new Date(connectionSnapshot.timestamp).toLocaleTimeString()
                     : lastUpdate?.toLocaleTimeString()}
@@ -666,7 +665,7 @@ export function AccountDetailsModal({
                   }}
                   disabled={!cachedPassword && !needsPassword}
                 >
-                  <Power className="h-3.5 w-3.5 mr-1" />
+                  <PlugZap className="h-3.5 w-3.5 mr-1" />
                   Connect
                 </Button>
               )}
@@ -677,7 +676,7 @@ export function AccountDetailsModal({
                   size="sm"
                   onClick={() => account && onDisconnect(account)}
                 >
-                  <PowerOff className="h-3.5 w-3.5 mr-1" />
+                  <Unplug className="h-3.5 w-3.5 mr-1" />
                   Disconnect
                 </Button>
               )}
@@ -690,7 +689,7 @@ export function AccountDetailsModal({
                   onClick={refresh}
                   disabled={isLoading}
                 >
-                  <RefreshCw
+                  <RotateCw
                     className={`h-4 w-4 ${isLoading ? "animate-spin" : ""}`}
                   />
                 </Button>
@@ -778,7 +777,7 @@ export function AccountDetailsModal({
                         Account Details
                       </TabsTrigger>
                       <TabsTrigger value="config" className="text-xs data-[state=active]:bg-primary/20 data-[state=active]:text-primary">
-                        <Settings className="h-3.5 w-3.5 mr-1" />
+                        <SlidersHorizontal className="h-3.5 w-3.5 mr-1" />
                         Link Configuration
                       </TabsTrigger>
                     </TabsList>
@@ -853,7 +852,7 @@ export function AccountDetailsModal({
                       {/* Per-follower settings */}
                       <div className="space-y-2">
                         <div className="flex items-center gap-2">
-                          <Users className="h-4 w-4 text-primary" />
+                          <UsersRound className="h-4 w-4 text-primary" />
                           <Label className="font-semibold text-sm">Follower Settings</Label>
                         </div>
 
@@ -957,7 +956,7 @@ export function AccountDetailsModal({
                       {isSubmittingPassword ? (
                         <Loader2 className="h-4 w-4 mr-2 animate-spin" />
                       ) : (
-                        <Power className="h-4 w-4 mr-2" />
+                        <PlugZap className="h-4 w-4 mr-2" />
                       )}
                       Connect to Account
                     </Button>
@@ -990,7 +989,7 @@ export function AccountDetailsModal({
                     size="sm" 
                     className="w-full"
                   >
-                    <RefreshCw className="h-4 w-4 mr-2" />
+                    <RotateCw className="h-4 w-4 mr-2" />
                     Retry Connection
                   </Button>
                 </CardContent>
@@ -1022,7 +1021,7 @@ export function AccountDetailsModal({
               <Card className="border-destructive/50">
                 <CardHeader>
                   <CardTitle className="flex items-center gap-2 text-destructive text-sm">
-                    <AlertCircle className="h-4 w-4" />
+                    <ShieldAlert className="h-4 w-4" />
                     Connection Error
                   </CardTitle>
                 </CardHeader>
@@ -1030,7 +1029,7 @@ export function AccountDetailsModal({
                   <p className="text-sm text-muted-foreground">{error}</p>
                   <div className="flex gap-2">
                     <Button onClick={refresh} variant="outline" size="sm" className="flex-1">
-                      <RefreshCw className="h-4 w-4 mr-2" />
+                      <RotateCw className="h-4 w-4 mr-2" />
                       Retry
                     </Button>
                     <Button 
@@ -1268,7 +1267,7 @@ function InlineFollowerConfigPanel({
       {/* Volume Sizing — always Lot Multiplier */}
       <div className="space-y-2">
         <div className="flex items-center gap-2">
-          <BarChart3 className="h-3.5 w-3.5 text-primary" />
+          <LineChart className="h-3.5 w-3.5 text-primary" />
           <Label className="font-semibold text-xs">Volume Sizing</Label>
         </div>
         <div className="space-y-1">
@@ -1312,7 +1311,7 @@ function InlineFollowerConfigPanel({
       {/* Trade Copy Settings */}
       <div className="space-y-2">
         <div className="flex items-center gap-2">
-          <ArrowRightLeft className="h-3.5 w-3.5 text-primary" />
+          <Route className="h-3.5 w-3.5 text-primary" />
           <Label className="font-semibold text-xs">Trade Copy Settings</Label>
         </div>
         <div className="flex items-center justify-between gap-2 p-2 rounded-lg border border-purple-500/30 bg-purple-500/10">

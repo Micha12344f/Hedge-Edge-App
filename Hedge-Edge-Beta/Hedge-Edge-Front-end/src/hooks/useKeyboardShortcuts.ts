@@ -19,7 +19,6 @@ interface KeyboardShortcut {
  * - Ctrl+3: Go to Analytics
  * - Ctrl+4: Go to Trade Copier
  * - Ctrl+,: Go to Settings
- * - Ctrl+/: Go to Help
  * - Ctrl+N: New Account (when on Overview/Accounts)
  * - Escape: Close modal/dialog
  */
@@ -34,7 +33,6 @@ export function useKeyboardShortcuts() {
     { key: '3', ctrl: true, action: () => navigate('/app/analytics'), description: 'Go to Analytics' },
     { key: '4', ctrl: true, action: () => navigate('/app/copier'), description: 'Go to Trade Copier' },
     { key: ',', ctrl: true, action: () => navigate('/app/settings'), description: 'Go to Settings' },
-    { key: '/', ctrl: true, action: () => navigate('/app/help'), description: 'Go to Help' },
   ];
 
   const handleKeyDown = useCallback((event: KeyboardEvent) => {
@@ -75,7 +73,6 @@ export function getKeyboardShortcuts() {
     { keys: ['Ctrl', '3'], description: 'Go to Analytics' },
     { keys: ['Ctrl', '4'], description: 'Go to Trade Copier' },
     { keys: ['Ctrl', ','], description: 'Go to Settings' },
-    { keys: ['Ctrl', '/'], description: 'Go to Help' },
     { keys: ['Escape'], description: 'Close modal/dialog' },
     { keys: ['Tab'], description: 'Navigate between elements' },
     { keys: ['Enter'], description: 'Activate focused element' },

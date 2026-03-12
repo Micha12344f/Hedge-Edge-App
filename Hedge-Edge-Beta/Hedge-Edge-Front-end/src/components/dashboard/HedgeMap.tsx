@@ -9,7 +9,7 @@ import {
   ZoomOut, 
   Maximize2, 
   Link2, 
-  Plus,
+  PlusCircle,
   Trash2,
   ArrowRight
 } from 'lucide-react';
@@ -519,7 +519,7 @@ export const HedgeMap = ({
           <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
             <div className="text-center space-y-4 pointer-events-auto">
               <div className="w-16 h-16 rounded-2xl bg-muted/50 flex items-center justify-center mx-auto">
-                <Plus className="w-8 h-8 text-muted-foreground" />
+                <PlusCircle className="w-8 h-8 text-muted-foreground" />
               </div>
               <div>
                 <h3 className="text-lg font-medium text-foreground">No accounts yet</h3>
@@ -528,7 +528,7 @@ export const HedgeMap = ({
                 </p>
               </div>
               <Button onClick={onAddAccount} className="gap-2">
-                <Plus className="h-4 w-4" />
+                <PlusCircle className="h-4 w-4" />
                 Add Account
               </Button>
             </div>

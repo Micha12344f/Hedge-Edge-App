@@ -238,6 +238,23 @@ export class LicenseManager extends EventEmitter {
   ): Promise<LicenseResult> {
     const effectiveDeviceId = deviceId || this.deviceId || this.generateDeviceId();
 
+    // Developer mode bypass — no network call, always valid in local dev builds
+    if (process.env.NODE_ENV === 'development') {
+      console.log('[LicenseManager] DEV MODE: bypassing license validation');
+      const devResult: LicenseResult = {
+        valid: true,
+        token: 'dev-token-' + Date.now(),
+        ttlSeconds: 3600 * 24 * 365,
+        message: 'Developer mode — license bypassed',
+        plan: 'developer',
+        tier: 'developer',
+        features: ['all'],
+      };
+      await licenseStore.activate(key.trim() || 'HEDGE-DEV-2026-MASTER');
+      this.emitLicenseChange('validated', devResult);
+      return devResult;
+    }
+
     console.log(`[LicenseManager] Validating license for device ${effectiveDeviceId.substring(0, 8)}...`);
 
     try {
@@ -494,6 +511,16 @@ export class LicenseManager extends EventEmitter {
    * Get current license status
    */
   getLicenseStatus(): LicenseInfo {
+    // Developer mode bypass — skips all license checks in local dev builds
+    if (process.env.NODE_ENV === 'development') {
+      return {
+        status: 'valid',
+        tier: 'developer',
+        plan: 'developer',
+        maskedKey: 'DEV-••••-••••-MODE',
+      };
+    }
+
     const storeStatus = licenseStore.getStatus();
 
     // Enhance with cached data

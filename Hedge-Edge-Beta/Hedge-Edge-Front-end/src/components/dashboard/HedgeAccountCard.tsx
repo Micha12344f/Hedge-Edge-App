@@ -5,7 +5,7 @@ import { cn } from '@/lib/utils';
 import { 
   Zap, 
   Server,
-  User,
+  CircleUser,
   Settings2
 } from 'lucide-react';
 
@@ -56,7 +56,7 @@ export const HedgeAccountCard = ({
       {/* Connection Details */}
       <div className="grid grid-cols-2 gap-2 mb-3">
         <div className="flex items-center gap-2 p-2 rounded-md bg-muted/30">
-          <User className="w-3.5 h-3.5 text-muted-foreground" />
+          <CircleUser className="w-3.5 h-3.5 text-muted-foreground" />
           <div>
             <p className="text-[10px] text-muted-foreground">Login</p>
             <p className="text-xs font-medium text-foreground">{account.login || '—'}</p>

@@ -25,25 +25,25 @@ import { cn } from '@/lib/utils';
 import { useToast } from '@/hooks/use-toast';
 import { useLicense, type DeviceInfo, type ConnectedAgent, type LicenseTier } from '@/contexts/LicenseContext';
 import {
-  Key,
+  KeyRound,
   CheckCircle2,
   XCircle,
-  AlertTriangle,
+  ShieldAlert,
   Loader2,
-  RefreshCw,
+  RotateCw,
   Eye,
   EyeOff,
   Copy,
   Check,
-  Clock,
+  Timer,
   Calendar,
-  Shield,
+  ShieldCheck,
   Trash2,
   Lock,
   Monitor,
   Smartphone,
   Server,
-  Users,
+  UsersRound,
   Activity,
   Crown,
   Star,
@@ -444,7 +444,7 @@ export function LicensePanel({ className, compact = false }: LicensePanelProps) 
       <CardHeader>
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
-            <Key className="h-5 w-5" />
+            <KeyRound className="h-5 w-5" />
             <CardTitle>License Management</CardTitle>
           </div>
           {isValid && (
@@ -465,7 +465,7 @@ export function LicensePanel({ className, compact = false }: LicensePanelProps) 
         {/* Expiry Warning */}
         {isExpiringSoon && license?.daysRemaining !== undefined && (
           <Alert variant="destructive" className="border-yellow-500/50 bg-yellow-500/10">
-            <AlertTriangle className="h-4 w-4 text-yellow-500" />
+            <ShieldAlert className="h-4 w-4 text-yellow-500" />
             <AlertTitle className="text-yellow-500">License Expiring Soon</AlertTitle>
             <AlertDescription>
               Your license expires in {license.daysRemaining} day{license.daysRemaining !== 1 ? 's' : ''}.
@@ -491,7 +491,7 @@ export function LicensePanel({ className, compact = false }: LicensePanelProps) 
                       onClick={handleRefresh}
                       disabled={isRefreshing || isLoading}
                     >
-                      <RefreshCw className={cn(
+                      <RotateCw className={cn(
                         "h-4 w-4",
                         isRefreshing && "animate-spin"
                       )} />

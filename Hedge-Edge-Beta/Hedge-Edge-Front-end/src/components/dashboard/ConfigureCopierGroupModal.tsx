@@ -31,19 +31,18 @@ import {
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import {
   Crown,
-  Users,
-  ArrowRightLeft,
-  Settings,
+  UsersRound,
+  Route,
+  SlidersHorizontal,
   Repeat2,
   Info,
   CircleDot,
   Pause,
-  AlertTriangle,
-  Clock,
+  ShieldAlert,
+  Timer,
   Zap,
   Save,
-  BarChart3,
-  Timer,
+  LineChart,
   Hash,
   ArrowRight,
   ChevronDown,
@@ -61,8 +60,8 @@ const volumeOptions: { value: VolumeSizingMode; label: string; hint: string }[] 
 const statusConfig: Record<string, { color: string; icon: typeof CircleDot; label: string }> = {
   active:  { color: 'text-green-500',  icon: CircleDot,      label: 'Active' },
   paused:  { color: 'text-yellow-500', icon: Pause,          label: 'Paused' },
-  error:   { color: 'text-red-500',    icon: AlertTriangle,  label: 'Error' },
-  pending: { color: 'text-blue-500',   icon: Clock,          label: 'Pending' },
+  error:   { color: 'text-red-500',    icon: ShieldAlert,  label: 'Error' },
+  pending: { color: 'text-blue-500',   icon: Timer,          label: 'Pending' },
 };
 
 const phaseConfig: Record<string, { className: string; label: string }> = {
@@ -290,7 +289,7 @@ export function ConfigureCopierGroupModal({
       <DialogContent className="max-w-3xl max-h-[90vh] flex flex-col">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
-            <Settings className="h-5 w-5 text-primary" />
+            <SlidersHorizontal className="h-5 w-5 text-primary" />
             Configure Copier Group
           </DialogTitle>
           <DialogDescription>
@@ -301,15 +300,15 @@ export function ConfigureCopierGroupModal({
         <Tabs value={activeTab} onValueChange={setActiveTab} className="flex-1 min-h-0">
           <TabsList className="grid w-full grid-cols-3 bg-muted/50">
             <TabsTrigger value="general" className="text-xs data-[state=active]:bg-primary/20 data-[state=active]:text-primary">
-              <Settings className="h-3.5 w-3.5 mr-1" />
+              <SlidersHorizontal className="h-3.5 w-3.5 mr-1" />
               General
             </TabsTrigger>
             <TabsTrigger value="followers" className="text-xs data-[state=active]:bg-primary/20 data-[state=active]:text-primary">
-              <Users className="h-3.5 w-3.5 mr-1" />
+              <UsersRound className="h-3.5 w-3.5 mr-1" />
               Followers ({group.followers.length})
             </TabsTrigger>
             <TabsTrigger value="overview" className="text-xs data-[state=active]:bg-primary/20 data-[state=active]:text-primary">
-              <BarChart3 className="h-3.5 w-3.5 mr-1" />
+              <LineChart className="h-3.5 w-3.5 mr-1" />
               Overview
             </TabsTrigger>
           </TabsList>
@@ -554,7 +553,7 @@ function FollowerConfigPanel({
       {/* ── Section 1: Volume Sizing ──────────────────────────── */}
       <div className="space-y-3">
         <div className="flex items-center gap-2">
-          <BarChart3 className="h-4 w-4 text-primary" />
+          <LineChart className="h-4 w-4 text-primary" />
           <Label className="font-semibold text-sm">Volume Sizing</Label>
         </div>
 
@@ -601,7 +600,7 @@ function FollowerConfigPanel({
       {/* ── Section 2: Trade Copy Settings ────────────────────── */}
       <div className="space-y-3">
         <div className="flex items-center gap-2">
-          <ArrowRightLeft className="h-4 w-4 text-primary" />
+          <Route className="h-4 w-4 text-primary" />
           <Label className="font-semibold text-sm">Trade Copy Settings</Label>
         </div>
 
