@@ -590,13 +590,15 @@ interface ElectronAPI {
   copier: CopierAPI;
   dailyLimit: DailyLimitAPI;
   updater?: {
-    checkForUpdate: () => Promise<{ updateAvailable: boolean }>;
+    checkForUpdate: () => Promise<{ checking: boolean; error?: string }>;
     downloadUpdate: () => Promise<{ success: boolean; error?: string }>;
     installUpdate: () => Promise<void>;
     getVersion: () => Promise<string>;
     onUpdateAvailable: (callback: (info: { version: string; releaseDate?: string; releaseNotes?: string }) => void) => void;
+    onUpdateNotAvailable: (callback: () => void) => void;
     onDownloadProgress: (callback: (progress: { percent: number; bytesPerSecond: number; total: number; transferred: number }) => void) => void;
     onUpdateDownloaded: (callback: (info: { version: string }) => void) => void;
+    onError: (callback: (err: { message: string }) => void) => void;
   };
 }
 

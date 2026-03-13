@@ -1657,11 +1657,17 @@ const electronAPI = {
     onUpdateAvailable: (callback: (info: any) => void) => {
       ipcRenderer.on('update:available', (_event, info) => callback(info));
     },
+    onUpdateNotAvailable: (callback: () => void) => {
+      ipcRenderer.on('update:not-available', () => callback());
+    },
     onDownloadProgress: (callback: (progress: any) => void) => {
       ipcRenderer.on('update:progress', (_event, progress) => callback(progress));
     },
     onUpdateDownloaded: (callback: (info: any) => void) => {
       ipcRenderer.on('update:downloaded', (_event, info) => callback(info));
+    },
+    onError: (callback: (err: any) => void) => {
+      ipcRenderer.on('update:error', (_event, err) => callback(err));
     },
   },
 

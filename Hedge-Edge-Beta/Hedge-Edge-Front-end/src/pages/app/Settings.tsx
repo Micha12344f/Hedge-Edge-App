@@ -29,12 +29,20 @@ const Settings = () => {
       setUpdateStatus('available');
       setUpdateVersion(info.version);
     });
+    updater.onUpdateNotAvailable(() => {
+      setUpdateStatus('up-to-date');
+      setTimeout(() => setUpdateStatus('idle'), 5000);
+    });
     updater.onDownloadProgress((progress) => {
       setUpdateStatus('downloading');
       setDownloadProgress(Math.round(progress.percent));
     });
     updater.onUpdateDownloaded(() => {
       setUpdateStatus('ready');
+    });
+    updater.onError((err) => {
+      setUpdateStatus('error');
+      setUpdateError(err?.message || 'Update check failed');
     });
   }, []);
 
@@ -44,11 +52,8 @@ const Settings = () => {
     setUpdateStatus('checking');
     setUpdateError('');
     try {
-      const result = await updater.checkForUpdate();
-      if (!result.updateAvailable) {
-        setUpdateStatus('up-to-date');
-        setTimeout(() => setUpdateStatus('idle'), 5000);
-      }
+      await updater.checkForUpdate();
+      // Status updates will come via events (onUpdateAvailable / onUpdateNotAvailable / onError)
     } catch {
       setUpdateStatus('error');
       setUpdateError('Failed to check for updates');

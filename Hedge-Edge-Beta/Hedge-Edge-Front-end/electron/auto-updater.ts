@@ -32,6 +32,7 @@ export function initAutoUpdater(mainWindow: BrowserWindow): void {
 
     autoUpdater.on('update-not-available', () => {
         console.log('[Updater] No update available');
+        mainWindow.webContents.send('update:not-available');
     });
 
     autoUpdater.on('download-progress', (progress) => {
@@ -52,16 +53,17 @@ export function initAutoUpdater(mainWindow: BrowserWindow): void {
 
     autoUpdater.on('error', (err) => {
         console.error('[Updater] Error:', err.message);
-        // Don't forward to renderer — user doesn't need to see update errors
+        mainWindow.webContents.send('update:error', { message: err.message });
     });
 
     // IPC handlers for renderer control
     ipcMain.handle('update:check', async () => {
         try {
-            const result = await autoUpdater.checkForUpdates();
-            return { updateAvailable: !!result?.updateInfo };
-        } catch {
-            return { updateAvailable: false };
+            await autoUpdater.checkForUpdates();
+            // Result comes via events (update:available / update:not-available / update:error)
+            return { checking: true };
+        } catch (err: any) {
+            return { checking: false, error: err?.message || 'Check failed' };
         }
     });
 
