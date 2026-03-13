@@ -589,6 +589,15 @@ interface ElectronAPI {
   agentChannel: AgentChannelAPI;
   copier: CopierAPI;
   dailyLimit: DailyLimitAPI;
+  updater?: {
+    checkForUpdate: () => Promise<{ updateAvailable: boolean }>;
+    downloadUpdate: () => Promise<{ success: boolean; error?: string }>;
+    installUpdate: () => Promise<void>;
+    getVersion: () => Promise<string>;
+    onUpdateAvailable: (callback: (info: { version: string; releaseDate?: string; releaseNotes?: string }) => void) => void;
+    onDownloadProgress: (callback: (progress: { percent: number; bytesPerSecond: number; total: number; transferred: number }) => void) => void;
+    onUpdateDownloaded: (callback: (info: { version: string }) => void) => void;
+  };
 }
 
 // Extend Window interface for Electron

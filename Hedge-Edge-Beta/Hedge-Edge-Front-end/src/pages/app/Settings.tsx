@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Switch } from '@/components/ui/switch';
@@ -8,9 +8,69 @@ import { LicenseKeySection } from '@/components/dashboard/LicenseKeySection';
 import { InstallationManagerModal } from '@/components/dashboard/InstallationManagerModal';
 import { useLicenseStatus } from '@/hooks/useLicenseStatus';
 
+type UpdateStatus = 'idle' | 'checking' | 'available' | 'downloading' | 'ready' | 'up-to-date' | 'error';
+
 const Settings = () => {
   const { license, activate, refresh, remove } = useLicenseStatus();
   const [installModalOpen, setInstallModalOpen] = useState(false);
+  const [appVersion, setAppVersion] = useState<string>('Beta');
+  const [updateStatus, setUpdateStatus] = useState<UpdateStatus>('idle');
+  const [updateVersion, setUpdateVersion] = useState<string>('');
+  const [downloadProgress, setDownloadProgress] = useState(0);
+  const [updateError, setUpdateError] = useState<string>('');
+
+  useEffect(() => {
+    const updater = window.electronAPI?.updater;
+    if (!updater) return;
+
+    updater.getVersion().then(setAppVersion).catch(() => {});
+
+    updater.onUpdateAvailable((info) => {
+      setUpdateStatus('available');
+      setUpdateVersion(info.version);
+    });
+    updater.onDownloadProgress((progress) => {
+      setUpdateStatus('downloading');
+      setDownloadProgress(Math.round(progress.percent));
+    });
+    updater.onUpdateDownloaded(() => {
+      setUpdateStatus('ready');
+    });
+  }, []);
+
+  const handleCheckForUpdates = async () => {
+    const updater = window.electronAPI?.updater;
+    if (!updater) return;
+    setUpdateStatus('checking');
+    setUpdateError('');
+    try {
+      const result = await updater.checkForUpdate();
+      if (!result.updateAvailable) {
+        setUpdateStatus('up-to-date');
+        setTimeout(() => setUpdateStatus('idle'), 5000);
+      }
+    } catch {
+      setUpdateStatus('error');
+      setUpdateError('Failed to check for updates');
+    }
+  };
+
+  const handleDownloadUpdate = async () => {
+    const updater = window.electronAPI?.updater;
+    if (!updater) return;
+    setUpdateStatus('downloading');
+    setDownloadProgress(0);
+    try {
+      await updater.downloadUpdate();
+    } catch {
+      setUpdateStatus('error');
+      setUpdateError('Download failed');
+    }
+  };
+
+  const handleInstallUpdate = () => {
+    window.electronAPI?.updater?.installUpdate();
+  };
 
   return (
     <div className="p-6 space-y-6 max-w-4xl">
@@ -103,7 +163,7 @@ const Settings = () => {
           <CardContent className="space-y-3">
             <div className="flex justify-between text-sm">
               <span className="text-muted-foreground">Version</span>
-              <Badge variant="outline">Beta</Badge>
+              <Badge variant="outline">v{appVersion}</Badge>
             </div>
             <div className="flex justify-between text-sm">
               <span className="text-muted-foreground">Support</span>
@@ -111,9 +171,36 @@ const Settings = () => {
             </div>
             <Separator />
             <div className="flex items-center gap-3">
-              <Button variant="outline" size="sm">Check for Updates</Button>
+              {updateStatus === 'idle' || updateStatus === 'error' ? (
+                <Button variant="outline" size="sm" onClick={handleCheckForUpdates}>
+                  Check for Updates
+                </Button>
+              ) : updateStatus === 'checking' ? (
+                <Button variant="outline" size="sm" disabled>
+                  Checking...
+                </Button>
+              ) : updateStatus === 'up-to-date' ? (
+                <Button variant="outline" size="sm" disabled>
+                  You're up to date!
+                </Button>
+              ) : updateStatus === 'available' ? (
+                <Button variant="default" size="sm" onClick={handleDownloadUpdate}>
+                  Download v{updateVersion}
+                </Button>
+              ) : updateStatus === 'downloading' ? (
+                <Button variant="outline" size="sm" disabled>
+                  Downloading... {downloadProgress}%
+                </Button>
+              ) : updateStatus === 'ready' ? (
+                <Button variant="default" size="sm" onClick={handleInstallUpdate} className="bg-green-600 hover:bg-green-700">
+                  Restart & Install v{updateVersion}
+                </Button>
+              ) : null}
               <Button variant="ghost" size="sm" className="text-muted-foreground">View Changelog</Button>
             </div>
+            {updateError && (
+              <p className="text-xs text-red-400">{updateError}</p>
+            )}
           </CardContent>
         </Card>
       </div>
