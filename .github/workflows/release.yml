@@ -70,7 +70,25 @@ jobs:
           cache: npm
           cache-dependency-path: Hedge-Edge-Beta/Hedge-Edge-Front-end/package-lock.json
 
+      # Ensure CMake is available for zeromq native compilation
+      - name: Verify native build tools
+        shell: pwsh
+        working-directory: .
+        run: |
+          cmake --version
+          echo "Visual Studio:"
+          & "C:\Program Files (x86)\Microsoft Visual Studio\Installer\vswhere.exe" -latest -property installationPath
+
       - run: npm ci
+        env:
+          npm_config_build_from_source: "true"
+
+      # Verify build prerequisites exist
+      - name: Check build resources
+        run: |
+          echo "Checking build icon..."
+          if (Test-Path "build/icon.png") { echo "icon.png found" } else { echo "WARNING: build/icon.png missing" }
+          if (Test-Path "build/icon.ico") { echo "icon.ico found" } else { echo "WARNING: build/icon.ico missing" }
 
       # Auto-bump patch version
       - name: Bump version
@@ -89,6 +107,7 @@ jobs:
         run: npm run electron:build:win -- --publish always
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          DEBUG: electron-builder
 
       # Commit version bump back to main so the repo stays in sync.
       # [skip ci] prevents an infinite loop.

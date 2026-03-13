@@ -46,8 +46,9 @@ Thumbs.db
 # Electron
 out/
 
-# Build (front-end)
-build/
+# Build (front-end) — exclude outputs but keep electron-builder resources
+build/*
+!build/icon.*
 
 # PyInstaller / standalone agent builds
 standalone/
