@@ -184,14 +184,26 @@ if SENTRY_DSN:
     )
 
 # ============================================================================
-# Logging Setup
+# Logging Setup (structured JSON in production, readable in dev)
 # ============================================================================
 
-logging.basicConfig(
-    level=getattr(logging, config.LOG_LEVEL),
-    format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
-    datefmt="%Y-%m-%d %H:%M:%S"
-)
+try:
+    from pythonjsonlogger import json_log_formatter
+    _json_formatter = json_log_formatter.JSONFormatter(
+        fmt="%(asctime)s %(levelname)s %(name)s %(message)s",
+        datefmt="%Y-%m-%dT%H:%M:%SZ"
+    )
+    _handler = logging.StreamHandler()
+    _handler.setFormatter(_json_formatter)
+    logging.root.handlers = [_handler]
+    logging.root.setLevel(getattr(logging, config.LOG_LEVEL))
+except ImportError:
+    # Fallback to plain text if python-json-logger quirks
+    logging.basicConfig(
+        level=getattr(logging, config.LOG_LEVEL),
+        format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S"
+    )
 logger = logging.getLogger("license_api")
 
 # ============================================================================
@@ -692,10 +704,11 @@ _cors_origins = [
     "https://www.hedge-edge.com",
     "https://api.hedge-edge.com",
     "app://.",  # Electron app
+    "http://localhost:5173",  # Vite dev server (also used by Electron dev mode)
+    "http://localhost:4173",  # Vite preview
 ]
 if _is_dev:
     _cors_origins.extend([
-        "http://localhost:5173",  # Vite dev server
         "http://localhost:8080",
     ])
 

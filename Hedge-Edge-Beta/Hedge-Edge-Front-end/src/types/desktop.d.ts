@@ -299,6 +299,8 @@ interface LicenseStatusData {
   deviceId?: string;
   devices?: LicenseDeviceInfo[];
   connectedAgents?: number;
+  lastValidatedAt?: number;  // epoch ms — for offline grace period tracking
+  offlineGrace?: boolean;    // true when operating in offline grace mode
 }
 
 interface LicenseDeviceInfo {

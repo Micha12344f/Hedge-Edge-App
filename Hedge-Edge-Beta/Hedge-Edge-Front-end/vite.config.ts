@@ -1,6 +1,7 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react-swc";
 import path from "path";
+import fs from "fs";
 
 // Vite config for Electron desktop app renderer process
 // The renderer is built as a web bundle loaded by Electron via file:// protocol
@@ -10,8 +11,26 @@ export default defineConfig(() => ({
   server: {
     host: "::",
     port: 50000,
+    strictPort: false,  // Auto-increment to next available port if 50000 is busy
   },
-  plugins: [react()],
+  plugins: [
+    react(),
+    // Write the actual dev server port to a temp file so Electron can discover it
+    {
+      name: 'write-server-port',
+      configureServer(server) {
+        server.httpServer?.once('listening', () => {
+          const addr = server.httpServer?.address();
+          if (addr && typeof addr === 'object') {
+            const portFile = path.resolve(__dirname, '.vite-port');
+            fs.writeFileSync(portFile, String(addr.port));
+            console.log(`[vite] Dev server on port ${addr.port} (written to .vite-port)`);
+          }
+        });
+      },
+    },
+  ],
+
   resolve: {
     alias: {
       "@": path.resolve(__dirname, "./src"),

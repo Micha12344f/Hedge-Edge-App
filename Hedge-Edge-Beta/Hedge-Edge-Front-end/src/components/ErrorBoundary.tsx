@@ -37,10 +37,11 @@ interface ErrorBoundaryState {
 // ============================================================================
 
 export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
-  private scopedLogger = logger.scope(this.props.componentName || 'ErrorBoundary');
+  private scopedLogger: ReturnType<typeof logger.scope>;
 
   constructor(props: ErrorBoundaryProps) {
     super(props);
+    this.scopedLogger = logger.scope(props.componentName || 'ErrorBoundary');
     this.state = {
       hasError: false,
       error: null,

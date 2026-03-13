@@ -1,5 +1,5 @@
 import { useEffect, useState, useRef } from "react";
-import { Loader2, KeyRound, ShieldAlert, CheckCircle, TrendingUp } from "lucide-react";
+import { Loader2, KeyRound, ShieldAlert, CheckCircle, TrendingUp, WifiOff } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -103,6 +103,31 @@ function LicenseBackground() {
 }
 
 /* ──────────────────────────────────────────────────────────
+   Human-readable error messages
+   ────────────────────────────────────────────────────────── */
+function friendlyError(raw?: string): string {
+  if (!raw) return 'License validation failed. Please try again.';
+  const lower = raw.toLowerCase();
+
+  if (lower.includes('device_limit') || lower.includes('device limit') || lower.includes('max_devices'))
+    return "You've reached your device limit (3/3). Go to Settings > Devices to free a slot.";
+  if (lower.includes('creem_rejected') || lower.includes('subscription') && lower.includes('inactive'))
+    return 'Your subscription is inactive. Please check your payment status at your billing portal.';
+  if (lower.includes('expired'))
+    return 'Your subscription has expired. Please renew to continue using Hedge Edge.';
+  if (lower.includes('invalid') && (lower.includes('key') || lower.includes('format')))
+    return 'Invalid license key format. Keys look like XXXX-XXXX-XXXX-XXXX.';
+  if (lower.includes('not found') || lower.includes('no license'))
+    return 'License key not found. Please double-check the key from your purchase confirmation email.';
+  if (lower.includes('unreachable') || lower.includes('network') || lower.includes('fetch'))
+    return 'Cannot reach the license server. Please check your internet connection and try again.';
+  if (lower.includes('rate limit') || lower.includes('429'))
+    return 'Too many attempts. Please wait a moment and try again.';
+
+  return raw;
+}
+
+/* ──────────────────────────────────────────────────────────
    Main Component
    ────────────────────────────────────────────────────────── */
 export function LicenseGate({ children }: LicenseGateProps) {
@@ -110,6 +135,7 @@ export function LicenseGate({ children }: LicenseGateProps) {
   const [licenseKey, setLicenseKey] = useState("");
   const [errorMessage, setErrorMessage] = useState("");
   const [licenseInfo, setLicenseInfo] = useState<{ plan?: string; expiresAt?: string } | null>(null);
+  const [offlineGraceHours, setOfflineGraceHours] = useState<number | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const revalidateRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
@@ -132,9 +158,21 @@ export function LicenseGate({ children }: LicenseGateProps) {
         try {
           const result = await window.electronAPI?.license?.getStatus();
           if (!result?.success || result.data?.status !== 'valid') {
+            // Check if we're in offline grace
+            if (result?.data?.offlineGrace && result?.data?.lastValidatedAt) {
+              const elapsed = Date.now() - result.data.lastValidatedAt;
+              const remainingH = Math.max(0, Math.round((72 * 60 * 60 * 1000 - elapsed) / 3600000));
+              if (remainingH > 0) {
+                setOfflineGraceHours(remainingH);
+                return; // still within grace, don't re-engage gate
+              }
+            }
             console.warn('[LicenseGate] Periodic revalidation failed — re-engaging license gate');
             setState('needs-license');
             setErrorMessage('Your license is no longer valid. Please re-enter your license key.');
+          } else {
+            // Online — clear offline banner
+            setOfflineGraceHours(null);
           }
         } catch (err) {
           console.error('[LicenseGate] Periodic revalidation error:', err);
@@ -183,9 +221,9 @@ export function LicenseGate({ children }: LicenseGateProps) {
         }
 
         if (status === "expired") {
-          setErrorMessage("Your license has expired. Please renew or enter a new license key.");
+          setErrorMessage(friendlyError("expired"));
         } else if (status === "error") {
-          setErrorMessage(result.data.errorMessage || "License validation error");
+          setErrorMessage(friendlyError(result.data.errorMessage));
         }
       }
 
@@ -221,10 +259,10 @@ export function LicenseGate({ children }: LicenseGateProps) {
           return;
         }
 
-        setErrorMessage(result.license.errorMessage || "License validation failed");
+        setErrorMessage(friendlyError(result.license.errorMessage) || "License validation failed");
         setState("error");
       } else {
-        setErrorMessage(result?.error || "Failed to activate license");
+        setErrorMessage(friendlyError(result?.error) || "Failed to activate license");
         setState("error");
       }
     } catch (err) {
@@ -241,7 +279,19 @@ export function LicenseGate({ children }: LicenseGateProps) {
 
   /* ── Valid: pass through ────────────────────────────── */
   if (state === "valid") {
-    return <>{children}</>;
+    return (
+      <>
+        {offlineGraceHours !== null && (
+          <div className="fixed top-0 left-0 right-0 z-50 flex items-center justify-center gap-2 py-2 px-4 bg-amber-600/90 text-white text-sm font-medium backdrop-blur-sm">
+            <WifiOff className="w-4 h-4 flex-shrink-0" />
+            <span>
+              Operating in offline mode. Reconnect within {offlineGraceHours}h to continue using Hedge Edge.
+            </span>
+          </div>
+        )}
+        {children}
+      </>
+    );
   }
 
   /* ── Loading state ──────────────────────────────────── */
@@ -463,7 +513,7 @@ export function LicenseGate({ children }: LicenseGateProps) {
               <br />
               Need help?{" "}
               <span className="text-primary/70 hover:text-primary transition-colors cursor-pointer">
-                support@hedge-edge.com
+                support@hedgedge.info
               </span>
             </p>
             {licenseInfo?.plan && (

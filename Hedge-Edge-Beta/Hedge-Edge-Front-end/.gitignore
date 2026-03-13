@@ -27,6 +27,7 @@ vps-deployment/.env
 # Electron build outputs
 dist-electron
 release
+.vite-port
 *.exe
 *.dmg
 *.app

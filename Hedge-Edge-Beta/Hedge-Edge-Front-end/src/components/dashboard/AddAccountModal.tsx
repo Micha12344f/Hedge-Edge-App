@@ -322,16 +322,26 @@ export const AddAccountModal = ({
             if (result.success && result.data && result.data.length > 0) {
               console.log('[AddAccountModal] Found accounts:', result.data);
               setDetectedAccounts(prev => {
-                const existing = new Set(prev.map(a => `${a.login}@${a.server}`));
+                // Dedup by login only — server name can change between ticks
+                // (broker fallback vs real server) so login@server is unreliable
+                const existing = new Set(prev.map(a => String(a.login)));
                 const newAccounts = result.data!.filter(
-                  (a) => !existing.has(`${a.login}@${a.server}`)
+                  (a) => !existing.has(String(a.login))
                 );
-                if (newAccounts.length > 0) {
+                // Also deduplicate within the incoming batch itself
+                const batchSeen = new Set<string>();
+                const uniqueNew = newAccounts.filter(a => {
+                  const key = String(a.login);
+                  if (batchSeen.has(key)) return false;
+                  batchSeen.add(key);
+                  return true;
+                });
+                if (uniqueNew.length > 0) {
                   toast.success('Account detected!', {
-                    description: `Found ${newAccounts[0].broker || 'trading'} account`,
+                    description: `Found ${uniqueNew[0].broker || 'trading'} account`,
                   });
                 }
-                return [...prev, ...newAccounts.map(a => ({
+                return [...prev, ...uniqueNew.map(a => ({
                   login: a.login,
                   server: a.server,
                   name: a.name,
@@ -1092,15 +1102,15 @@ export const AddAccountModal = ({
   );
 
   const renderListeningStep = () => {
-    // Filter out accounts that are already connected (match by login + server)
+    // Filter out accounts that are already connected (match by login)
     // Archived accounts are excluded so their terminal can be re-used
-    const existingLoginServers = new Set(
+    const existingLogins = new Set(
       existingAccounts
-        .filter(acc => acc.login && acc.server && !acc.is_archived)
-        .map(acc => `${acc.login}@${acc.server}`)
+        .filter(acc => acc.login && !acc.is_archived)
+        .map(acc => String(acc.login))
     );
     const availableDetectedAccounts = detectedAccounts.filter(
-      acc => !existingLoginServers.has(`${acc.login}@${acc.server}`)
+      acc => !existingLogins.has(String(acc.login))
     );
     const availableCount = availableDetectedAccounts.length;
     

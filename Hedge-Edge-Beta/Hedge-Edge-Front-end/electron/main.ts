@@ -98,6 +98,7 @@ import { CopierEngine } from './copier-engine.js';
 import { eaControlServer, EAControlServer } from './ea-control-server.js';
 import { dailyLimitTracker, type AccountMetrics as DailyAccountMetrics, type DailyLimitResult } from './daily-limit-tracker.js';
 import { registerMetaApiHandlers } from './metaapi-proxy.js';
+import { deployDllsToTerminals } from './dll-deployer.js';
 import {
   SessionManager,
   EA_STALENESS_THRESHOLD_MS,
@@ -1682,8 +1683,27 @@ async function createWindow() {
 
   // Load the app
   if (isDev) {
-    // Development: Load from Vite dev server
-    const devServerUrl = process.env.VITE_DEV_SERVER_URL || 'http://localhost:8080';
+    // Development: Discover Vite dev server port dynamically
+    // Vite writes its actual port to .vite-port (handles port conflicts automatically)
+    let devServerUrl = process.env.VITE_DEV_SERVER_URL || '';
+    if (!devServerUrl) {
+      const portFile = path.join(__dirname, '..', '.vite-port');
+      let retries = 0;
+      while (retries < 30) {
+        try {
+          const port = fs.readFileSync(portFile, 'utf-8').trim();
+          if (port) {
+            devServerUrl = `http://localhost:${port}`;
+            break;
+          }
+        } catch {
+          // Vite hasn't written the port file yet — wait and retry
+        }
+        await new Promise(r => setTimeout(r, 500));
+        retries++;
+      }
+      if (!devServerUrl) devServerUrl = 'http://localhost:50000'; // last-resort fallback
+    }
     console.log('[Main] Loading dev server:', devServerUrl);
     try {
       await mainWindow.loadURL(devServerUrl);
@@ -1692,11 +1712,19 @@ async function createWindow() {
       console.error('[Main] Failed to load dev server:', err);
     }
     // Open DevTools in development (Ctrl+Shift+I to open manually)
-    // mainWindow.webContents.openDevTools();
+    mainWindow.webContents.openDevTools();
   } else {
     // Production: Load from built files
     await mainWindow.loadFile(path.join(__dirname, '../dist/index.html'));
+    mainWindow.webContents.openDevTools(); // TEMP: debug page error
   }
+
+  // TEMP: Capture renderer console errors in main process
+  mainWindow.webContents.on('console-message', (_event, level, message, line, sourceId) => {
+    if (level >= 2) { // 2 = error, 3 = warning
+      console.log(`[Renderer ERROR] ${message} (${sourceId}:${line})`);
+    }
+  });
 
   // Show window immediately - don't wait for ready-to-show in dev
   if (isDev) {
@@ -1992,10 +2020,23 @@ function setupIpcHandlers() {
         }
       }
       
-      await debugLog(`[getConnectedAccounts] Returning ${connectedAccounts.length} accounts`);
+      // ── Deduplicate by login ────────────────────────────────────
+      // The same account can appear with different `server` strings
+      // across ticks (broker fallback vs real server name). Dedup by
+      // login alone — a given login number is always one account.
+      const seenLogins = new Map<string, typeof connectedAccounts[0]>();
+      for (const acc of connectedAccounts) {
+        const key = acc.login && acc.login !== '0' ? acc.login : acc.terminalId || '';
+        if (key && !seenLogins.has(key)) {
+          seenLogins.set(key, acc);
+        }
+      }
+      const dedupedAccounts = Array.from(seenLogins.values());
+
+      await debugLog(`[getConnectedAccounts] Returning ${dedupedAccounts.length} accounts (${connectedAccounts.length} before dedup)`);
       return { 
         success: true, 
-        data: connectedAccounts 
+        data: dedupedAccounts 
       };
     } catch (error) {
       await debugLog(`[getConnectedAccounts] Error: ${error}`);
@@ -2226,8 +2267,8 @@ function setupIpcHandlers() {
           const snapshot = agentChannelReader.getLastSnapshot(terminalId);
           if (snapshot) {
             // Match by terminalId first (most reliable for multi-account)
-            // Or match by broker if server matches
-            // Or match by accountId if it's not "0"
+            // Then by accountId (login number)
+            // Server-only match is NOT sufficient when multiple accounts exist
             if (credentials) {
               const creds = credentials as { login: string; server: string; terminalId?: string };
               
@@ -2236,14 +2277,22 @@ function setupIpcHandlers() {
                 continue;
               }
               
-              // If no terminalId, try to match by broker/server
+              // If no terminalId, match by login (accountId) — required for multi-account
               if (!creds.terminalId) {
-                const serverMatch = snapshot.broker === creds.server || snapshot.server === creds.server;
                 const accountMatch = snapshot.accountId && snapshot.accountId !== '0' && String(snapshot.accountId) === String(creds.login);
+                const serverMatch = snapshot.broker === creds.server || snapshot.server === creds.server;
                 
-                // Skip if neither server nor accountId match
-                if (!serverMatch && !accountMatch) {
-                  continue;
+                // When a login is provided, REQUIRE login match to avoid
+                // returning the wrong account when two share a broker/server
+                if (creds.login && creds.login !== '0') {
+                  if (!accountMatch) {
+                    continue;
+                  }
+                } else {
+                  // No login hint — fall back to server-only match
+                  if (!serverMatch) {
+                    continue;
+                  }
                 }
               }
             }
@@ -4219,12 +4268,12 @@ app.whenReady().then(async () => {
     console.error('[Main] Failed to initialize license manager:', error);
   }
 
-  // Start embedded license API server (runs on localhost:3002)
+  // Start embedded license API server (port auto-discovered via PortManager)
   console.log('[Main] About to start license API server...');
   try {
     console.log('[Main] Calling licenseAPIServer.start()');
     await licenseAPIServer.start();
-    console.log('[Main] License API server initialized');
+    console.log(`[Main] License API server initialized on port ${licenseAPIServer.port}`);
   } catch (error) {
     console.error('[Main] Failed to start license API server:', error);
   }
@@ -4278,6 +4327,17 @@ app.whenReady().then(async () => {
     console.log('[Main] EA control server configured');
   } catch (error) {
     console.error('[Main] Failed to configure EA control server:', error);
+  }
+
+  // Deploy bundled DLLs (libzmq, libsodium) to all MT5 terminals
+  try {
+    const dllResult = await deployDllsToTerminals();
+    console.log(`[Main] DLL deployment: ${dllResult.deployed} deployed, ${dllResult.skipped} up-to-date`);
+    if (dllResult.errors.length > 0) {
+      console.warn(`[Main] DLL deployment warnings:`, dllResult.errors);
+    }
+  } catch (error) {
+    console.warn('[Main] DLL deployment failed (non-critical):', error);
   }
 
   // Auto-reconnect accounts via ZeroMQ (restore connections on restart)

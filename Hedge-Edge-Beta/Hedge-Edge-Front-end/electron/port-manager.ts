@@ -61,7 +61,8 @@ export type PortOwner =
   | 'zmq-command'        // ZMQ REQ/REP command socket
   | 'webrequest-proxy'   // WebRequest HTTP proxy
   | 'agent-mt5'          // MT5 agent HTTP endpoint
-  | 'agent-ctrader';     // cTrader agent HTTP endpoint
+  | 'agent-ctrader'      // cTrader agent HTTP endpoint
+  | 'license-api';       // Embedded license API server
 
 export interface PortAllocation {
   port: number;
@@ -145,6 +146,7 @@ export const PORT_RANGES = {
   proxy:     { start: 9089,  end: 9099,  label: 'WebRequest Proxy' },
   agentMt5:  { start: 5101,  end: 5101,  label: 'MT5 Agent HTTP' },
   agentCt:   { start: 5102,  end: 5102,  label: 'cTrader Agent HTTP' },
+  apiServer: { start: 3002,  end: 3012,  label: 'License API Server' },
 } as const;
 
 // ============================================================================
@@ -218,6 +220,7 @@ export class PortManager extends EventEmitter {
       'webrequest-proxy': ['proxy'],
       'agent-mt5':        ['agentMt5'],
       'agent-ctrader':    ['agentCt'],
+      'license-api':      ['apiServer'],
     };
     return compatibility[owner]?.includes(rangeKey) ?? false;
   }
@@ -648,6 +651,33 @@ export class PortManager extends EventEmitter {
     }
 
     console.error(`[PortManager] No available port in range ${start}-${end} for WebRequest proxy`);
+    return null;
+  }
+
+  /**
+   * Allocate a port for the embedded license API server.
+   * Tries the preferred port first (3002), then falls back through 3002-3012.
+   */
+  async allocateApiPort(preferredPort = 3002): Promise<number | null> {
+    const { start, end } = PORT_RANGES.apiServer;
+    const firstPort = preferredPort;
+
+    if (await this.isPortAvailable(firstPort)) {
+      const conflict = this.allocate(firstPort, 'license-api', 'license-api-server');
+      if (!conflict) return firstPort;
+    }
+
+    for (let port = start; port <= end; port++) {
+      if (port === firstPort) continue;
+      if (this.allocations.has(port)) continue;
+
+      if (await this.isPortAvailable(port)) {
+        const conflict = this.allocate(port, 'license-api', 'license-api-server');
+        if (!conflict) return port;
+      }
+    }
+
+    console.error(`[PortManager] No available port in range ${start}-${end} for License API server`);
     return null;
   }
 

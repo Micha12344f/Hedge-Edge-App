@@ -7,7 +7,9 @@ import {
   ShieldCheck,
   ShieldAlert,
   ArrowUpRight,
-  ArrowDownRight
+  ArrowDownRight,
+  Target,
+  Shield,
 } from 'lucide-react';
 
 import type { ConnectionStatus } from '@/contexts/CopierGroupsContext';

@@ -18,6 +18,7 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { config as loadEnv } from 'dotenv';
+import { portManager } from './port-manager.js';
 
 // Get the directory of this file for finding .env.desktop
 const __filename = fileURLToPath(import.meta.url);
@@ -57,7 +58,7 @@ interface ValidateLicenseResponse {
 // Configuration
 // ============================================================================
 
-const API_PORT = 3002;
+const DEFAULT_API_PORT = 3002;
 
 // Railway backend — the ONLY upstream for license validation.
 // Desktop app NEVER talks to Creem directly (secrets stay server-side).
@@ -111,6 +112,12 @@ export class LicenseAPIServer extends EventEmitter {
   private server: Express;
   private httpServer: any = null;
   private isRunning = false;
+  private _actualPort: number | null = null;
+
+  /** The port the server is actually listening on (may differ from default) */
+  get port(): number | null {
+    return this._actualPort;
+  }
 
   constructor() {
     super();
@@ -269,20 +276,41 @@ export class LicenseAPIServer extends EventEmitter {
   }
 
   /**
-   * Start the API server
+   * Start the API server on the first available port (default 3002, fallback 3002-3012)
    */
   async start(): Promise<void> {
+    const allocatedPort = await portManager.allocateApiPort(DEFAULT_API_PORT);
+    if (allocatedPort === null) {
+      const err = new Error('No available port for License API server (tried 3002-3012)');
+      console.error('[APIServer]', err.message);
+      this.emit('error', err);
+      throw err;
+    }
+
     return new Promise((resolve, reject) => {
       try {
-        this.httpServer = this.server.listen(API_PORT, 'localhost', () => {
+        this.httpServer = this.server.listen(allocatedPort, 'localhost', () => {
           this.isRunning = true;
+          this._actualPort = allocatedPort;
+          portManager.markVerified(allocatedPort);
           writeNonceFile();
-          console.log(`[APIServer] License API server started on http://localhost:${API_PORT}`);
-          this.emit('started');
+          console.log(`[APIServer] License API server started on http://localhost:${allocatedPort}`);
+          this.emit('started', { port: allocatedPort });
           resolve();
+        });
+
+        this.httpServer.on('error', (err: NodeJS.ErrnoException) => {
+          if (err.code === 'EADDRINUSE') {
+            // Port was stolen between allocate and listen — release and fail
+            portManager.release(allocatedPort);
+            console.error(`[APIServer] Port ${allocatedPort} stolen between allocation and listen`);
+          }
+          this.emit('error', err);
+          reject(err);
         });
       } catch (error) {
         console.error('[APIServer] Failed to start:', error);
+        portManager.release(allocatedPort);
         this.emit('error', error);
         reject(error);
       }
@@ -299,8 +327,11 @@ export class LicenseAPIServer extends EventEmitter {
         return;
       }
 
+      const port = this._actualPort;
       this.httpServer.close(() => {
         this.isRunning = false;
+        this._actualPort = null;
+        if (port !== null) portManager.release(port);
         console.log('[APIServer] License API server stopped');
         this.emit('stopped');
         resolve();

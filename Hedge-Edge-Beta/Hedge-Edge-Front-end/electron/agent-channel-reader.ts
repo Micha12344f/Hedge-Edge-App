@@ -687,6 +687,38 @@ export class AgentChannelReader extends EventEmitter {
         if (reg) registrations.push(reg);
       }
       
+      // ── Deduplicate by login: keep only ONE registration per login ──
+      // If the same account's EA restarted on a different port, we'd have
+      // two registrations for the same login.  Keep the one whose file was
+      // modified most recently (newest EA run wins).
+      if (registrations.length > 1) {
+        const byLogin = new Map<string, typeof registrations[0]>();
+        for (const reg of registrations) {
+          const key = String(reg.login);
+          const prev = byLogin.get(key);
+          if (!prev) {
+            byLogin.set(key, reg);
+          } else {
+            // Compare file modification times — prefer the newer file
+            try {
+              const prevStat = prev._filePath ? await fs.stat(prev._filePath) : null;
+              const curStat = reg._filePath ? await fs.stat(reg._filePath) : null;
+              if (curStat && (!prevStat || curStat.mtimeMs > prevStat.mtimeMs)) {
+                byLogin.set(key, reg);
+              }
+            } catch {
+              // If stat fails, keep the first one
+            }
+          }
+        }
+        const deduped = Array.from(byLogin.values());
+        if (deduped.length < registrations.length) {
+          console.log(`[AgentChannelReader] Deduplicated ${registrations.length} registration(s) → ${deduped.length} unique login(s)`);
+          registrations.length = 0;
+          registrations.push(...deduped);
+        }
+      }
+      
     } catch (err) {
       console.warn('[AgentChannelReader] Error reading EA registration files:', err instanceof Error ? err.message : err);
     }
@@ -938,7 +970,11 @@ export class AgentChannelReader extends EventEmitter {
       // Slaves only expose a REP socket for app commands & STATUS queries.
       // We TCP-probe their commandPort and connect with polling.
       // ═══════════════════════════════════════════════════════════════
-      slaveCandidates = slaveCandidates.filter(c => !alreadyConnected.has(c.name));
+      // Exclude terminals that were already connected OR connected during
+      // Phase 3-5 of this scan. Without this, a slave with the same login
+      // as a newly-connected master would destroy the master's PUB/SUB bridge.
+      const allConnected = new Set([...alreadyConnected, ...connectedTerminals]);
+      slaveCandidates = slaveCandidates.filter(c => !allConnected.has(c.name));
       
       if (slaveCandidates.length > 0) {
         console.log(`[AgentChannelReader] Probing ${slaveCandidates.length} slave EA(s) (command-only)...`);
@@ -1142,6 +1178,14 @@ export class AgentChannelReader extends EventEmitter {
     console.log(`  Data endpoint: tcp://${host}:${dataPort}`);
     console.log(`  Command endpoint: tcp://${host}:${commandPort}`);
     if (options.curveEnabled) console.log(`  CURVE: enabled`);
+    
+    // ─── CRITICAL: Clean up any existing bridge for this terminal ────
+    // Without this, a re-connect (e.g. EA restart on different port)
+    // orphans the old ZMQ sockets — causing data leaks and port mixing.
+    if (this.zmqBridges.has(terminalId)) {
+      console.log(`[AgentChannelReader] Cleaning up existing bridge for ${terminalId} before reconnect`);
+      await this.safeDisconnectMT5(terminalId);
+    }
     
     // Check ZMQ availability first
     if (!this.zmqAvailable) {

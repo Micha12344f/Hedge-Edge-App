@@ -15,9 +15,10 @@
 //--- This imports libzmq.dll and libsodium.dll from MQL5/Libraries/
 #include <ZMQv2.mqh>
 
-//--- Windows API for DLL detection
+//--- Windows API for DLL detection + auto-loading
 #import "kernel32.dll"
-   int GetModuleHandleW(string lpModuleName);
+   int  GetModuleHandleW(string lpModuleName);
+   bool SetDllDirectoryW(string lpPathName);
 #import
 
 //--- DLL imports for license validation (optional, graceful fallback)
@@ -111,10 +112,58 @@ PositionInfo g_prevPositions[];
 string g_registrationFilePath = "";
 
 //+------------------------------------------------------------------+
+//| Auto-configure DLL search path (zero-touch DLL deployment)       |
+//| Priority: 1) MQL5/Libraries (Electron direct-deploy)             |
+//|           2) Common/Files/HedgeEdge/lib (SetDllDirectoryW)       |
+//+------------------------------------------------------------------+
+void SetupDllSearchPath()
+{
+   //--- Priority 1: Check if Electron already deployed DLLs to Libraries
+   string dataPath   = TerminalInfoString(TERMINAL_DATA_PATH);
+   string libZmq     = dataPath + "\\MQL5\\Libraries\\libzmq.dll";
+   string libSodium  = dataPath + "\\MQL5\\Libraries\\libsodium.dll";
+   
+   if(GetModuleHandleW("libzmq") != 0)
+   {
+      Print("[DLL] libzmq.dll already loaded in process");
+      return;
+   }
+   
+   //--- Check if DLLs exist in the standard Libraries folder
+   if(FileIsExist("..\\Libraries\\libzmq.dll", 0))
+   {
+      Print("[DLL] Found libzmq.dll in MQL5\\Libraries\\ (direct deploy)");
+      return;  // MT5 will find them natively — no path tricks needed
+   }
+   
+   //--- Priority 2: Point DLL search at Common/Files/HedgeEdge/lib
+   string commonPath = TerminalInfoString(TERMINAL_COMMONDATA_PATH);
+   string dllPath    = commonPath + "\\Files\\HedgeEdge\\lib";
+   
+   if(SetDllDirectoryW(dllPath))
+   {
+      Print("[DLL] Search path set: ", dllPath);
+      //--- Verify DLLs actually exist there
+      if(!FileIsExist("HedgeEdge\\lib\\libzmq.dll", FILE_COMMON))
+      {
+         Print("[DLL] WARNING: libzmq.dll not found at ", dllPath);
+         Print("[DLL] Please install the Hedge Edge app first, or manually copy DLLs to MQL5\\Libraries\\");
+      }
+   }
+   else
+   {
+      Print("[DLL] WARNING: SetDllDirectoryW failed — install Hedge Edge app or copy DLLs manually");
+      Print("[DLL] Expected: MQL5\\Libraries\\libzmq.dll + libsodium.dll");
+   }
+}
+
+//+------------------------------------------------------------------+
 //| Expert initialization function                                     |
 //+------------------------------------------------------------------+
 int OnInit()
 {
+   SetupDllSearchPath();   // Auto-configure DLL search path
+   
    Print("═══════════════════════════════════════════════════════════");
    Print("  HedgEdge MASTER EA v3.0 - Starting...");
    Print("═══════════════════════════════════════════════════════════");

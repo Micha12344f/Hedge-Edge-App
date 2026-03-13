@@ -35,6 +35,8 @@ export interface LicenseInfo {
   email?: string;
   tier?: string;
   plan?: string;
+  lastValidatedAt?: number; // epoch ms — used for offline grace window
+  offlineGrace?: boolean;   // true when operating in offline grace mode
 }
 
 export interface LicenseValidationResponse {
@@ -315,6 +317,26 @@ export class LicenseStore {
     this.persistLicense().catch(() => {
       console.warn('[LicenseStore] Failed to persist instance_id');
     });
+  }
+
+  /**
+   * Record the timestamp of the last successful server validation.
+   * Used by LicenseManager to enforce the 72-hour offline grace window.
+   */
+  setLastValidatedAt(epochMs: number): void {
+    if (this.licenseInfo) {
+      this.licenseInfo.lastValidatedAt = epochMs;
+    }
+    this.persistLicense().catch(() => {
+      console.warn('[LicenseStore] Failed to persist lastValidatedAt');
+    });
+  }
+
+  /**
+   * Get the timestamp of the last successful server validation.
+   */
+  getLastValidatedAt(): number | null {
+    return this.licenseInfo?.lastValidatedAt ?? null;
   }
   
   /**

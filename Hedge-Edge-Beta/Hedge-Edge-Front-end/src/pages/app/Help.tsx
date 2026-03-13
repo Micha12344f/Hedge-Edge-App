@@ -88,6 +88,28 @@ const faqCategories = [
     ],
   },
   {
+    title: 'License Troubleshooting',
+    icon: KeyRound,
+    faqs: [
+      {
+        question: 'I\'m seeing "Device limit reached" — what do I do?',
+        answer: 'Your license allows up to 3 devices. Go to Settings > Devices to see which devices are registered. You can deactivate an old device to free a slot, then re-enter your key on the new device.',
+      },
+      {
+        question: 'My license says "Subscription inactive"',
+        answer: 'This means your payment may have failed or been cancelled. Check your email for a payment notification from Creem, or visit your billing portal to update your payment method.',
+      },
+      {
+        question: 'The app says "Cannot reach the license server"',
+        answer: 'Check your internet connection. If you\'re behind a firewall or VPN, try disabling it temporarily. The app has a 72-hour offline grace period — if you were recently online, you can keep trading.',
+      },
+      {
+        question: 'How does offline mode work?',
+        answer: 'If your internet drops after a successful license check, HedgeEdge will continue working for up to 72 hours. You\'ll see an amber "Offline Mode" banner at the top. Reconnect before the grace period ends to avoid interruption.',
+      },
+    ],
+  },
+  {
     title: 'Connections & Security',
     icon: ShieldCheck,
     faqs: [

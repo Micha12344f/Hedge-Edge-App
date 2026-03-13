@@ -92,6 +92,7 @@ const TOKEN_REFRESH_BUFFER_MS = 5 * 60 * 1000; // Refresh 5 minutes before expir
 const EXPIRY_WARNING_HOURS = 24; // Warn 24 hours before license expiry
 const DEVICE_CHECK_INTERVAL_MS = 60 * 1000; // Check devices every minute
 const MAX_CACHE_AGE_MS = 60 * 60 * 1000; // Max cache age 1 hour
+const OFFLINE_GRACE_MS = 72 * 60 * 60 * 1000; // 72 hours offline grace window
 
 // ============================================================================
 // License Manager Class
@@ -308,6 +309,9 @@ export class LicenseManager extends EventEmitter {
 
         await licenseStore.activate(key);
 
+        // Record last successful server validation for offline grace window
+        licenseStore.setLastValidatedAt(Date.now());
+
         // Persist instance_id for future deactivation
         const instanceId = data.instance?.id || data.instanceId || data.instance_id;
         if (instanceId) {
@@ -333,7 +337,8 @@ export class LicenseManager extends EventEmitter {
 
   /**
    * Refresh the current session token
-   * Uses offline grace: if network fails but cached license is still valid, returns cached result.
+   * Uses offline grace: if network fails but cached license was validated
+   * within the last 72 hours, returns cached result.
    */
   async refreshToken(token?: string): Promise<RefreshResult> {
     const currentToken = token || this.cachedLicense?.token;
@@ -360,15 +365,10 @@ export class LicenseManager extends EventEmitter {
             message: 'Token refreshed successfully',
           };
         }
-        // Validation returned invalid — check if we can use offline grace
-        if (this.cachedLicense && this.cachedLicense.expiresAt > Date.now()) {
-          console.log('[LicenseManager] Validation failed but cached license still valid — granting offline grace');
-          return {
-            success: true,
-            token: this.cachedLicense.token,
-            ttlSeconds: Math.floor((this.cachedLicense.expiresAt - Date.now()) / 1000),
-            message: 'Using cached license (offline grace)',
-          };
+        // Validation returned invalid — check offline grace within 72h window
+        if (this.isWithinOfflineGrace()) {
+          console.log('[LicenseManager] Validation failed but within 72h offline grace — allowing access');
+          return this.buildOfflineGraceResult();
         }
         return {
           success: false,
@@ -381,15 +381,10 @@ export class LicenseManager extends EventEmitter {
         error: 'No stored license key',
       };
     } catch (error) {
-      // Offline grace: if network call throws but cached license is still valid, allow access
-      if (this.cachedLicense && this.cachedLicense.expiresAt > Date.now()) {
-        console.log('[LicenseManager] Network error but cached license still valid — granting offline grace');
-        return {
-          success: true,
-          token: this.cachedLicense.token,
-          ttlSeconds: Math.floor((this.cachedLicense.expiresAt - Date.now()) / 1000),
-          message: 'Using cached license (offline grace)',
-        };
+      // Offline grace: if network call throws but we're within 72h window, allow access
+      if (this.isWithinOfflineGrace()) {
+        console.log('[LicenseManager] Network error but within 72h offline grace — allowing access');
+        return this.buildOfflineGraceResult();
       }
       console.error('[LicenseManager] Refresh error:', error);
       return {
@@ -397,6 +392,29 @@ export class LicenseManager extends EventEmitter {
         error: error instanceof Error ? error.message : 'Refresh failed',
       };
     }
+  }
+
+  /**
+   * Check if we are within the 72-hour offline grace window
+   */
+  private isWithinOfflineGrace(): boolean {
+    const lastValidated = licenseStore.getLastValidatedAt();
+    if (!lastValidated) return false;
+    return (Date.now() - lastValidated) < OFFLINE_GRACE_MS;
+  }
+
+  /**
+   * Build a RefreshResult for offline grace mode
+   */
+  private buildOfflineGraceResult(): RefreshResult {
+    const lastValidated = licenseStore.getLastValidatedAt() || Date.now();
+    const remaining = Math.max(0, OFFLINE_GRACE_MS - (Date.now() - lastValidated));
+    return {
+      success: true,
+      token: this.cachedLicense?.token || 'offline-grace',
+      ttlSeconds: Math.floor(remaining / 1000),
+      message: `Using cached license (offline grace — ${Math.round(remaining / 3600000)}h remaining)`,
+    };
   }
 
   /**

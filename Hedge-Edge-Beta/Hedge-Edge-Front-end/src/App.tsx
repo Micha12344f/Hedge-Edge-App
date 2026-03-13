@@ -10,6 +10,7 @@ import { LicenseGate } from "@/components/LicenseGate";
 import { Loader2 } from "lucide-react";
 import { useExternalLinkInterceptor } from "@/hooks/useExternalLinks";
 import { UpdateNotification } from "@/components/UpdateNotification";
+import { isOnboardingComplete } from "@/lib/onboarding";
 import * as Sentry from '@sentry/react';
 
 // Lazy load pages for code splitting
@@ -19,6 +20,7 @@ const DashboardAnalytics = lazy(() => import("./pages/app/DashboardAnalytics"));
 const TradeCopier = lazy(() => import("./pages/app/TradeCopier"));
 const Settings = lazy(() => import("./pages/app/Settings"));
 const Auth = lazy(() => import("./pages/Auth"));
+const Onboarding = lazy(() => import("./pages/Onboarding"));
 
 const PageLoader = () => (
   <div className="min-h-screen bg-background flex items-center justify-center">
@@ -54,17 +56,22 @@ const App = () => {
             <UpdateNotification />
             <Suspense fallback={<PageLoader />}>
               <Routes>
-                {/* Redirect root to dashboard */}
-                <Route path="/" element={<Navigate to="/app/overview" replace />} />
+                {/* Redirect root: onboarding for first launch, dashboard after */}
+                <Route path="/" element={
+                  <Navigate to={isOnboardingComplete() ? "/app/overview" : "/onboarding"} replace />
+                } />
+
+                {/* Onboarding wizard (first-launch) */}
+                <Route path="/onboarding" element={<Onboarding />} />
 
                 {/* Dashboard routes */}
                 <Route path="/app" element={<DashboardLayout />}>
                   <Route index element={<Navigate to="/app/overview" replace />} />
-                  <Route path="overview" element={<DashboardOverview />} />
-                  <Route path="accounts" element={<Accounts />} />
-                  <Route path="analytics" element={<DashboardAnalytics />} />
-                  <Route path="copier" element={<TradeCopier />} />
-                  <Route path="settings" element={<Settings />} />
+                  <Route path="overview" element={<PageErrorBoundary pageName="Overview"><DashboardOverview /></PageErrorBoundary>} />
+                  <Route path="accounts" element={<PageErrorBoundary pageName="HedgeMap"><Accounts /></PageErrorBoundary>} />
+                  <Route path="analytics" element={<PageErrorBoundary pageName="Analytics"><DashboardAnalytics /></PageErrorBoundary>} />
+                  <Route path="copier" element={<PageErrorBoundary pageName="TradeCopier"><TradeCopier /></PageErrorBoundary>} />
+                  <Route path="settings" element={<PageErrorBoundary pageName="Settings"><Settings /></PageErrorBoundary>} />
                 </Route>
 
                 {/* Auth page (for idle timeout redirect with ?reason=idle) */}
