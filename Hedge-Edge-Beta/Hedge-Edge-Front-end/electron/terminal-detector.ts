@@ -262,7 +262,7 @@ function extractBrokerName(folderPath: string): string | undefined {
  */
 function extractTerminalGuid(filePath: string): string | undefined {
   // Pattern: MetaQuotes\Terminal\<GUID>\
-  const match = filePath.match(/MetaQuotes[\\\/]Terminal[\\\/]([A-F0-9]{32})/i);
+  const match = filePath.match(/MetaQuotes[\\/]Terminal[\\/]([A-F0-9]{32})/i);
   return match ? match[1].toUpperCase() : undefined;
 }
 
@@ -281,7 +281,7 @@ function createDisplayName(type: TerminalType, installPath: string, broker?: str
   }
   
   // Use last meaningful folder name from path
-  const parts = installPath.split(/[\\\/]/).filter(Boolean);
+  const parts = installPath.split(/[\\/]/).filter(Boolean);
   const lastPart = parts[parts.length - 1];
   
   // If it's a GUID, show parent folder instead
@@ -425,6 +425,7 @@ async function scanMetaQuotesTerminalFolder(): Promise<DetectedTerminal[]> {
         originPath = content.trim();
       }
       // Remove any null characters or BOM remnants
+      // eslint-disable-next-line no-control-regex
       originPath = originPath.replace(/\x00/g, '').replace(/^\uFEFF/, '').trim();
       debugLog(`[Terminal Detector] origin.txt points to: ${originPath}`);
       debugLog(`[Terminal Detector] origin.txt path length: ${originPath.length}, chars: ${[...originPath].map(c => c.charCodeAt(0)).slice(0, 10).join(',')}`);
@@ -480,7 +481,7 @@ async function scanDirectory(dirPath: string, patterns: string[]): Promise<Detec
     // Check if folder matches any pattern (remove hyphens/spaces for matching)
     const normalizedFolderName = folderName.replace(/[-_\s]/g, '');
     const matchesPattern = patterns.some(pattern => {
-      const p = pattern.toLowerCase().replace(/[-_\s\*]/g, '');
+      const p = pattern.toLowerCase().replace(/[-_\s*]/g, '');
       return normalizedFolderName.includes(p) || folderName.includes(p);
     });
     
@@ -844,7 +845,7 @@ export async function detectTerminalsDeep(): Promise<DetectionResult> {
     const deepTerminals = await deepScanWithPowerShell();
     
     // Combine and deduplicate
-    let allTerminals = deduplicateTerminals([
+    const allTerminals = deduplicateTerminals([
       ...fastResult.terminals,
       ...deepTerminals,
     ]);
@@ -922,7 +923,7 @@ export async function launchTerminal(
     const lowerPath = executablePath.toLowerCase();
     const isMetaTrader = lowerPath.includes('terminal64.exe') || lowerPath.includes('terminal.exe');
     
-    let args: string[] = [];
+    const args: string[] = [];
     
     if (isMetaTrader && credentials) {
       // MT5 command line format:

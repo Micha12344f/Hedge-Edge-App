@@ -29,6 +29,8 @@ export default tseslint.config(
         varsIgnorePattern: "^_",
         caughtErrorsIgnorePattern: "^_",
       }],
+      // Downgrade pre-existing any usage to warning (103 occurrences in electron layer)
+      "@typescript-eslint/no-explicit-any": "warn",
       // Security: detect eval-like patterns, timing attacks, non-literal regex
       "security/detect-eval-with-expression": "warn",
       "security/detect-non-literal-regexp": "warn",

@@ -151,6 +151,7 @@ async function testCTraderConnection(): Promise<void> {
   
   const client = createNamedPipeClient();
   
+  // eslint-disable-next-line no-async-promise-executor
   return new Promise(async (resolve, reject) => {
     const timeout = setTimeout(() => {
       client.stop();

@@ -61,15 +61,12 @@ ChartContainer.displayName = "Chart";
 const ChartStyle = ({ id, config }: { id: string; config: ChartConfig }) => {
   const colorConfig = Object.entries(config).filter(([_, config]) => config.theme || config.color);
 
-  if (!colorConfig.length) {
-    return null;
-  }
-
   // Build CSS string from developer-controlled config values.
   // Uses a ref + textContent (safe — no HTML parsing) instead of dangerouslySetInnerHTML.
-  const cssText = Object.entries(THEMES)
-    .map(
-      ([theme, prefix]) => `
+  const cssText = colorConfig.length
+    ? Object.entries(THEMES)
+        .map(
+          ([theme, prefix]) => `
 ${prefix} [data-chart=${id}] {
 ${colorConfig
   .map(([key, itemConfig]) => {
@@ -80,12 +77,14 @@ ${colorConfig
   .join("\n")}
 }
 `,
-    )
-    .join("\n");
+        )
+        .join("\n")
+    : "";
 
   const styleRef = React.useRef<HTMLStyleElement | null>(null);
 
   React.useEffect(() => {
+    if (!cssText) return;
     const style = document.createElement('style');
     style.textContent = cssText;
     document.head.appendChild(style);
@@ -96,6 +95,10 @@ ${colorConfig
       styleRef.current = null;
     };
   }, [cssText]);
+
+  if (!colorConfig.length) {
+    return null;
+  }
 
   return null;
 };

@@ -910,7 +910,7 @@ export const DraggableHedgeMap = ({
     // Check all relationships involving this account
     for (const rel of relationships) {
       if (rel.sourceId === accountId || rel.targetId === accountId) {
-        let status = getConnectionStatusProp(rel.sourceId, rel.targetId);
+        const status = getConnectionStatusProp(rel.sourceId, rel.targetId);
 
         // For active copier links, verify the hedge account's real connection
         if (status === 'active' && getAccountSnapshot) {
