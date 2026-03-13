@@ -8,11 +8,20 @@ autoUpdater.autoInstallOnAppQuit = true;
 autoUpdater.allowPrerelease = false;
 
 export function initAutoUpdater(mainWindow: BrowserWindow): void {
+    const isDev = !app.isPackaged;
     const CHECK_INTERVAL = 4 * 60 * 60 * 1000; // 4 hours
+
+    if (isDev) {
+        console.log('[Updater] Running in dev mode — auto-update checks use GitHub releases only');
+        // In dev, force the provider to check GitHub releases even when not packaged
+        autoUpdater.forceDevUpdateConfig = true;
+    }
 
     // Initial check (delayed to not slow startup)
     setTimeout(() => {
-        autoUpdater.checkForUpdates().catch(() => {});
+        autoUpdater.checkForUpdates().catch((err) => {
+            console.log('[Updater] Initial check skipped:', err?.message);
+        });
     }, 30_000);
 
     // Periodic check
@@ -59,11 +68,14 @@ export function initAutoUpdater(mainWindow: BrowserWindow): void {
     // IPC handlers for renderer control
     ipcMain.handle('update:check', async () => {
         try {
-            await autoUpdater.checkForUpdates();
+            const result = await autoUpdater.checkForUpdates();
             // Result comes via events (update:available / update:not-available / update:error)
-            return { checking: true };
+            return { checking: true, currentVersion: app.getVersion() };
         } catch (err: any) {
-            return { checking: false, error: err?.message || 'Check failed' };
+            const msg = err?.message || 'Check failed';
+            // Forward error to renderer via event as well
+            mainWindow.webContents.send('update:error', { message: msg });
+            return { checking: false, error: msg };
         }
     });
 

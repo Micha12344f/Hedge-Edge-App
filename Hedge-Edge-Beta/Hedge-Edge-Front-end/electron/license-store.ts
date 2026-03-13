@@ -79,18 +79,22 @@ export class LicenseStore {
   private licenseKey: string | null = null;
   private licenseInfo: LicenseInfo | null = null;
   private instanceId: string | null = null;
-  private encryptionAvailable: boolean;
-  private licenseFilePath: string;
+  private encryptionAvailable: boolean = false;
+  private licenseFilePath: string = '';
   
   constructor() {
-    this.encryptionAvailable = safeStorage.isEncryptionAvailable();
-    this.licenseFilePath = path.join(app.getPath('userData'), LICENSE_FILE_NAME);
+    // NOTE: safeStorage and app.getPath() are NOT available until app.whenReady().
+    // Defer all Electron API calls to initialize().
   }
   
   /**
    * Initialize the store - load any persisted license
    */
   async initialize(): Promise<void> {
+    // Resolve encryption availability now (app is ready at this point)
+    this.encryptionAvailable = safeStorage.isEncryptionAvailable();
+    this.licenseFilePath = path.join(app.getPath('userData'), LICENSE_FILE_NAME);
+
     if (!this.encryptionAvailable) {
       console.warn('[LicenseStore] WARNING: OS encryption unavailable. License key stored in memory only.');
       console.warn('[LicenseStore] License will need to be re-entered each session.');
