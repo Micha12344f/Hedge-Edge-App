@@ -70,7 +70,7 @@ export const HedgeNode = ({ account, isSelected, isDragging, isLinkSource, copie
   const getConnectionStatus = (): ConnectionStatus => {
     // For hedge accounts, check real EA connection status first
     if (account.phase === 'live' && connectionSnapshot !== undefined) {
-      const realStatus = connectionSnapshot?.session.status;
+      const realStatus = connectionSnapshot?.session?.status;
       if (!realStatus || realStatus === 'disconnected' || realStatus === 'idle') {
         return 'disconnected';
       }
@@ -155,8 +155,8 @@ export const HedgeNode = ({ account, isSelected, isDragging, isLinkSource, copie
     },
   };
 
-  const config = typeConfig[account.phase];
-  const StatusIcon = statusConfig[connectionStatus].icon;
+  const config = typeConfig[account.phase] || typeConfig.live;
+  const StatusIcon = statusConfig[connectionStatus]?.icon || statusConfig.disconnected.icon;
   const TypeIcon = config.icon;
   const isNodeDisconnected = connectionStatus === 'disconnected';
 

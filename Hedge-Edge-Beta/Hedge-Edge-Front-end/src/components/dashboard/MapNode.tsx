@@ -70,7 +70,7 @@ export const MapNode = ({ account, isSelected, isDragging, isLinkSource, copierS
     },
   };
 
-  const config = typeConfig[account.phase];
+  const config = typeConfig[account.phase] || typeConfig.evaluation;
   const Icon = config.icon;
 
   // Get logo - platform logo for hedge accounts, prop firm logo for others

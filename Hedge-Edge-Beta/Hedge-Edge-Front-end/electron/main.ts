@@ -1713,6 +1713,13 @@ async function createWindow() {
     }
     // Open DevTools in development (Ctrl+Shift+I to open manually)
     mainWindow.webContents.openDevTools();
+
+    // Log renderer errors to main process for debugging
+    mainWindow.webContents.on('console-message', (_event, level, message, line, sourceId) => {
+      if (level >= 2) { // 2 = error
+        console.log(`[Renderer ERROR] ${message} (${sourceId}:${line})`);
+      }
+    });
   } else {
     // Production: Load from built files
     await mainWindow.loadFile(path.join(__dirname, '../dist/index.html'));

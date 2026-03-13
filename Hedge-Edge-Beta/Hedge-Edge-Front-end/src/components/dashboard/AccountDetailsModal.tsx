@@ -392,7 +392,7 @@ export function AccountDetailsModal({
   };
 
   // Connection state from supervisor (if provided)
-  const supervisedStatus: ConnectionStatusType = connectionSnapshot?.session.status || 'disconnected';
+  const supervisedStatus: ConnectionStatusType = connectionSnapshot?.session?.status || 'disconnected';
   const isSupervisedConnected = supervisedStatus === 'connected';
   const hasSupervisedMetrics = connectionSnapshot?.metrics != null;
 

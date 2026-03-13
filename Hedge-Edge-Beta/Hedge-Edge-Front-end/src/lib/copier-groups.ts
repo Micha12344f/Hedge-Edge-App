@@ -211,11 +211,11 @@ export const getGroupsSummary = (groups: CopierGroup[]) => {
     activeGroups: activeGroups.length,
     totalFollowers: allFollowers.length,
     activeFollowers: activeFollowers.length,
-    tradesToday: groups.reduce((s, g) => s + g.stats.tradesToday, 0),
-    totalProfit: Math.round(groups.reduce((s, g) => s + g.stats.totalProfit, 0) * 100) / 100,
+    tradesToday: groups.reduce((s, g) => s + (g.stats?.tradesToday || 0), 0),
+    totalProfit: Math.round(groups.reduce((s, g) => s + (g.stats?.totalProfit || 0), 0) * 100) / 100,
     avgLatency:
       activeGroups.length > 0
-        ? Math.round(activeGroups.reduce((s, g) => s + g.stats.avgLatency, 0) / activeGroups.length)
+        ? Math.round(activeGroups.reduce((s, g) => s + (g.stats?.avgLatency || 0), 0) / activeGroups.length)
         : 0,
   };
 };

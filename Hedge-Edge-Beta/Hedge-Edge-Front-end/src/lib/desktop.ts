@@ -153,6 +153,12 @@ class ConnectionSupervisor {
       return;
     }
 
+    // Guard against double initialization — clean up previous subscription first
+    if (this.unsubscribe) {
+      this.unsubscribe();
+      this.unsubscribe = null;
+    }
+
     this.pollingInterval = pollingInterval;
 
     // Get initial state

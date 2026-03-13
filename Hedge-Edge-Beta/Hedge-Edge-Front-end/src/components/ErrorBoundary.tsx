@@ -180,28 +180,10 @@ export function PageErrorBoundary({ children, pageName }: PageErrorBoundaryProps
   return (
     <ErrorBoundary
       componentName={pageName || 'Page'}
-      fallback={
-        <div className="flex min-h-screen flex-col items-center justify-center p-8 bg-background">
-          <div className="rounded-full bg-destructive/10 p-6 mb-6">
-            <span className="block h-16 w-16 text-destructive text-5xl font-bold leading-[4rem] text-center">!</span>
-          </div>
-          
-          <h1 className="text-3xl font-bold mb-2">Page Error</h1>
-          <p className="text-muted-foreground mb-8 max-w-md text-center">
-            This page encountered an error and couldn't be displayed.
-            Our team has been notified.
-          </p>
-
-          <div className="flex gap-4">
-            <Button onClick={() => window.location.reload()} size="lg">
-              Reload Page
-            </Button>
-            <Button onClick={() => window.location.href = '/'} variant="outline" size="lg">
-              Go to Dashboard
-            </Button>
-          </div>
-        </div>
-      }
+      showDetails
+      onError={(error, errorInfo) => {
+        console.error(`[PageError:${pageName}]`, error.message, error.stack, errorInfo.componentStack);
+      }}
     >
       {children}
     </ErrorBoundary>

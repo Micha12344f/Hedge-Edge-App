@@ -270,31 +270,38 @@ export const DraggableHedgeMap = ({
     }
   }, [autoAlignOnMount, containerSize, accounts.length]);
 
-  // Initialize positions for new accounts
+  // Initialize positions for new accounts and clean up stale ones
   useEffect(() => {
-    const existingIds = nodePositions.map(p => p.id);
-    const newAccounts = accounts.filter(a => !existingIds.includes(a.id));
-    
+    const currentIds = new Set(accounts.map(a => a.id));
+    let updatedPositions = [...nodePositions];
+    let changed = false;
+
+    // Remove positions for accounts that no longer exist
+    const beforeLength = updatedPositions.length;
+    updatedPositions = updatedPositions.filter(p => currentIds.has(p.id));
+    if (updatedPositions.length !== beforeLength) {
+      changed = true;
+    }
+
+    // Add positions for new accounts that don't have one yet
+    const existingIds = new Set(updatedPositions.map(p => p.id));
+    const newAccounts = accounts.filter(a => !existingIds.has(a.id));
     if (newAccounts.length > 0) {
-      const newPositions = [...nodePositions];
       newAccounts.forEach((account, index) => {
         const angle = (index * 137.5) * (Math.PI / 180);
         const radius = 150 + index * 30;
-        newPositions.push({
+        updatedPositions.push({
           id: account.id,
           x: snapToGrid(Math.cos(angle) * radius),
           y: snapToGrid(Math.sin(angle) * radius),
         });
       });
-      setNodePositions(newPositions);
-      savePositions(newPositions);
+      changed = true;
     }
-    
-    const currentIds = accounts.map(a => a.id);
-    const filteredPositions = nodePositions.filter(p => currentIds.includes(p.id));
-    if (filteredPositions.length !== nodePositions.length) {
-      setNodePositions(filteredPositions);
-      savePositions(filteredPositions);
+
+    if (changed) {
+      setNodePositions(updatedPositions);
+      savePositions(updatedPositions);
     }
   }, [accounts]);
 

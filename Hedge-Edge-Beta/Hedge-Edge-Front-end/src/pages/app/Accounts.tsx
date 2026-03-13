@@ -89,7 +89,7 @@ const Accounts = () => {
         saveHedgeMapAccounts(validIds);
       }
     }
-  }, [accounts, loading]); // Only run when accounts change or loading finishes
+  }, [accounts, loading, hedgeMapAccountIds]); // Only run when accounts change or loading finishes
 
   // Sync: ensure accounts from copier groups appear on the hedge map
   // Gate on copierInitialized to avoid running with stale empty groups
@@ -298,19 +298,17 @@ const Accounts = () => {
     });
   };
 
-  if (loading) {
-    return (
-      <div className="h-screen flex items-center justify-center">
-        <div className="text-center space-y-4">
-          <div className="w-12 h-12 border-4 border-primary border-t-transparent rounded-full animate-spin mx-auto" />
-          <p className="text-muted-foreground">Loading accounts...</p>
-        </div>
-      </div>
-    );
-  }
-
   return (
-    <div className="h-screen">
+    <div className="h-screen relative">
+      {/* Loading overlay — keeps children mounted to avoid state loss */}
+      {loading && (
+        <div className="absolute inset-0 z-50 flex items-center justify-center bg-background/80 backdrop-blur-sm">
+          <div className="text-center space-y-4">
+            <div className="w-12 h-12 border-4 border-primary border-t-transparent rounded-full animate-spin mx-auto" />
+            <p className="text-muted-foreground">Loading accounts...</p>
+          </div>
+        </div>
+      )}
       <DraggableHedgeMap
         accounts={hedgeMapAccounts}
         relationships={relationships}

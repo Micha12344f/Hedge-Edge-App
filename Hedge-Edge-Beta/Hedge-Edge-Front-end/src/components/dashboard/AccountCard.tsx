@@ -76,17 +76,17 @@ export const AccountCard = ({
   const drawdownRemaining = maxLoss > 0 ? Math.max(maxLoss - drawdownUsed, 0) : maxLoss;
 
   // Connection state
-  const connectionStatus: ConnectionStatus = connectionSnapshot?.session.status || 'disconnected';
+  const connectionStatus: ConnectionStatus = connectionSnapshot?.session?.status || 'disconnected';
   const isConnected = connectionStatus === 'connected';
   const isConnectionActive = connectionStatus === 'connecting' || connectionStatus === 'reconnecting';
   const hasConnectionError = connectionStatus === 'error';
   
   // License state from connection snapshot
-  const licenseStatus: LicenseStatus = connectionSnapshot?.license?.status || connectionSnapshot?.session.licenseStatus || 'not-configured';
+  const licenseStatus: LicenseStatus = connectionSnapshot?.license?.status || connectionSnapshot?.session?.licenseStatus || 'not-configured';
   const isLicenseValid = licenseStatus === 'valid';
   const isLicenseExpired = licenseStatus === 'expired';
   const hasLicenseError = licenseStatus === 'error' || licenseStatus === 'invalid';
-  const licenseErrorMsg = connectionSnapshot?.license?.errorMessage || connectionSnapshot?.session.licenseError;
+  const licenseErrorMsg = connectionSnapshot?.license?.errorMessage || connectionSnapshot?.session?.licenseError;
 
   const formatCurrency = (value: number) => {
     return new Intl.NumberFormat('en-US', {
@@ -451,7 +451,7 @@ export const AccountCard = ({
             )}
 
             {/* Connection Error */}
-            {hasConnectionError && connectionSnapshot?.session.error && (
+            {hasConnectionError && connectionSnapshot?.session?.error && (
               <div className="pt-2 text-xs text-destructive">
                 {connectionSnapshot.session.error}
               </div>
