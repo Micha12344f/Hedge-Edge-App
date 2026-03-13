@@ -70,25 +70,7 @@ jobs:
           cache: npm
           cache-dependency-path: Hedge-Edge-Beta/Hedge-Edge-Front-end/package-lock.json
 
-      # Ensure CMake is available for zeromq native compilation
-      - name: Verify native build tools
-        shell: pwsh
-        working-directory: .
-        run: |
-          cmake --version
-          echo "Visual Studio:"
-          & "C:\Program Files (x86)\Microsoft Visual Studio\Installer\vswhere.exe" -latest -property installationPath
-
       - run: npm ci
-        env:
-          npm_config_build_from_source: "true"
-
-      # Verify build prerequisites exist
-      - name: Check build resources
-        run: |
-          echo "Checking build icon..."
-          if (Test-Path "build/icon.png") { echo "icon.png found" } else { echo "WARNING: build/icon.png missing" }
-          if (Test-Path "build/icon.ico") { echo "icon.ico found" } else { echo "WARNING: build/icon.ico missing" }
 
       # Auto-bump patch version
       - name: Bump version
@@ -100,14 +82,19 @@ jobs:
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "Bumped to v$VERSION"
 
-      # Build Electron app AND publish to GitHub Releases in one step.
-      # electron-builder --publish always creates the release + uploads
-      # latest.yml (the manifest electron-updater reads for auto-updates).
+      # Run each build step explicitly so failures are clearly attributed
+      - name: Vite build
+        run: npx vite build
+
+      - name: Compile Electron TypeScript
+        run: npm run electron:compile
+
+      # electron-builder packages and uploads to GitHub Releases.
+      # latest.yml is also uploaded — electron-updater reads it for auto-updates.
       - name: Build & Publish to GitHub Releases
-        run: npm run electron:build:win -- --publish always
+        run: npx electron-builder --win --publish always
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          DEBUG: electron-builder
 
       # Commit version bump back to main so the repo stays in sync.
       # [skip ci] prevents an infinite loop.
@@ -119,5 +106,6 @@ jobs:
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add Hedge-Edge-Beta/Hedge-Edge-Front-end/package.json Hedge-Edge-Beta/Hedge-Edge-Front-end/package-lock.json
           git diff --cached --quiet || git commit -m "chore: release v${{ steps.version.outputs.version }} [skip ci]"
-          git tag "v${{ steps.version.outputs.version }}"
+          git tag "v${{ steps.version.outputs.version }}" || true
+          git pull --rebase origin main
           git push origin main --tags
