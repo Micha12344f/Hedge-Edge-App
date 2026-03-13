@@ -21,6 +21,9 @@ build/release/
 *.dll
 *.so
 *.dylib
+# Allow bundled MT5 experts and DLLs shipped with the app
+!Hedge-Edge-Front-end/agents/mt5/Experts/*.ex5
+!Hedge-Edge-Front-end/agents/mt5/lib/*.dll
 
 # Environment files (contain secrets)
 .env

@@ -3682,8 +3682,10 @@ function setupIpcHandlers() {
   function getAssetPaths(): {
     mt4EaPath: string;
     mt4DllPath: string;
-    mt5EaPath: string;
-    mt5DllPath: string;
+    mt5ExpertsDir: string;
+    mt5LibDir: string;
+    mt5EAs: string[];
+    mt5DLLs: string[];
     ctraderCbotPath: string;
     assetsDir: string;
   } {
@@ -3697,8 +3699,10 @@ function setupIpcHandlers() {
       assetsDir,
       mt4EaPath: path.join(assetsDir, 'mt4', 'HedgeEdge.ex4'),
       mt4DllPath: path.join(assetsDir, 'mt4', 'HedgeEdgeBridge.dll'),
-      mt5EaPath: path.join(assetsDir, 'mt5', 'HedgeEdge.ex5'),
-      mt5DllPath: path.join(assetsDir, 'mt5', 'HedgeEdgeBridge.dll'),
+      mt5ExpertsDir: path.join(assetsDir, 'mt5', 'Experts'),
+      mt5LibDir: path.join(assetsDir, 'mt5', 'lib'),
+      mt5EAs: ['HE_Hedge.ex5', 'HE_Prop.ex5'],
+      mt5DLLs: ['libsodium.dll', 'libzmq.dll'],
       ctraderCbotPath: path.join(assetsDir, 'ctrader', 'HedgeEdge.algo'),
     };
   }
@@ -3712,7 +3716,8 @@ function setupIpcHandlers() {
       case 'mt4':
         return existsSync(paths.mt4EaPath) && existsSync(paths.mt4DllPath);
       case 'mt5':
-        return existsSync(paths.mt5EaPath) && existsSync(paths.mt5DllPath);
+        return paths.mt5EAs.every(f => existsSync(path.join(paths.mt5ExpertsDir, f))) &&
+               paths.mt5DLLs.every(f => existsSync(path.join(paths.mt5LibDir, f)));
       case 'ctrader':
         return existsSync(paths.ctraderCbotPath);
       default:
@@ -3864,16 +3869,30 @@ function setupIpcHandlers() {
           targetDir = path.join(dataPath, 'MQL4', 'Libraries');
           fileName = 'HedgeEdgeBridge.dll';
           break;
-        case 'mt5-ea':
-          sourcePath = paths.mt5EaPath;
-          targetDir = path.join(dataPath, 'MQL5', 'Experts');
-          fileName = 'HedgeEdge.ex5';
-          break;
-        case 'mt5-dll':
-          sourcePath = paths.mt5DllPath;
-          targetDir = path.join(dataPath, 'MQL5', 'Libraries');
-          fileName = 'HedgeEdgeBridge.dll';
-          break;
+        case 'mt5-ea': {
+          const mt5ExpertsTarget = path.join(dataPath, 'MQL5', 'Experts');
+          if (!existsSync(mt5ExpertsTarget)) mkdirSync(mt5ExpertsTarget, { recursive: true });
+          const installedEAs: string[] = [];
+          for (const ea of paths.mt5EAs) {
+            const src = path.join(paths.mt5ExpertsDir, ea);
+            if (!existsSync(src)) return { success: false, error: `Source file not found: ${ea}` };
+            copyFileSync(src, path.join(mt5ExpertsTarget, ea));
+            installedEAs.push(path.join(mt5ExpertsTarget, ea));
+          }
+          return { success: true, data: { installedPath: installedEAs.join(', ') } };
+        }
+        case 'mt5-dll': {
+          const mt5LibTarget = path.join(dataPath, 'MQL5', 'Libraries');
+          if (!existsSync(mt5LibTarget)) mkdirSync(mt5LibTarget, { recursive: true });
+          const installedDLLs: string[] = [];
+          for (const dll of paths.mt5DLLs) {
+            const src = path.join(paths.mt5LibDir, dll);
+            if (!existsSync(src)) return { success: false, error: `Source file not found: ${dll}` };
+            copyFileSync(src, path.join(mt5LibTarget, dll));
+            installedDLLs.push(path.join(mt5LibTarget, dll));
+          }
+          return { success: true, data: { installedPath: installedDLLs.join(', ') } };
+        }
         case 'ctrader-cbot':
           sourcePath = paths.ctraderCbotPath;
           targetDir = path.join(dataPath, 'cBots');
@@ -4002,16 +4021,30 @@ function setupIpcHandlers() {
           targetDir = path.join(customPath, 'MQL4', 'Libraries');
           fileName = 'HedgeEdgeBridge.dll';
           break;
-        case 'mt5-ea':
-          sourcePath = paths.mt5EaPath;
-          targetDir = path.join(customPath, 'MQL5', 'Experts');
-          fileName = 'HedgeEdge.ex5';
-          break;
-        case 'mt5-dll':
-          sourcePath = paths.mt5DllPath;
-          targetDir = path.join(customPath, 'MQL5', 'Libraries');
-          fileName = 'HedgeEdgeBridge.dll';
-          break;
+        case 'mt5-ea': {
+          const mt5ExpertsTarget = path.join(customPath, 'MQL5', 'Experts');
+          if (!existsSync(mt5ExpertsTarget)) mkdirSync(mt5ExpertsTarget, { recursive: true });
+          const installedEAs: string[] = [];
+          for (const ea of paths.mt5EAs) {
+            const src = path.join(paths.mt5ExpertsDir, ea);
+            if (!existsSync(src)) return { success: false, error: `Source file not found: ${ea}` };
+            copyFileSync(src, path.join(mt5ExpertsTarget, ea));
+            installedEAs.push(path.join(mt5ExpertsTarget, ea));
+          }
+          return { success: true, data: { installedPath: installedEAs.join(', ') } };
+        }
+        case 'mt5-dll': {
+          const mt5LibTarget = path.join(customPath, 'MQL5', 'Libraries');
+          if (!existsSync(mt5LibTarget)) mkdirSync(mt5LibTarget, { recursive: true });
+          const installedDLLs: string[] = [];
+          for (const dll of paths.mt5DLLs) {
+            const src = path.join(paths.mt5LibDir, dll);
+            if (!existsSync(src)) return { success: false, error: `Source file not found: ${dll}` };
+            copyFileSync(src, path.join(mt5LibTarget, dll));
+            installedDLLs.push(path.join(mt5LibTarget, dll));
+          }
+          return { success: true, data: { installedPath: installedDLLs.join(', ') } };
+        }
         case 'ctrader-cbot':
           sourcePath = paths.ctraderCbotPath;
           targetDir = path.join(customPath, 'cBots');
@@ -4093,8 +4126,8 @@ function setupIpcHandlers() {
           dll: existsSync(paths.mt4DllPath),
         },
         mt5: {
-          ea: existsSync(paths.mt5EaPath),
-          dll: existsSync(paths.mt5DllPath),
+          ea: paths.mt5EAs.every(f => existsSync(path.join(paths.mt5ExpertsDir, f))),
+          dll: paths.mt5DLLs.every(f => existsSync(path.join(paths.mt5LibDir, f))),
         },
         ctrader: {
           cbot: existsSync(paths.ctraderCbotPath),
