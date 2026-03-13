@@ -1,0 +1,104 @@
+name: Release & Auto-Update
+
+# Triggers on every push to main — builds, publishes a GitHub Release,
+# and electron-updater in installed apps picks it up automatically.
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'Hedge-Edge-Beta/Hedge-Edge-Front-end/**'
+      - 'Hedge-Edge-Beta/Hedge-Edge-Back-end/**'
+      - 'Hedge-Edge-Beta/.github/workflows/release.yml'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ── Tests must pass before any release ──────────────────
+  test:
+    name: Pre-release Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: Hedge-Edge-Beta/Hedge-Edge-Front-end/package-lock.json
+
+      - name: Frontend tests
+        working-directory: Hedge-Edge-Beta/Hedge-Edge-Front-end
+        run: |
+          npm ci
+          npm run test:run
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Backend tests
+        working-directory: Hedge-Edge-Beta/Hedge-Edge-Back-end
+        run: |
+          pip install -r requirements.production.txt
+          pip install pytest pytest-asyncio httpx
+          pytest testing/ -v --tb=short
+
+  # ── Build Windows + publish GitHub Release ──────────────
+  release-windows:
+    name: Build & Release (Windows)
+    needs: test
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: Hedge-Edge-Beta/Hedge-Edge-Front-end
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: Hedge-Edge-Beta/Hedge-Edge-Front-end/package-lock.json
+
+      - run: npm ci
+
+      # Auto-bump patch version
+      - name: Bump version
+        id: version
+        shell: bash
+        run: |
+          npm version patch --no-git-tag-version
+          VERSION=$(node -p "require('./package.json').version")
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "Bumped to v$VERSION"
+
+      # Build Electron app AND publish to GitHub Releases in one step.
+      # electron-builder --publish always creates the release + uploads
+      # latest.yml (the manifest electron-updater reads for auto-updates).
+      - name: Build & Publish to GitHub Releases
+        run: npm run electron:build:win -- --publish always
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # Commit version bump back to main so the repo stays in sync.
+      # [skip ci] prevents an infinite loop.
+      - name: Commit version bump
+        shell: bash
+        run: |
+          cd ../..
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add Hedge-Edge-Beta/Hedge-Edge-Front-end/package.json Hedge-Edge-Beta/Hedge-Edge-Front-end/package-lock.json
+          git diff --cached --quiet || git commit -m "chore: release v${{ steps.version.outputs.version }} [skip ci]"
+          git tag "v${{ steps.version.outputs.version }}"
+          git push origin main --tags
