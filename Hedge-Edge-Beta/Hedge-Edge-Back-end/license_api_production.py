@@ -107,6 +107,10 @@ class Config:
     CREEM_WEBHOOK_SECRET: str = os.getenv("CREEM_WEBHOOK_SECRET", "")
     CREEM_PRODUCT_ID: str = os.getenv("CREEM_PRODUCT_ID", "")
     
+    # Secondary Creem key for fallback (try test API if live returns 404)
+    CREEM_TEST_API_KEY: str = _first_env("CREEM_TEST_API_KEY")
+    CREEM_TEST_API_BASE: str = _first_env("CREEM_TEST_API_URL") or "https://test-api.creem.io"
+    
     @property
     def CREEM_API_BASE(self) -> str:
         if self.CREEM_API_MODE == "sandbox":
@@ -407,7 +411,10 @@ async def validate_license_with_creem(license_key: str, instance_name: Optional[
             }
             
             activate_resp = await client.post(activate_url, json=activate_payload, headers=headers)
-            activate_data = activate_resp.json()
+            try:
+                activate_data = activate_resp.json()
+            except Exception:
+                activate_data = {}
             
             logger.info(f"Creem activate response: {activate_resp.status_code}")
             
@@ -427,6 +434,29 @@ async def validate_license_with_creem(license_key: str, instance_name: Optional[
                 return {"valid": True, "status": "active", "error": None}
             
             if not activate_resp.is_success and activate_resp.status_code != 403:
+                # Fallback: if primary returns 404 and we have a test key, try test API
+                if activate_resp.status_code == 404 and config.CREEM_TEST_API_KEY and config.CREEM_API_MODE != "sandbox":
+                    logger.info("Creem: key not found on live API, trying test/sandbox fallback")
+                    test_headers = {**headers, "x-api-key": config.CREEM_TEST_API_KEY}
+                    test_url = f"{config.CREEM_TEST_API_BASE}/v1/licenses/activate"
+                    test_resp = await client.post(test_url, json=activate_payload, headers=test_headers)
+                    try:
+                        test_data = test_resp.json()
+                    except Exception:
+                        test_data = {}
+                    if test_resp.is_success:
+                        logger.info("Creem: key found on test/sandbox API (fallback OK)")
+                        status = test_data.get("status", "active")
+                        return {
+                            "valid": status == "active",
+                            "status": status,
+                            "expires_at": test_data.get("expires_at"),
+                            "error": None,
+                        }
+                    if test_resp.status_code == 403:
+                        logger.info("Creem: test API activation limit reached (key is valid)")
+                        return {"valid": True, "status": "active", "error": None}
+                
                 error_msg = activate_data.get("message", "Creem validation failed")
                 if isinstance(error_msg, list):
                     error_msg = ", ".join(error_msg)
@@ -442,7 +472,10 @@ async def validate_license_with_creem(license_key: str, instance_name: Optional[
                 }
                 
                 validate_resp = await client.post(validate_url, json=validate_payload, headers=headers)
-                validate_data = validate_resp.json()
+                try:
+                    validate_data = validate_resp.json()
+                except Exception:
+                    validate_data = {}
                 
                 if validate_resp.is_success:
                     is_active = validate_data.get("status") == "active"

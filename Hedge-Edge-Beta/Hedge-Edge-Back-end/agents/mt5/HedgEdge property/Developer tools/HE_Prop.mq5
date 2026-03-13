@@ -114,6 +114,10 @@ string g_registrationFilePath = "";
 // Shared license key (read from FILE_COMMON if input is blank)
 string g_sharedLicenseKey = "";
 
+// Railway license session token (returned by /v1/license/validate)
+string g_sessionToken = "";
+datetime g_lastLicenseHeartbeat = 0;
+
 //+------------------------------------------------------------------+
 //| Read shared license key from Common Files                          |
 //| The Electron app writes the key to HedgeEdge\license.key so all   |
@@ -345,6 +349,9 @@ void OnDeinit(const int reason)
    PublishEvent("DISCONNECTED", "{\"reason\":" + IntegerToString(reason) + "}");
    Sleep(100);
    
+   //--- Deactivate license device slot on Railway
+   DeactivateLicenseDevice();
+   
    ShutdownZMQ();
    DeleteRegistrationFile();
    
@@ -376,6 +383,17 @@ void OnTimer()
    {
       PublishHeartbeat();
       g_lastHeartbeat = TimeCurrent();
+   }
+   
+   //--- License heartbeat (sends session token + account status to Railway)
+   if(!InpDevMode && g_isLicenseValid && StringLen(g_sessionToken) > 0 &&
+      TimeCurrent() - g_lastLicenseHeartbeat >= InpPollIntervalSeconds)
+   {
+      if(!SendLicenseHeartbeat())
+      {
+         Print("LICENSE: Heartbeat failed, falling back to full revalidation");
+      }
+      g_lastLicenseHeartbeat = TimeCurrent();
    }
    
    //--- License periodic recheck
@@ -1133,7 +1151,8 @@ bool ValidateLicenseViaWebRequest(string overrideKey = "")
    string body = "{\"licenseKey\":\"" + keyToUse + "\","
       + "\"accountId\":\"" + IntegerToString(AccountInfoInteger(ACCOUNT_LOGIN)) + "\","
       + "\"broker\":\"" + EscapeJson(AccountInfoString(ACCOUNT_COMPANY)) + "\","
-      + "\"deviceId\":\"" + g_deviceId + "\"}";
+      + "\"deviceId\":\"" + g_deviceId + "\","
+      + "\"platform\":\"mt5\"}";
    
    char postData[], resultData[];
    string resultHeaders;
@@ -1156,6 +1175,13 @@ bool ValidateLicenseViaWebRequest(string overrideKey = "")
       Print("LICENSE: Response (200): ", StringSubstr(response, 0, 200));
       if(ExtractJsonValue(response, "valid") == "true")
       {
+         // Store session token for heartbeat API
+         string token = ExtractJsonValue(response, "token");
+         if(StringLen(token) > 0)
+         {
+            g_sessionToken = token;
+            Print("LICENSE: Session token received (", StringLen(token), " chars)");
+         }
          Print("LICENSE: Validation SUCCESS");
          g_isLicenseValid    = true;
          g_lastError         = "";
@@ -1190,6 +1216,108 @@ bool ValidateLicenseViaWebRequest(string overrideKey = "")
    g_lastLicenseCheck = TimeCurrent();
    UpdateComment();
    return false;
+}
+
+//+------------------------------------------------------------------+
+//| Send license heartbeat to Railway backend                          |
+//| POST /v1/license/heartbeat  { token, deviceId, status }           |
+//| Keeps the session alive and reports account status.                |
+//+------------------------------------------------------------------+
+bool SendLicenseHeartbeat()
+{
+   if(StringLen(g_sessionToken) == 0) return false;
+   
+   // Build the heartbeat endpoint from the validate endpoint
+   string heartbeatUrl = InpEndpointUrl;
+   StringReplace(heartbeatUrl, "/validate", "/heartbeat");
+   
+   string headers = "Content-Type: application/json\r\n";
+   string body = "{\"token\":\"" + g_sessionToken + "\","
+      + "\"deviceId\":\"" + g_deviceId + "\","
+      + "\"status\":{"
+      + "\"balance\":" + DoubleToString(AccountInfoDouble(ACCOUNT_BALANCE), 2) + ","
+      + "\"equity\":" + DoubleToString(AccountInfoDouble(ACCOUNT_EQUITY), 2) + ","
+      + "\"positions\":" + IntegerToString(PositionsTotal())
+      + "}}";
+   
+   char postData[], resultData[];
+   string resultHeaders;
+   StringToCharArray(body, postData, 0, WHOLE_ARRAY, CP_UTF8);
+   int sz = ArraySize(postData);
+   if(sz > 0 && postData[sz - 1] == 0)
+      ArrayResize(postData, sz - 1);
+   
+   ResetLastError();
+   int httpCode = WebRequest("POST", heartbeatUrl, headers, 10000, postData, resultData, resultHeaders);
+   
+   if(httpCode == 200)
+   {
+      string response = CharArrayToString(resultData, 0, WHOLE_ARRAY, CP_UTF8);
+      if(ExtractJsonValue(response, "valid") == "true")
+      {
+         // Check for token refresh
+         string newToken = ExtractJsonValue(response, "token");
+         if(StringLen(newToken) > 0 && newToken != g_sessionToken)
+         {
+            g_sessionToken = newToken;
+            Print("LICENSE: Session token refreshed");
+         }
+         Print("LICENSE: Heartbeat OK");
+         return true;
+      }
+      Print("LICENSE: Heartbeat rejected — session no longer valid");
+      g_isLicenseValid = false;
+      g_sessionToken = "";
+      return false;
+   }
+   
+   Print("LICENSE: Heartbeat failed, httpCode=", httpCode);
+   return false;
+}
+
+//+------------------------------------------------------------------+
+//| Deactivate license device on Railway backend                       |
+//| POST /v1/license/deactivate  { licenseKey, deviceId }             |
+//| Frees the device slot so it can be used elsewhere.                 |
+//+------------------------------------------------------------------+
+void DeactivateLicenseDevice()
+{
+   if(InpDevMode) return;
+   
+   string keyToUse = InpLicenseKey;
+   if(StringLen(keyToUse) == 0) keyToUse = g_sharedLicenseKey;
+   if(StringLen(keyToUse) == 0) return;
+   
+   // Build the deactivate endpoint from the validate endpoint
+   string deactivateUrl = InpEndpointUrl;
+   StringReplace(deactivateUrl, "/validate", "/deactivate");
+   
+   string headers = "Content-Type: application/json\r\n";
+   string body = "{\"licenseKey\":\"" + keyToUse + "\","
+      + "\"deviceId\":\"" + g_deviceId + "\"}";
+   
+   char postData[], resultData[];
+   string resultHeaders;
+   StringToCharArray(body, postData, 0, WHOLE_ARRAY, CP_UTF8);
+   int sz = ArraySize(postData);
+   if(sz > 0 && postData[sz - 1] == 0)
+      ArrayResize(postData, sz - 1);
+   
+   ResetLastError();
+   int httpCode = WebRequest("POST", deactivateUrl, headers, 5000, postData, resultData, resultHeaders);
+   
+   if(httpCode == 200)
+   {
+      string response = CharArrayToString(resultData, 0, WHOLE_ARRAY, CP_UTF8);
+      string remaining = ExtractJsonValue(response, "devicesRemaining");
+      Print("LICENSE: Device deactivated. Devices remaining: ", remaining);
+   }
+   else
+   {
+      Print("LICENSE: Deactivation call returned httpCode=", httpCode, " (non-critical)");
+   }
+   
+   g_sessionToken = "";
 }
 
 string GenerateDeviceId()
